@@ -1,0 +1,53 @@
+# Core numerical computing
+numpy>=2.0.0
+scipy>=1.10.0
+pandas>=2.0.0
+
+# JAX for automatic differentiation
+jax>=0.4.0
+jaxlib>=0.4.0
+jax-md>=0.2.0
+e3nn-jax>=0.20.0
+
+# Graph and network analysis
+networkx>=3.0.0
+
+# Plotting and visualization
+matplotlib>=3.5.0
+cmocean>=2.0
+scikit-image>=0.19.0
+seaborn>=0.12.0
+
+# Parallel processing and progress
+joblib>=1.0.0
+tqdm>=4.60.0
+
+# Compilation and performance
+Cython>=0.29.0
+numba>=0.55.0
+
+# Development and interactive computing
+ipython>=8.0.0
+jupyter>=1.0.0
+jupyterlab>=3.0.0
+notebook>=6.4.0
+
+# Optional: Experiment tracking (uncomment if needed)
+# wandb
+# mlflow
+
+# Installation instructions:
+#
+# 1. Create virtual environment:
+#    python -m venv venv
+#    source venv/bin/activate  # On Windows: venv\Scripts\activate
+#
+# 2. Install requirements:
+#    pip install -r requirements.txt
+#
+# 3. Compile Cython extensions:
+#    cd ../instruments/
+#    python setup_fire_minimizer_memview_cython.py build_ext --inplace
+#
+# Note: For GPU support with JAX, follow instructions at:
+# https://github.com/google/jax#installation
