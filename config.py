@@ -68,7 +68,8 @@ PRODUCTION_PATH = BASE_DIR / 'production'
 PACKING_PATH = BASE_DIR.parent.parent / 'cl_mech_repo' / 'physical_learning'
 
 # Data paths
-ENSEMBLE_DIR = BASE_DIR / 'ensemble_training'
+DATA_DIR = '/data2/shared/felipetm/auxetic_networks'  # Change as needed
+ENSEMBLE_DIR = DATA_DIR / 'ensemble_training'
 RESULTS_DIR = ENSEMBLE_DIR / 'results'
 CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints'
 
