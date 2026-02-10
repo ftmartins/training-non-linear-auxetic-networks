@@ -15,10 +15,19 @@ print(f'')
 if len(incomplete) > 0:
     print('Incomplete job array indices:')
     array_indices = [task * N_REALIZATIONS + real for task, real in incomplete]
-    # Print in batches of 50 for readability
-    for i in range(0, len(array_indices), N_REALIZATIONS):
-        batch = array_indices[i:i+N_REALIZATIONS]
-        print(','.join(map(str, batch)))
+#    # Print in batches of 50 for readability
+#    for i in range(0, len(array_indices), N_REALIZATIONS):
+#        batch = array_indices[i:i+N_REALIZATIONS]
+#        print(','.join(map(str, batch)))
+    incomplete_per_task = {}
+    for (task, real) in incomplete:
+        if task in incomplete_per_task.keys():
+            incomplete_per_task[task].append(real)
+        else:
+            incomplete_per_task[task] = [real]
+    for task in incomplete_per_task.keys():
+        print(f'Task {task}')
+        print(incomplete_per_task[task])
 
     # Write to file for easy resubmission
     with open('incomplete_jobs.txt', 'w') as f:

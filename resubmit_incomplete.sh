@@ -26,10 +26,10 @@ print(f'')
 
 if len(incomplete) > 0:
     print('Incomplete job array indices:')
-    array_indices = [task * 50 + real for task, real in incomplete]
-    # Print in batches of 50 for readability
-    for i in range(0, len(array_indices), 50):
-        batch = array_indices[i:i+50]
+    array_indices = [task * 20 + real for task, real in incomplete]
+    # Print in batches of 20 for readability
+    for i in range(0, len(array_indices), 20):
+        batch = array_indices[i:i+20]
         print(','.join(map(str, batch)))
 
     # Write to file for easy resubmission

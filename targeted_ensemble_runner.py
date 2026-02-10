@@ -45,6 +45,7 @@ from targeted_task_generator import (
     TARGETED_RESULTS_DIR,
 )
 
+
 # Import shared utilities
 from task_generator import generate_realization_stiffnesses, compute_target_extensions
 from network_utils import create_auxetic_network
@@ -379,7 +380,7 @@ Examples:
     parser.add_argument(
         '--mode',
         choices=['sequential', 'single', 'status'],
-        default='sequential',
+        default='single',
         help='Execution mode'
     )
     parser.add_argument(

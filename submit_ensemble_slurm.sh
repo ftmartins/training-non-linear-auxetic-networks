@@ -6,11 +6,11 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=5gb
-#SBATCH --array=0-400%20
+#SBATCH --array=0-200%20
 #SBATCH --begin=now
 #SBATCH --job-name=auxetic_ensemble
-#SBATCH --output=/home1/felipetm/ensemble_training/Logs/auxetic_training_%A_%a.out
-#SBATCH --error=/home1/felipetm/ensemble_training/Logs/auxetic_training_%A_%a.err
+#SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/auxetic_training_%A_%a.out
+#SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/auxetic_training_%A_%a.err
 
 # ============================================================================
 # SLURM Job Array Script for Ensemble Training of Auxetic Networks

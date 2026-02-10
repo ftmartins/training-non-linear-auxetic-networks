@@ -33,7 +33,7 @@ def get_training_result_path(task_seed, realization_seed, results_dir=None):
     """
     if results_dir is None:
         results_dir = RESULTS_DIR
-
+    
     task_dir = Path(results_dir) / f"task_{task_seed:02d}"
     return task_dir / f"realization_{realization_seed:02d}"
 
@@ -103,7 +103,7 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         reduction_ratio = initial_loss / min_loss
 
         # Check if 3+ orders of magnitude (1000×)
-        if reduction_ratio >= 1000.0:
+        if reduction_ratio >= 1_000.0:
             # Create alternative completion marker
             mark_training_complete_small_loss(
                 task_seed, realization_seed,
@@ -141,8 +141,8 @@ def is_training_complete(task_seed, realization_seed, results_dir=None):
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
 
     # Fast path 1: Check standard completion marker
-    if (result_path / "training_complete.txt").exists():
-        return True
+    #if (result_path / "training_complete.txt").exists():
+    #    return True
 
     # Fast path 2: Check alternative completion marker
     if (result_path / "training_complete_small_loss.txt").exists():
