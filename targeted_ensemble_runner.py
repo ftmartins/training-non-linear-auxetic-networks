@@ -206,7 +206,9 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 vmax=VMAX,
                 task_seed=task_id,
                 realization_seed=realization_seed,
-                save_interval=500,
+                save_interval=5,
+                task_config=task_config,
+                TARGETED_RESULTS_DIR=TARGETED_RESULTS_DIR,
             )
         else:
             trained_network = network
