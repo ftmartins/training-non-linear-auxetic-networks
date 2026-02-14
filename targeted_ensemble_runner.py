@@ -33,8 +33,11 @@ sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'phys
 # Import shared config (not validate_config)
 from config import (
     N_NODES, FORCE_TYPE, BOUNDARY_MARGIN,
-    LEARNING_RATE, FORCE_TOL, VMIN, VMAX,
+    FORCE_TOL, VMIN, VMAX,
 )
+
+
+LEARNING_RATE = 1e-4
 
 # Import targeted config and task definitions
 from targeted_task_generator import (
@@ -206,7 +209,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 vmax=VMAX,
                 task_seed=task_id,
                 realization_seed=realization_seed,
-                save_interval=500,
+                save_interval=20,
+                loss_tol=1e-8
             )
         else:
             trained_network = network

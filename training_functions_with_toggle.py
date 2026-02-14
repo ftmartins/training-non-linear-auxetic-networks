@@ -438,7 +438,7 @@ def finish_training_GD_auxetic_batch(
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
     verbose=False, stiffnesses_filename=None, force_tol=1e-6,
     vmin=1e-3, vmax=1e3,
-    task_seed=None, realization_seed=None, save_interval=500
+    task_seed=None, realization_seed=None, save_interval=20, loss_tol=1e-30
 ):
     """
     Train the network for auxetic response using gradient descent.
@@ -593,7 +593,7 @@ def finish_training_GD_auxetic_batch(
             min_loss = loss
 
         # Update progress bar
-        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e})')
+        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}), grad_norm = {np.linalg.norm(update):.4e}')
 
         # Verbose output
         if verbose and step % 100 == 0:
@@ -608,6 +608,8 @@ def finish_training_GD_auxetic_batch(
                 task_seed, realization_seed, history,
                 step + 1, "periodic"
             )
+        if loss < loss_tol:
+            break
 
     # Final summary
     print(f"\n{'='*60}")
