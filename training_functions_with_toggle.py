@@ -11,6 +11,9 @@ import time
 from tqdm import tqdm
 from joblib import Parallel, delayed
 from fire_minimize_memview_cy import fire_minimize_dof
+from checkpoint_manager import (
+    save_training_results,
+)
 
 
 # ============================================================================
@@ -366,68 +369,6 @@ def finite_difference_gradient_parallel_batch(network, target_poisson_list, top_
 
 
 # ============================================================================
-# HELPER FUNCTIONS FOR INTERMEDIATE SAVING
-# ============================================================================
-
-def _save_intermediate_trajectories(task_seed, realization_seed, history, step, reason="periodic"):
-    """
-    Save intermediate loss and stiffness trajectories during training.
-
-    This allows the loss-based completion criterion to evaluate jobs that
-    crash or timeout before completing all training steps.
-
-    Args:
-        task_seed: Task index
-        realization_seed: Realization index
-        history: Current training history dictionary
-        step: Current training step
-        reason: Reason for saving ("periodic", "loss_nan", "stiffness_nan")
-    """
-    try:
-        import numpy as np
-        from pathlib import Path
-        import sys
-
-        # Import checkpoint manager functions
-        ensemble_dir = Path(__file__).parent
-        if str(ensemble_dir) not in sys.path:
-            sys.path.insert(0, str(ensemble_dir))
-        from checkpoint_manager import get_training_result_path
-
-        # Get result path
-        result_path = get_training_result_path(task_seed, realization_seed)
-        result_path.mkdir(parents=True, exist_ok=True)
-
-        # Convert lists to numpy arrays
-        loss_array = np.array(history.get('loss', []))
-        stiffness_array = np.array(history.get('stiffnesses', []))
-
-        # Only save if we have data
-        if len(loss_array) > 0:
-            np.save(result_path / "loss_trajectory.npy", loss_array)
-
-        if len(stiffness_array) > 0:
-            np.save(result_path / "stiffness_trajectory.npy", stiffness_array)
-
-        # Create a marker file indicating intermediate save
-        marker_file = result_path / "intermediate_save.txt"
-        with open(marker_file, 'w') as f:
-            from datetime import datetime
-            f.write(f"Intermediate save at step {step}\n")
-            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
-            f.write(f"Reason: {reason}\n")
-            f.write(f"Loss points saved: {len(loss_array)}\n")
-            f.write(f"Stiffness points saved: {len(stiffness_array)}\n")
-            if len(loss_array) > 0:
-                f.write(f"Initial loss: {loss_array[0]:.4e}\n")
-                f.write(f"Current loss: {loss_array[-1]:.4e}\n")
-                f.write(f"Minimum loss: {np.min(loss_array):.4e}\n")
-
-    except Exception as e:
-        print(f"Warning: Failed to save intermediate trajectories: {e}")
-
-
-# ============================================================================
 # MAIN TRAINING FUNCTION
 # ============================================================================
 
@@ -438,7 +379,7 @@ def finish_training_GD_auxetic_batch(
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
     verbose=False, stiffnesses_filename=None, force_tol=1e-6,
     vmin=1e-3, vmax=1e3,
-    task_seed=None, realization_seed=None, save_interval=20, loss_tol=1e-30
+    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None
 ):
     """
     Train the network for auxetic response using gradient descent.
@@ -550,9 +491,13 @@ def finish_training_GD_auxetic_batch(
             print(f"{'='*60}")
             # Save intermediate results before breaking
             if save_intermediate:
-                _save_intermediate_trajectories(
-                    task_seed, realization_seed, history,
-                    step, "stiffness_nan"
+                save_training_results(
+                    task_seed=task_seed,
+                    realization_seed=realization_seed,
+                    history=history,
+                    network=network,
+                    task_config=task_config,
+                    results_dir=TARGETED_RESULTS_DIR,
                 )
             break
 
@@ -582,9 +527,13 @@ def finish_training_GD_auxetic_batch(
             print(f"{'='*60}")
             # Save intermediate results before breaking
             if save_intermediate:
-                _save_intermediate_trajectories(
-                    task_seed, realization_seed, history,
-                    step, "loss_nan"
+                save_training_results(
+                    task_seed=task_seed,
+                    realization_seed=realization_seed,
+                    history=history,
+                    network=network,
+                    task_config=task_config,
+                    results_dir=TARGETED_RESULTS_DIR,
                 )
             break
 
@@ -604,9 +553,13 @@ def finish_training_GD_auxetic_batch(
 
         # Periodically save intermediate trajectories
         if save_intermediate and (step) % save_interval == 0:
-            _save_intermediate_trajectories(
-                task_seed, realization_seed, history,
-                step + 1, "periodic"
+            save_training_results(
+                task_seed=task_seed,
+                realization_seed=realization_seed,
+                history=history,
+                network=network,
+                task_config=task_config,
+                results_dir=TARGETED_RESULTS_DIR,
             )
         if loss < loss_tol:
             break
