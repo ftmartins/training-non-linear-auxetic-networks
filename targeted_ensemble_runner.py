@@ -67,6 +67,7 @@ from checkpoint_manager import (
 try:
     from training_functions_with_toggle import (
         finish_training_GD_auxetic_batch,
+        finish_training_GD_auxetic_batch_jax,
     )
     TRAINING_FUNCTIONS_AVAILABLE = True
 except ImportError as e:
@@ -74,7 +75,8 @@ except ImportError as e:
     TRAINING_FUNCTIONS_AVAILABLE = False
 
 
-def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True):
+def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
+                        gradient_method='jax'):
     """
     Run a single targeted training job with checkpoint support.
 
@@ -83,6 +85,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         realization_seed: Realization index (default: 0)
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing
+        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
 
     Returns:
         success: Boolean indicating success
@@ -191,7 +194,10 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         remaining_steps = N_STEPS - start_step
 
         if remaining_steps > 0:
-            history, trained_network = finish_training_GD_auxetic_batch(
+            train_fn = (finish_training_GD_auxetic_batch_jax
+                        if gradient_method == 'jax'
+                        else finish_training_GD_auxetic_batch)
+            history, trained_network = train_fn(
                 network=network,
                 history=history,
                 learning_rate=LEARNING_RATE,
@@ -258,13 +264,14 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         return False
 
 
-def run_all_targeted(resume=True, verbose=False):
+def run_all_targeted(resume=True, verbose=False, gradient_method='jax'):
     """
     Run all 5 targeted training jobs sequentially.
 
     Args:
         resume: Skip already completed jobs
         verbose: Print detailed progress
+        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
     """
     print(f"\n{'#'*80}")
     print(f"# TARGETED ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -299,7 +306,8 @@ def run_all_targeted(resume=True, verbose=False):
 
     for idx, (task_id, realization_seed) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
-        success = run_single_training(task_id, realization_seed, verbose=verbose)
+        success = run_single_training(task_id, realization_seed, verbose=verbose,
+                                      gradient_method=gradient_method)
 
         if success:
             success_count += 1
@@ -416,6 +424,12 @@ Examples:
         action='store_true',
         help='Verbose output'
     )
+    parser.add_argument(
+        '--gradient-method',
+        choices=['parallel', 'jax'],
+        default='jax',
+        help='Gradient computation method: parallel (finite-difference, default) or jax (autodiff)'
+    )
 
     args = parser.parse_args()
 
@@ -426,11 +440,13 @@ Examples:
             parser.error(f"--task must be between 0 and {N_TASKS-1}")
 
         print_targeted_tasks_summary()
-        success = run_single_training(args.task, args.realization, verbose=args.verbose)
+        success = run_single_training(args.task, args.realization, verbose=args.verbose,
+                                      gradient_method=args.gradient_method)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
-        run_all_targeted(resume=args.resume, verbose=args.verbose)
+        run_all_targeted(resume=args.resume, verbose=args.verbose,
+                         gradient_method=args.gradient_method)
 
     elif args.mode == 'status':
         print_targeted_tasks_summary()

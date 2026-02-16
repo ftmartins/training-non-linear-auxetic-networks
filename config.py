@@ -36,8 +36,8 @@ POISSON_POOL = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
 LEARNING_RATE = 1e-4
 N_STEPS = 3_000  # Number of training iterations
 N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory
-FORCE_TOL = 1e-6  # Force convergence tolerance for FIRE
-VMIN = 1e-3  # Minimum stiffness value
+FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
+VMIN = 1e-6  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
 ETA = 0.1  # Coupling factor (from notebook)
 

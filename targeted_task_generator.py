@@ -39,6 +39,40 @@ TARGETED_RESULTS_DIR = ENSEMBLE_DIR / 'targeted_results'
 # Task Definitions
 # ============================================================================
 
+# TARGETED_TASKS = [
+#     {
+#         'task_seed': 0,
+#         'packing_seed': PACKING_SEED,
+#         'compression_strains': [-0.4],
+#         'target_poisson_ratios': [-0.8],
+#     },
+#     {
+#         'task_seed': 1,
+#         'packing_seed': PACKING_SEED,
+#         'compression_strains': [-0.4, -0.2],
+#         'target_poisson_ratios': [-0.8, -0.8],
+#     },
+#     {
+#         'task_seed': 2,
+#         'packing_seed': PACKING_SEED,
+#         'compression_strains': [-0.4, -0.2],
+#         'target_poisson_ratios': [-0.8, -1.0],
+#     },
+#     {
+#         'task_seed': 3,
+#         'packing_seed': PACKING_SEED,
+#         'compression_strains': [-0.4, -0.2],
+#         'target_poisson_ratios': [-0.8, -0.4],
+#     },
+#     {
+#         'task_seed': 4,
+#         'packing_seed': PACKING_SEED,
+#         'compression_strains': [-0.4, -0.2],
+#         'target_poisson_ratios': [-0.8, -0.6],
+#     },
+# ]
+
+
 TARGETED_TASKS = [
     {
         'task_seed': 0,
@@ -46,7 +80,7 @@ TARGETED_TASKS = [
         'compression_strains': [-0.4],
         'target_poisson_ratios': [-0.8],
     },
-    {
+        {
         'task_seed': 1,
         'packing_seed': PACKING_SEED,
         'compression_strains': [-0.4, -0.2],
@@ -69,6 +103,24 @@ TARGETED_TASKS = [
         'packing_seed': PACKING_SEED,
         'compression_strains': [-0.4, -0.2],
         'target_poisson_ratios': [-0.8, -0.6],
+    },
+    {
+        'task_seed': 5,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.4, -0.2],
+        'target_poisson_ratios': [-0.8, -0.3],
+    },
+    {
+        'task_seed': 6,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.4, -0.2],
+        'target_poisson_ratios': [-0.8, -0.5],
+    },
+    {
+        'task_seed': 7,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.4, -0.2],
+        'target_poisson_ratios': [-0.8, -0.2],
     },
 ]
 
