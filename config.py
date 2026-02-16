@@ -33,11 +33,11 @@ POISSON_POOL = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
 # Training Hyperparameters
 # ============================================================================
 
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-4
 N_STEPS = 3_000  # Number of training iterations
-N_STRAIN_STEPS = 20  # Number of steps in quasistatic trajectory
-FORCE_TOL = 1e-6  # Force convergence tolerance for FIRE
-VMIN = 1e-3  # Minimum stiffness value
+N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory
+FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
+VMIN = 1e-6  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
 ETA = 0.1  # Coupling factor (from notebook)
 
@@ -68,10 +68,11 @@ PRODUCTION_PATH = BASE_DIR #/ 'production'
 PACKING_PATH = BASE_DIR.parent.parent / 'cl_mech_repo' / 'physical_learning'
 
 # Data paths
-DATA_DIR = Path('/data2/shared/felipetm/auxetic_networks')  # Change as needed
-ENSEMBLE_DIR = DATA_DIR / 'ensemble_training'
-RESULTS_DIR = ENSEMBLE_DIR / 'results'
-CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints'
+# DATA_DIR = Path('/data2/shared/felipetm/auxetic_networks')  # Change as needed
+DATA_DIR = '../data/auxetic_nets'  # Relative path for easier portability
+ENSEMBLE_DIR = DATA_DIR + '/ensemble_training'
+RESULTS_DIR = ENSEMBLE_DIR + '/results'
+CHECKPOINT_DIR = ENSEMBLE_DIR + '/checkpoints'
 
 # ============================================================================
 # Network Creation Parameters

@@ -50,6 +50,7 @@ from checkpoint_manager import (
 try:
     from training_functions_with_toggle import (
         finish_training_GD_auxetic_batch,
+        finish_training_GD_auxetic_batch_jax,
         compute_quasistatic_trajectory_auxetic,
         poisson_loss_batch_parallel,
         finite_difference_gradient_parallel_batch
@@ -61,7 +62,8 @@ except ImportError as e:
     TRAINING_FUNCTIONS_AVAILABLE = False
 
 
-def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoint=True):
+def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoint=True,
+                        gradient_method='parallel'):
     """
     Run a single training job with checkpoint support.
 
@@ -70,6 +72,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         realization_seed: Realization index (0 to N_REALIZATIONS-1)
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing (default: True)
+        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
 
     Returns:
         success: Boolean indicating success
@@ -187,7 +190,10 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         remaining_steps = N_STEPS - start_step
 
         if remaining_steps > 0:
-            history, trained_network = finish_training_GD_auxetic_batch(
+            train_fn = (finish_training_GD_auxetic_batch_jax
+                        if gradient_method == 'jax'
+                        else finish_training_GD_auxetic_batch)
+            history, trained_network = train_fn(
                 network=network,
                 history=history,
                 learning_rate=LEARNING_RATE,
@@ -205,8 +211,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 vmax=VMAX,
                 task_seed=task_seed,
                 realization_seed=realization_seed,
-                save_interval=500,  # Save intermediate results every 500 steps
-                # eta=ETA
+                save_interval=500,
             )
         else:
             trained_network = network
@@ -251,13 +256,14 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         return False
 
 
-def run_ensemble_sequential(resume=True, verbose=False):
+def run_ensemble_sequential(resume=True, verbose=False, gradient_method='parallel'):
     """
     Run all ensemble jobs sequentially.
 
     Args:
         resume: Skip already completed jobs
         verbose: Print detailed progress
+        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
     """
     print(f"\n{'#'*80}")
     print(f"# ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -286,7 +292,8 @@ def run_ensemble_sequential(resume=True, verbose=False):
 
     for idx, (task_seed, realization_seed) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
-        success = run_single_training(task_seed, realization_seed, verbose=verbose)
+        success = run_single_training(task_seed, realization_seed, verbose=verbose,
+                                      gradient_method=gradient_method)
 
         if success:
             success_count += 1
@@ -374,6 +381,12 @@ Examples:
         action='store_true',
         help='Verbose output'
     )
+    parser.add_argument(
+        '--gradient-method',
+        choices=['parallel', 'jax'],
+        default='parallel',
+        help='Gradient computation method: parallel (finite-difference, default) or jax (autodiff)'
+    )
 
     args = parser.parse_args()
 
@@ -388,11 +401,13 @@ Examples:
         if args.realization < 0 or args.realization >= N_REALIZATIONS:
             parser.error(f"--realization must be between 0 and {N_REALIZATIONS-1}")
 
-        success = run_single_training(args.task, args.realization, verbose=args.verbose)
+        success = run_single_training(args.task, args.realization, verbose=args.verbose,
+                                      gradient_method=args.gradient_method)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
-        run_ensemble_sequential(resume=args.resume, verbose=args.verbose)
+        run_ensemble_sequential(resume=args.resume, verbose=args.verbose,
+                                gradient_method=args.gradient_method)
 
     elif args.mode == 'status':
         print_progress_summary()
