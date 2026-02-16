@@ -452,8 +452,8 @@ def compute_quasistatic_trajectory_auxetic_jax(crf, stiffnesses, edges, rest_len
     bottom_nodes = jnp.asarray(np.array(bottom_nodes))
 
     pos_2d = jnp.reshape(positions_flat, (-1, d))
-    top_nodes = jnp.asarray(np.asarray(top_nodes, dtype=np.int32))
-    bottom_nodes = jnp.asarray(np.asarray(bottom_nodes, dtype=np.int32))
+    top_nodes = jnp.asarray(top_nodes, dtype=jnp.int32)
+    bottom_nodes = jnp.asarray(bottom_nodes, dtype=jnp.int32)
     y_top_init = pos_2d[top_nodes, 1]
     y_bottom_init = pos_2d[bottom_nodes, 1]
     y_bottom_mean = jnp.mean(y_bottom_init)
@@ -494,8 +494,8 @@ def compute_poisson_ratio_single_jax(crf, stiffnesses, edges, rest_lengths, posi
         poisson_ratio: scalar = -(lateral_strain / compression_strain)
     """
     positions_flat = jnp.asarray(positions_flat).flatten()
-    left_nodes = jnp.asarray(np.asarray(left_nodes, dtype=np.int32))
-    right_nodes = jnp.asarray(np.asarray(right_nodes, dtype=np.int32))
+    left_nodes = jnp.asarray(left_nodes, dtype=jnp.int32)
+    right_nodes = jnp.asarray(right_nodes, dtype=jnp.int32)
 
     final_pos_flat = compute_quasistatic_trajectory_auxetic_jax(
         crf, stiffnesses, edges, rest_lengths, positions_flat,
