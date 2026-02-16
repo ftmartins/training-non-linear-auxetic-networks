@@ -448,6 +448,9 @@ def compute_quasistatic_trajectory_auxetic_jax(crf, stiffnesses, edges, rest_len
     edges = jnp.asarray(edges)
     rest_lengths = jnp.asarray(rest_lengths)
 
+    top_nodes = jnp.asarray(np.array(top_nodes))
+    bottom_nodes = jnp.asarray(np.array(bottom_nodes))
+
     pos_2d = jnp.reshape(positions_flat, (-1, d))
     y_top_init = pos_2d[top_nodes, 1]
     y_bottom_init = pos_2d[bottom_nodes, 1]
