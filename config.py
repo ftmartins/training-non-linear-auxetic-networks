@@ -24,7 +24,7 @@ N_TASKS = 10  # Number of distinct training tasks
 N_REALIZATIONS = 20  # Number of realizations per task
 
 # Compression strain pool (9 options)
-COMPRESSION_POOL = (-np.arange(0.01, 0.10, 0.01)).tolist()  # [-0.01, -0.02, ..., -0.09]
+COMPRESSION_POOL = (-np.arange(0.10, 0.55, 0.05)).tolist()  #(-np.arange(0.01, 0.10, 0.01)).tolist()  # [-0.01, -0.02, ..., -0.09]
 
 # Poisson ratio pool (6 options)
 POISSON_POOL = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
@@ -33,9 +33,9 @@ POISSON_POOL = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
 # Training Hyperparameters
 # ============================================================================
 
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-4
 N_STEPS = 3_000  # Number of training iterations
-N_STRAIN_STEPS = 20  # Number of steps in quasistatic trajectory
+N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory
 FORCE_TOL = 1e-6  # Force convergence tolerance for FIRE
 VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
@@ -53,7 +53,7 @@ STIFFNESS_LOG_MAX = np.log(1.0)   # log(maximum stiffness)
 # ============================================================================
 
 N_JOBS_OUTER = 4  # Parallel jobs for gradient computation across edges
-N_JOBS_INNER = 2  # Parallel jobs for Poisson ratio computation across strains
+N_JOBS_INNER = 1  # Parallel jobs for Poisson ratio computation across strains
 
 # ============================================================================
 # Paths
@@ -69,9 +69,9 @@ PACKING_PATH = BASE_DIR.parent.parent / 'cl_mech_repo' / 'physical_learning'
 
 # Data paths
 DATA_DIR = Path('/data2/shared/felipetm/auxetic_networks')  # Change as needed
-ENSEMBLE_DIR = DATA_DIR / 'ensemble_training'
-RESULTS_DIR = ENSEMBLE_DIR / 'results'
-CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints'
+ENSEMBLE_DIR = DATA_DIR / 'ensemble_training_new/'
+RESULTS_DIR = ENSEMBLE_DIR / 'results_new/'
+CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new/'
 
 # ============================================================================
 # Network Creation Parameters
@@ -90,7 +90,7 @@ PACKING_FRAMES = 200
 # Save/Checkpoint Parameters
 # ============================================================================
 
-CHECKPOINT_INTERVAL = 500  # Save checkpoint every N steps
+CHECKPOINT_INTERVAL = 50  # Save checkpoint every N steps
 SAVE_FULL_HISTORY = True  # Save full training history (stiffnesses at each step)
 USE_CHECKPOINTING = True  # Enable checkpoint/resume functionality
 
