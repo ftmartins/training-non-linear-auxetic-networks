@@ -160,7 +160,7 @@ cpdef tuple fire_minimize(
         force_norm = sqrt(force_norm)
         v_norm = sqrt(v_norm)
 
-        if force_norm < force_tol:
+        if force_norm/(n*d) < force_tol:
             break
 
         if force_norm > 0.:
@@ -192,7 +192,7 @@ cpdef tuple fire_minimize(
                     v[i, j] = 0.0
 
     # return x (array), force_norm (double), and f (the last computed forces array)
-    return np.asarray(x), force_norm, f_np
+    return np.asarray(x), force_norm / (n*d), f_np
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -286,7 +286,7 @@ cpdef tuple fire_minimize_dof(
         force_norm = sqrt(force_norm)
         v_norm = sqrt(v_norm)
 
-        if force_norm < force_tol:
+        if force_norm/(n*d) < force_tol:
             break
 
         if force_norm > 0.:
@@ -317,4 +317,4 @@ cpdef tuple fire_minimize_dof(
                     v[i, j] = 0.0
 
     # return x (array), force_norm (double), and f (the last computed forces array)
-    return np.asarray(x), force_norm, f_np
+    return np.asarray(x), force_norm/(n*d), f_np

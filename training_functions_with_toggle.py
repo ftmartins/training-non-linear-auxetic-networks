@@ -14,6 +14,7 @@ from fire_minimize_memview_cy import fire_minimize_dof
 from checkpoint_manager import (
     save_training_results,
 )
+from config import FORCE_TOL
 
 import jax
 import jax.numpy as jnp
@@ -413,7 +414,7 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4, a
 
 
 # ---------- Build the solver instance (capture hyperparams by closure) ----------
-crf = make_compute_response_fire(d=2, max_steps=100_000, tol=1e-6, force_type="quadratic")
+crf = make_compute_response_fire(d=2, max_steps=500_000, tol=FORCE_TOL, force_type="quadratic")
 
 
 # ============================================================================
@@ -540,7 +541,7 @@ def poisson_loss_batch_jax(crf, stiffnesses, edges, rest_lengths, positions_flat
 # ============================================================================
 
 def compute_poisson_ratio_single(network, top_nodes, bottom_nodes, left_nodes, right_nodes,
-                                 compression_strain, n_strain_steps=100, force_type='quartic'):
+                                 compression_strain, n_strain_steps=100, tol=FORCE_TOL, force_type='quadratic'):
     """
     Compute Poisson ratio for a single compression strain.
     """
@@ -552,7 +553,7 @@ def compute_poisson_ratio_single(network, top_nodes, bottom_nodes, left_nodes, r
         n_steps=n_strain_steps,
         verbose=False,
         force_type=force_type,
-        tol=1e-6
+        tol=tol
     )
 
     positions_free_final = traj[-1]
@@ -573,14 +574,14 @@ def compute_poisson_ratio_single(network, top_nodes, bottom_nodes, left_nodes, r
 
 def poisson_loss_batch_parallel(network, target_poisson_list, top_nodes, bottom_nodes,
                                 left_nodes, right_nodes, compression_strain_list,
-                                n_strain_steps=100, n_jobs_inner=4, force_type='quartic'):
+                                n_strain_steps=100, n_jobs_inner=4, force_type='quadratic', tol=FORCE_TOL):
     """
     Compute MSE loss across multiple compression-Poisson pairs in parallel.
     """
     computed_poisson_ratios = Parallel(n_jobs=n_jobs_inner)(
         delayed(compute_poisson_ratio_single)(
             network, top_nodes, bottom_nodes, left_nodes, right_nodes,
-            cs, n_strain_steps, force_type=force_type
+            cs, n_strain_steps, force_type=force_type, tol=FORCE_TOL
         )
         for cs in compression_strain_list
     )
@@ -593,7 +594,7 @@ def poisson_loss_batch_parallel(network, target_poisson_list, top_nodes, bottom_
 
 def compute_gradient_entry_batch(i, network, target_poisson_list, top_nodes, bottom_nodes,
                                  left_nodes, right_nodes, compression_strain_list,
-                                 epsilon, n_strain_steps, n_jobs_inner=4, force_type='quartic'):
+                                 epsilon, n_strain_steps, n_jobs_inner=4, force_type='quadratic', tol=FORCE_TOL):
     """
     Compute gradient for a single stiffness using finite differences.
     """
@@ -604,7 +605,7 @@ def compute_gradient_entry_batch(i, network, target_poisson_list, top_nodes, bot
     loss_plus, _ = poisson_loss_batch_parallel(
         network, target_poisson_list, top_nodes, bottom_nodes,
         left_nodes, right_nodes, compression_strain_list,
-        n_strain_steps, n_jobs_inner, force_type=force_type
+        n_strain_steps, n_jobs_inner, force_type=force_type, tol=tol
     )
 
     # Perturb down
@@ -612,7 +613,7 @@ def compute_gradient_entry_batch(i, network, target_poisson_list, top_nodes, bot
     loss_minus, _ = poisson_loss_batch_parallel(
         network, target_poisson_list, top_nodes, bottom_nodes,
         left_nodes, right_nodes, compression_strain_list,
-        n_strain_steps, n_jobs_inner, force_type=force_type
+        n_strain_steps, n_jobs_inner, force_type=force_type, tol=tol
     )
 
     # Restore
@@ -627,7 +628,7 @@ def compute_gradient_entry_batch(i, network, target_poisson_list, top_nodes, bot
 def finite_difference_gradient_parallel_batch(network, target_poisson_list, top_nodes, bottom_nodes,
                                              left_nodes, right_nodes, compression_strain_list,
                                              epsilon=1e-8, n_jobs_outer=4, n_jobs_inner=2,
-                                             n_strain_steps=100, force_type='quartic'):
+                                             n_strain_steps=100, force_type='quadratic', tol=FORCE_TOL):
     """
     Compute gradient across all stiffnesses using parallel finite differences.
 
@@ -641,7 +642,7 @@ def finite_difference_gradient_parallel_batch(network, target_poisson_list, top_
             i, network, target_poisson_list,
             top_nodes, bottom_nodes, left_nodes, right_nodes,
             compression_strain_list, epsilon, n_strain_steps,
-            n_jobs_inner, force_type=force_type
+            n_jobs_inner, force_type=force_type, tol=FORCE_TOL
         )
         for i in range(n_edges)
     )
@@ -660,7 +661,7 @@ def finite_difference_gradient_parallel_batch(network, target_poisson_list, top_
 def finish_training_GD_auxetic_batch(
     network, history, learning_rate, n_steps,
     top_nodes, bottom_nodes, left_nodes, right_nodes,
-    force_type='quartic', n_strain_steps=100,
+    force_type='quadratic', n_strain_steps=100,
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
     verbose=False, stiffnesses_filename=None, force_tol=1e-6,
     vmin=1e-3, vmax=1e3,
@@ -761,7 +762,8 @@ def finish_training_GD_auxetic_batch(
             n_strain_steps=n_strain_steps,
             n_jobs_outer=4,
             n_jobs_inner=2,
-            force_type=force_type
+            force_type=force_type,
+            tol=force_tol
         )
 
         # --- Update stiffnesses ---
@@ -876,7 +878,7 @@ def finish_training_GD_auxetic_batch_jax(
     vmin=1e-6, vmax=1e3,
     task_seed=None, realization_seed=None, save_interval=10,
     task_config=None, TARGETED_RESULTS_DIR=None,
-    fire_max_steps=100_000, fire_tol=1e-6
+    fire_max_steps=100_000, fire_tol=FORCE_TOL
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
