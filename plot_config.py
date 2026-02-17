@@ -29,12 +29,16 @@ COLORS = {
     'subtask_2': '#009E73',   # bluish green
     'subtask_3': '#CC79A7',   # reddish purple
     'subtask_4': '#E69F00',   # orange
+    'subtask_5': '#56B4E9',   # sky blue
+    'subtask_6': '#F0E442',   # yellow
+    'subtask_7': '#800080',   # purple
+    'subtask_8': '#008000',   # green
     'train_star': '#CC0000',  # red for training point markers
     'gray':      '#999999',
     'black':     '#000000',
 }
 
-SUBTASK_COLORS = [COLORS[f'subtask_{i}'] for i in range(5)]
+SUBTASK_COLORS = [COLORS[f'subtask_{i}'] for i in range(len(COLORS)-3)]  # subtask colors are first N_TASKS entries
 
 # =============================================================================
 # MARKERS
