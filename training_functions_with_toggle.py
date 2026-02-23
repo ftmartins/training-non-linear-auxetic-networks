@@ -59,36 +59,62 @@ def elastic_energy(flat_positions, edges, rest_lengths, stiffnesses, *, d=2, for
 # ============================================================================
 
 def fire_minimize_network(network, constrained_dof_idx=None, force_type='quadratic',
-                         tol=1e-6, max_steps=500_000, deltaT=1e-2):
+                         tol=1e-6, max_steps=500_000, deltaT=1e-2,
+                         retry_steps_1=500_000, retry_steps_2=500_000):
     """
-    Minimize network using Cython FIRE.
+    Minimize network using Cython FIRE, with up to two retry passes.
+
+    If not converged after ``max_steps``, retries from the last positions with
+    ``retry_steps_1`` additional steps, then ``retry_steps_2`` more.  Mirrors
+    the retry pattern of the JAX ``make_compute_response_fire`` solver.
+    The caller is still responsible for checking convergence (force_norm vs tol).
 
     Args:
         network: ElasticNetwork object
         constrained_dof_idx: List of DOF indices to constrain or None
         force_type: 'quartic' or 'quadratic'
         tol: Convergence tolerance
-        max_steps: Maximum number of minimization steps
+        max_steps: Maximum number of minimization steps (first attempt)
         deltaT: FIRE timestep (default 1e-2 for fast convergence)
+        retry_steps_1: Extra steps for the first retry (default 500_000)
+        retry_steps_2: Extra steps for the second retry (default 500_000)
 
     Returns:
         min_positions: Minimized positions (N, d) array
-        force_norm: Final force norm
+        force_norm: Final force norm (after all retry attempts)
     """
     if constrained_dof_idx is None:
         constrained_dof_idx = []
 
+    edges_i32 = np.array(network.edges, dtype=np.int32)
+    rest_lengths_f64 = np.array(network.rest_lengths, dtype=np.float64)
+    stiffnesses_f64 = np.array(network.stiffnesses, dtype=np.float64)
+    force_type_int = 1 if force_type == 'quartic' else 0
+
     min_pos, force_norm, _ = fire_minimize_dof(
         network.positions,
-        np.array(network.edges, dtype=np.int32),
-        np.array(network.rest_lengths, dtype=np.float64),
-        np.array(network.stiffnesses, dtype=np.float64),
-        deltaT,
-        max_steps,
-        tol,
-        constrained_dof_idx,
-        1 if force_type == 'quartic' else 0
+        edges_i32, rest_lengths_f64, stiffnesses_f64,
+        deltaT, max_steps, tol, constrained_dof_idx, force_type_int,
     )
+
+    # Retry 1: continue from last positions if not yet converged
+    if force_norm is not None and force_norm >= tol:
+        print(f"  FIRE retry 1 ({retry_steps_1:,} steps, force_norm={force_norm:.3e})...")
+        min_pos, force_norm, _ = fire_minimize_dof(
+            min_pos,
+            edges_i32, rest_lengths_f64, stiffnesses_f64,
+            deltaT, retry_steps_1, tol, constrained_dof_idx, force_type_int,
+        )
+
+    # Retry 2: continue from last positions if still not converged
+    if force_norm is not None and force_norm >= tol:
+        print(f"  FIRE retry 2 ({retry_steps_2:,} steps, force_norm={force_norm:.3e})...")
+        min_pos, force_norm, _ = fire_minimize_dof(
+            min_pos,
+            edges_i32, rest_lengths_f64, stiffnesses_f64,
+            deltaT, retry_steps_2, tol, constrained_dof_idx, force_type_int,
+        )
+
     return min_pos, force_norm
 
 
@@ -122,12 +148,14 @@ def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_node
     initial_height = y_top.mean() - y_bottom.mean()
     target_height = initial_height * (1 + compression_strain)
 
-    traj = [np.copy(positions)]
+    x_top_init = positions[top_nodes, 0]
+    x_bottom_init = positions[bottom_nodes, 0]
 
-    # Prepare DOF constraints (y-direction only for top and bottom nodes)
-    constrained_idx_dof = []
-    for i in np.concatenate([top_nodes, bottom_nodes]):
-        constrained_idx_dof.append(i * d + 1)  # y DOF only
+    # Precompute constrained DOF indices (y-component of top + bottom nodes)
+    all_boundary = jnp.concatenate([jnp.asarray(top_nodes), jnp.asarray(bottom_nodes)])
+    constrained_idx_dof = jnp.concatenate([all_boundary * d, all_boundary * d + 1])  # x- and y-DOF
+
+    traj = [np.copy(positions)]
 
     for step in range(n_steps):
         frac = step / (n_steps - 1)
@@ -138,6 +166,8 @@ def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_node
         positions_step = np.copy(positions)
         positions_step[top_nodes, 1] = y_top_new + (positions[top_nodes, 1] - positions[top_nodes, 1].mean())
         positions_step[bottom_nodes, 1] = y_bottom
+        positions_step[top_nodes, 0] = x_top_init  # hold x fixed for top nodes
+        positions_step[bottom_nodes, 0] = x_bottom_init  # hold x fixed for bottom nodes
 
         # Direct Cython call for better performance
         min_pos, force_norm, _ = fire_minimize_dof(
@@ -457,9 +487,12 @@ def compute_quasistatic_trajectory_auxetic_jax(crf, stiffnesses, edges, rest_len
     y_bottom_mean = jnp.mean(y_bottom_init)
     initial_height = jnp.mean(y_top_init) - y_bottom_mean
 
+    x_top_init = pos_2d[top_nodes, 0]
+    x_bottom_init = pos_2d[bottom_nodes, 0]
+
     # Precompute constrained DOF indices (y-component of top + bottom nodes)
     all_boundary = jnp.concatenate([jnp.asarray(top_nodes), jnp.asarray(bottom_nodes)])
-    source_nodes_dof = all_boundary * d + 1  # y-DOF
+    source_nodes_dof = jnp.concatenate([all_boundary * d, all_boundary * d + 1])  # x- and y-DOF
 
     # Offsets of individual top/bottom nodes from their mean y
     top_offsets = y_top_init - jnp.mean(y_top_init)
@@ -474,7 +507,9 @@ def compute_quasistatic_trajectory_auxetic_jax(crf, stiffnesses, edges, rest_len
         # Imposed y-values: top nodes (shifted) then bottom nodes (fixed)
         imposed_y_top = y_top_new + top_offsets
         imposed_y_bottom = bottom_y_values
-        imposed_positions = jnp.concatenate([imposed_y_top, imposed_y_bottom])
+        imposed_x_top = x_top_init  # hold x fixed for top nodes
+        imposed_x_bottom = x_bottom_init  # hold x fixed for bottom nodes
+        imposed_positions = jnp.concatenate([imposed_x_top, imposed_x_bottom, imposed_y_top, imposed_y_bottom])
 
         current_pos = crf(stiffnesses, edges, rest_lengths,
                           current_pos, source_nodes_dof, imposed_positions)
