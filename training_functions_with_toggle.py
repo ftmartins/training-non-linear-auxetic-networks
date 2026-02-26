@@ -13,6 +13,7 @@ from joblib import Parallel, delayed
 from fire_minimize_memview_cy import fire_minimize_dof
 from checkpoint_manager import (
     save_training_results,
+    save_checkpoint,
 )
 from config import FORCE_TOL
 
@@ -873,8 +874,8 @@ def finish_training_GD_auxetic_batch(
             print(f"  Computed Poisson ratios: {computed_poisson_ratios}")
             print(f"  Target Poisson ratios: {desired_poisson_list}")
 
-        # Periodically save intermediate trajectories
-        if save_intermediate and (step) % save_interval == 0:
+        # Periodically save intermediate trajectories and checkpoint
+        if save_intermediate and step % save_interval == 0:
             save_training_results(
                 task_seed=task_seed,
                 realization_seed=realization_seed,
@@ -883,8 +884,20 @@ def finish_training_GD_auxetic_batch(
                 task_config=task_config,
                 results_dir=TARGETED_RESULTS_DIR,
             )
+<<<<<<< HEAD
         if loss < loss_tol:
             break
+=======
+            save_checkpoint(
+                task_seed=task_seed,
+                realization_seed=realization_seed,
+                history=history,
+                network=network,
+                task_config=task_config,
+                current_step=step,
+                results_dir=TARGETED_RESULTS_DIR,
+            )
+>>>>>>> 430816fbb7f3a5d7ebbd9d0bca61659e3dd7477d
 
     # Final summary
     print(f"\n{'='*60}")
@@ -1043,7 +1056,7 @@ def finish_training_GD_auxetic_batch_jax(
         if loss < min_loss:
             min_loss = loss
 
-        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}, log mean update ={np.mean(np.log10(np.abs(grad_np / grad_norm + 1e-12))):.2f})')
+        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}, init loss = {history["loss"][0]:.4e}, log mean update ={np.mean(np.log10(np.abs(grad_np / grad_norm + 1e-12))):.2f})')
 
         if verbose and step % save_interval == 0:
             print(f"\nStep {step}:")
@@ -1056,6 +1069,12 @@ def finish_training_GD_auxetic_batch_jax(
                 task_seed=task_seed, realization_seed=realization_seed,
                 history=history, network=network,
                 task_config=task_config, results_dir=TARGETED_RESULTS_DIR,
+            )
+            save_checkpoint(
+                task_seed=task_seed, realization_seed=realization_seed,
+                history=history, network=network,
+                task_config=task_config, current_step=step,
+                results_dir=TARGETED_RESULTS_DIR,
             )
 
     # Final summary

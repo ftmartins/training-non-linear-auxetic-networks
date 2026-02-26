@@ -62,7 +62,14 @@ from checkpoint_manager import (
     get_complete_jobs,
     load_checkpoint,
     remove_checkpoint,
+    has_nan_in_results,
+    get_last_good_step,
+    get_training_result_path,
 )
+import pickle
+
+# Learning-rate reduction factor applied when NaN is detected in saved results
+LR_NAN_REDUCTION = 0.1
 
 # Import moduli training
 try:
@@ -144,8 +151,23 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
     print(f"Starting Moduli Task {task_id}, Realization {realization_seed}")
     print(f"{'='*80}")
 
-    # Check if already complete
-    if is_training_complete(task_id, realization_seed, results_dir=MODULI_RESULTS_DIR):
+    # Check for NaN in previously saved results (takes priority over completion check)
+    nan_detected = has_nan_in_results(task_id, realization_seed,
+                                      results_dir=MODULI_RESULTS_DIR)
+    recovery_mode = None   # None | 'from_last_good' | 'from_scratch'
+    recovery_lr_scale = 1.0
+
+    if nan_detected:
+        last_good = get_last_good_step(task_id, realization_seed,
+                                       results_dir=MODULI_RESULTS_DIR)
+        if last_good >= 0:
+            recovery_mode = 'from_last_good'
+        else:
+            recovery_mode = 'from_scratch'
+        recovery_lr_scale = LR_NAN_REDUCTION
+        print(f"NaN detected in saved results — recovery_mode={recovery_mode}, "
+              f"LR scale={recovery_lr_scale}")
+    elif is_training_complete(task_id, realization_seed, results_dir=MODULI_RESULTS_DIR):
         print(f"Job already completed! Skipping...")
         print(f"{'='*80}\n")
         return True
@@ -156,25 +178,10 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
         if not TRAINING_AVAILABLE:
             raise ImportError("Moduli training functions not available. Check imports.")
 
-        # Try to load checkpoint
-        checkpoint = None
-        if use_checkpoint:
-            checkpoint = load_checkpoint(task_id, realization_seed,
-                                         results_dir=MODULI_RESULTS_DIR)
-            if checkpoint is not None:
-                print(f"Found checkpoint at step {checkpoint['current_step']}")
-                print(f"Resuming from checkpoint...")
-
         # 1. Get task configuration
-        if checkpoint is not None:
-            task_config = checkpoint['task_config']
-            if verbose:
-                print("Step 1: Loaded task configuration from checkpoint...")
-        else:
-            if verbose:
-                print("Step 1: Loading moduli task configuration...")
-            task_config = get_moduli_task_config(task_id)
-
+        if verbose:
+            print("Step 1: Loading moduli task configuration...")
+        task_config = get_moduli_task_config(task_id)
         print(f"  Category: {task_config['category']} ({task_config['category_name']})")
 
         # 2. Compute reference moduli and resolve targets
@@ -188,79 +195,100 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
             target_strs = [f"{k}={v:.4f}" for k, v in targets.items()]
             print(f"    strain={strain}: {', '.join(target_strs)}")
 
-        # 3. Create network or restore from checkpoint
-        if checkpoint is not None:
-            if verbose:
-                print("Step 3: Restoring network from checkpoint...")
-            network, boundary_dict = create_auxetic_network(
-                n_nodes=N_NODES,
-                packing_seed=task_config['packing_seed'],
-                force_type=FORCE_TYPE,
-                boundary_margin=BOUNDARY_MARGIN,
-            )
-            network.positions = checkpoint['network']['positions']
-            network.stiffnesses = checkpoint['network']['stiffnesses']
-            network.rest_lengths = checkpoint['network']['rest_lengths']
-            network.edges = checkpoint['network']['edges']
-            print(f"  Network restored: {len(network.positions)} nodes, "
-                  f"{len(network.edges)} edges")
-        else:
-            if verbose:
-                print("Step 3: Creating network from packing...")
-            network, boundary_dict = create_auxetic_network(
-                n_nodes=N_NODES,
-                packing_seed=task_config['packing_seed'],
-                force_type=FORCE_TYPE,
-                boundary_margin=BOUNDARY_MARGIN,
-            )
-            print(f"  Network created: {len(network.positions)} nodes, "
-                  f"{len(network.edges)} edges")
+        # 3. Create base network structure
+        if verbose:
+            print("Step 3: Creating network from packing...")
+        network, boundary_dict = create_auxetic_network(
+            n_nodes=N_NODES,
+            packing_seed=task_config['packing_seed'],
+            force_type=FORCE_TYPE,
+            boundary_margin=BOUNDARY_MARGIN,
+        )
+        print(f"  Network created: {len(network.positions)} nodes, "
+              f"{len(network.edges)} edges")
 
-            # Initialize stiffnesses
-            if verbose:
-                print("Step 4: Initializing random stiffnesses...")
+        # 4. Determine initial state based on recovery mode or checkpoint
+        history = {}
+        start_step = 0
+
+        if recovery_mode == 'from_last_good':
+            last_good = get_last_good_step(task_id, realization_seed,
+                                           results_dir=MODULI_RESULTS_DIR)
+            result_path = get_training_result_path(task_id, realization_seed,
+                                                   results_dir=MODULI_RESULTS_DIR)
+            with open(result_path / "history.pkl", 'rb') as f:
+                saved_history = pickle.load(f)
+            n_trim = last_good + 1
+            history = {
+                'stiffnesses': list(np.array(saved_history['stiffnesses'])[:n_trim]),
+                'loss':        list(np.array(saved_history['loss'])[:n_trim]),
+                'positions':   list(saved_history['positions'])[:n_trim],
+            }
+            network.stiffnesses = np.array(saved_history['stiffnesses'])[last_good]
+            network.positions = np.array(saved_history['positions'][last_good])
+            start_step = n_trim
+            print(f"  Restored from last good step {last_good} — continuing from step {start_step}")
+
+        elif recovery_mode == 'from_scratch':
             n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(
-                realization_seed, n_edges,
-            )
+            initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
             network.stiffnesses = initial_stiffnesses
             network.save_original_parameters()
-            print(f"  Stiffnesses initialized: range "
+            print(f"  Restarting from scratch with reduced LR "
                   f"[{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
 
-        # 4. Run training
-        if verbose:
-            print("Step 5: Running moduli training...")
+        else:
+            # Normal path: try checkpoint first, else fresh start
+            checkpoint = None
+            if use_checkpoint:
+                checkpoint = load_checkpoint(task_id, realization_seed,
+                                             results_dir=MODULI_RESULTS_DIR)
+                if checkpoint is not None:
+                    print(f"Found checkpoint at step {checkpoint['current_step']}")
+                    network.positions = checkpoint['network']['positions']
+                    network.stiffnesses = checkpoint['network']['stiffnesses']
+                    network.rest_lengths = checkpoint['network']['rest_lengths']
+                    network.edges = checkpoint['network']['edges']
+                    history = checkpoint['history']
+                    start_step = checkpoint['current_step']
+                    print(f"  Resuming from step {start_step}/{N_STEPS}")
+
+            if checkpoint is None:
+                if verbose:
+                    print("Step 4: Initializing random stiffnesses...")
+                n_edges = len(network.edges)
+                initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+                network.stiffnesses = initial_stiffnesses
+                network.save_original_parameters()
+                print(f"  Stiffnesses initialized: range "
+                      f"[{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
+
+        effective_lr = LEARNING_RATE * recovery_lr_scale
+        remaining_steps = N_STEPS - start_step
+
         print(f"  Training parameters:")
-        print(f"    Learning rate: {LEARNING_RATE}")
-        print(f"    Steps: {N_STEPS:,}")
+        print(f"    Learning rate: {effective_lr} (scale={recovery_lr_scale})")
+        print(f"    Steps remaining: {remaining_steps:,} / {N_STEPS:,}")
         print(f"    Strain steps: {N_STRAIN_STEPS}")
         print(f"    Force tolerance: {FORCE_TOL}")
 
-        # Initialize or restore history
-        if checkpoint is not None:
-            history = checkpoint['history']
-            start_step = checkpoint['current_step']
-            print(f"  Resuming from step {start_step}/{N_STEPS}")
-        else:
-            history = {}
-            start_step = 0
+        # 5. Run training
+        if verbose:
+            print("Step 5: Running moduli training...")
 
-        remaining_steps = N_STEPS - start_step
-
-        if remaining_steps > 0:
-            history, trained_network = run_moduli_training(
-                network=network,
+        def _run_train(net, hist, lr, n_steps):
+            return run_moduli_training(
+                network=net,
                 training_goals=training_goals,
-                learning_rate=LEARNING_RATE,
-                n_steps=remaining_steps,
+                learning_rate=lr,
+                n_steps=n_steps,
                 top_nodes=boundary_dict['top'],
                 bottom_nodes=boundary_dict['bottom'],
                 left_nodes=boundary_dict['left'],
                 right_nodes=boundary_dict['right'],
                 force_type=FORCE_TYPE,
                 n_strain_steps=N_STRAIN_STEPS,
-                history=history,
+                history=hist,
                 force_tol=FORCE_TOL,
                 vmin=VMIN,
                 vmax=VMAX,
@@ -270,11 +298,29 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
                 task_config=task_config,
                 TARGETED_RESULTS_DIR=MODULI_RESULTS_DIR,
             )
+
+        if remaining_steps > 0:
+            history, trained_network = _run_train(network, history, effective_lr, remaining_steps)
         else:
             trained_network = network
-            print("  Training already complete from checkpoint!")
+            print("  Training already complete!")
 
-        # 5. Save final results
+        # 5b. Second NaN recovery
+        if recovery_mode is not None and has_nan_in_results(
+                task_id, realization_seed, results_dir=MODULI_RESULTS_DIR):
+            print(f"\n{'!'*60}")
+            print(f"NaN persists after {recovery_mode} recovery.")
+            print(f"Restarting from scratch with LR scale={LR_NAN_REDUCTION}.")
+            print(f"{'!'*60}\n")
+            n_edges = len(network.edges)
+            initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+            trained_network.stiffnesses = initial_stiffnesses
+            trained_network.save_original_parameters()
+            history = {}
+            history, trained_network = _run_train(
+                trained_network, history, LEARNING_RATE * LR_NAN_REDUCTION, N_STEPS)
+
+        # 6. Save final results
         if verbose:
             print("Step 6: Saving results...")
         save_training_results(
@@ -288,19 +334,17 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
 
         # Remove checkpoint after success
         if use_checkpoint:
-            remove_checkpoint(task_id, realization_seed,
-                              results_dir=MODULI_RESULTS_DIR)
+            remove_checkpoint(task_id, realization_seed, results_dir=MODULI_RESULTS_DIR)
 
         elapsed = time.time() - start_time
-        final_loss = (history['loss'][-1]
-                      if 'loss' in history and history['loss']
-                      else float('nan'))
+        loss_list = history.get('loss', [])
+        final_loss = loss_list[-1] if loss_list else float('nan')
 
         print(f"\n{'='*80}")
         print(f"SUCCESS: Moduli Task {task_id}, Realization {realization_seed}")
         print(f"Time elapsed: {elapsed/60:.2f} minutes")
         print(f"Final loss: {final_loss:.4e}")
-        print(f"Training steps completed: {len(history.get('loss', []))}")
+        print(f"Training steps completed: {len(loss_list)}")
         print(f"{'='*80}\n")
 
         return True
