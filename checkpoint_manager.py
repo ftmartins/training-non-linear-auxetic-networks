@@ -121,6 +121,96 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         return False
 
 
+def has_nan_in_results(task_seed, realization_seed, results_dir=None):
+    """
+    Check if previously saved training results contain NaN values.
+
+    Loads ``stiffness_trajectory.npy`` and ``loss_trajectory.npy`` from the
+    result directory and returns True if either file contains any NaN.
+    Returns False when the files do not exist (no results saved yet).
+
+    Args:
+        task_seed: Task index
+        realization_seed: Realization index
+        results_dir: Results directory (default: from config)
+
+    Returns:
+        has_nan: True if NaN detected in saved stiffnesses or losses.
+    """
+    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
+
+    stiffness_file = result_path / "stiffness_trajectory.npy"
+    loss_file = result_path / "loss_trajectory.npy"
+
+    try:
+        if stiffness_file.exists():
+            stiffnesses = np.load(stiffness_file)
+            if np.isnan(stiffnesses).any():
+                return True
+        if loss_file.exists():
+            losses = np.load(loss_file)
+            if np.isnan(losses).any():
+                return True
+    except Exception as e:
+        print(f"Warning: Could not check NaN for task {task_seed}, "
+              f"realization {realization_seed}: {e}")
+
+    return False
+
+
+def get_last_good_step(task_seed, realization_seed, results_dir=None):
+    """
+    Return the index of the last training step that contains no NaN in either
+    stiffnesses or loss.
+
+    Loads ``stiffness_trajectory.npy`` (n_steps, E) and
+    ``loss_trajectory.npy`` (n_steps,) and finds the last row in which
+    neither array has a NaN.
+
+    Args:
+        task_seed: Task index
+        realization_seed: Realization index
+        results_dir: Results directory (default: from config)
+
+    Returns:
+        last_good: Index of last clean step, or -1 if no clean step exists
+                   or the trajectory files are missing.
+    """
+    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
+
+    stiffness_file = result_path / "stiffness_trajectory.npy"
+    loss_file = result_path / "loss_trajectory.npy"
+
+    if not stiffness_file.exists() or not loss_file.exists():
+        return -1
+
+    try:
+        stiffnesses = np.load(stiffness_file)  # (n_steps, E)
+        losses = np.load(loss_file)             # (n_steps,)
+
+        n_steps = min(len(stiffnesses), len(losses))
+        if n_steps == 0:
+            return -1
+
+        stiffnesses = stiffnesses[:n_steps]
+        losses = losses[:n_steps]
+
+        # Good steps: no NaN in stiffnesses row and no NaN in loss
+        stiff_ok = ~np.isnan(stiffnesses).any(axis=1)  # (n_steps,)
+        loss_ok = ~np.isnan(losses)                     # (n_steps,)
+        good_mask = stiff_ok & loss_ok
+
+        good_indices = np.where(good_mask)[0]
+        if len(good_indices) == 0:
+            return -1
+        return int(good_indices[-1])
+
+    except Exception as e:
+        print(f"Warning: Could not find last good step for task {task_seed}, "
+              f"realization {realization_seed}: {e}")
+        return -1
+
+
 def is_training_complete(task_seed, realization_seed, results_dir=None):
     """
     Check if a training job is marked as complete.
