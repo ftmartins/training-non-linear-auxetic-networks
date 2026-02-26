@@ -38,6 +38,9 @@ from config import (
     LEARNING_RATE, FORCE_TOL, VMIN, VMAX,
 )
 
+LEARNING_RATE = 1e-4
+
+
 # Import moduli task definitions
 from moduli_task_generator import (
     get_moduli_task_config,

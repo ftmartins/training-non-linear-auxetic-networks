@@ -301,7 +301,9 @@ def load_checkpoint(task_seed, realization_seed, results_dir=None):
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
     checkpoint_file = result_path / "checkpoint.pkl"
-
+ 
+    print(checkpoint_file, checkpoint_file.exists())
+ 
     if not checkpoint_file.exists():
         return None
 

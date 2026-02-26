@@ -33,11 +33,12 @@ sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'phys
 # Import shared config (not validate_config)
 from config import (
     N_NODES, FORCE_TYPE, BOUNDARY_MARGIN,
-    FORCE_TOL, VMIN, VMAX,
+    FORCE_TOL
 )
+VMIN = 1e-3
+VMAX = 1e2
 
-
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 
 # Import targeted config and task definitions
 from targeted_task_generator import (
@@ -114,7 +115,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             if checkpoint is not None:
                 print(f"Found checkpoint at step {checkpoint['current_step']}")
                 print(f"Resuming from checkpoint...")
-
+        print(checkpoint)
+        assert 1==2
         # 1. Get task configuration (or load from checkpoint)
         if checkpoint is not None:
             task_config = checkpoint['task_config']
@@ -455,3 +457,6 @@ Examples:
 
 if __name__ == '__main__':
     main()
+
+
+resume
