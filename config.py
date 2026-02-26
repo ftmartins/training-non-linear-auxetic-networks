@@ -24,7 +24,7 @@ N_TASKS = 10  # Number of distinct training tasks
 N_REALIZATIONS = 20  # Number of realizations per task
 
 # Compression strain pool (9 options)
-COMPRESSION_POOL = (-np.arange(0.10, 0.55, 0.05)).tolist()  #(-np.arange(0.01, 0.10, 0.01)).tolist()  # [-0.01, -0.02, ..., -0.09]
+COMPRESSION_POOL = (-np.arange(0.05, 0.31, 0.05)).tolist()  #(-np.arange(0.01, 0.10, 0.01)).tolist()  # [-0.01, -0.02, ..., -0.09]
 
 # Poisson ratio pool (6 options)
 POISSON_POOL = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
@@ -33,11 +33,11 @@ POISSON_POOL = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
 # Training Hyperparameters
 # ============================================================================
 
-LEARNING_RATE = 1e-4
-N_STEPS = 3_000  # Number of training iterations
+LEARNING_RATE = 1e-3
+N_STEPS = 10_000  # Number of training iterations
 N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory
 FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
-VMIN = 1e-6  # Minimum stiffness value
+VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
 ETA = 0.1  # Coupling factor (from notebook)
 

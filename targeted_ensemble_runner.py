@@ -129,7 +129,6 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         if not TRAINING_FUNCTIONS_AVAILABLE:
             raise ImportError("Training functions not available. Check imports.")
 
-<<<<<<< HEAD
         # Try to load checkpoint
         checkpoint = None
         if use_checkpoint:
@@ -138,8 +137,6 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             if checkpoint is not None:
                 print(f"Found checkpoint at step {checkpoint['current_step']}")
                 print(f"Resuming from checkpoint...")
-        print(checkpoint)
-        assert 1==2
         # 1. Get task configuration (or load from checkpoint)
         if checkpoint is not None:
             task_config = checkpoint['task_config']
@@ -149,12 +146,6 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             if verbose:
                 print("Step 1: Loading targeted task configuration...")
             task_config = get_targeted_task_config(task_id)
-=======
-        # 1. Get task configuration
-        if verbose:
-            print("Step 1: Loading targeted task configuration...")
-        task_config = get_targeted_task_config(task_id)
->>>>>>> 430816fbb7f3a5d7ebbd9d0bca61659e3dd7477d
 
         print(f"  Compression strains: {task_config['compression_strains']}")
         print(f"  Target Poisson ratios: {task_config['target_poisson_ratios']}")
@@ -527,5 +518,3 @@ Examples:
 if __name__ == '__main__':
     main()
 
-
-resume

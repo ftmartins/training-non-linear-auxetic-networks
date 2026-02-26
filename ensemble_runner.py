@@ -384,7 +384,7 @@ Examples:
     parser.add_argument(
         '--gradient-method',
         choices=['parallel', 'jax'],
-        default='parallel',
+        default='jax',
         help='Gradient computation method: parallel (finite-difference, default) or jax (autodiff)'
     )
 

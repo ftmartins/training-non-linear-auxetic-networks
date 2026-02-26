@@ -884,10 +884,7 @@ def finish_training_GD_auxetic_batch(
                 task_config=task_config,
                 results_dir=TARGETED_RESULTS_DIR,
             )
-<<<<<<< HEAD
-        if loss < loss_tol:
-            break
-=======
+
             save_checkpoint(
                 task_seed=task_seed,
                 realization_seed=realization_seed,
@@ -897,7 +894,9 @@ def finish_training_GD_auxetic_batch(
                 current_step=step,
                 results_dir=TARGETED_RESULTS_DIR,
             )
->>>>>>> 430816fbb7f3a5d7ebbd9d0bca61659e3dd7477d
+
+        if loss < loss_tol:
+            break
 
     # Final summary
     print(f"\n{'='*60}")
