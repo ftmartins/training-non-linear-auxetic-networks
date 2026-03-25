@@ -33,8 +33,12 @@ sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'phys
 # Import shared config (not validate_config)
 from config import (
     N_NODES, FORCE_TYPE, BOUNDARY_MARGIN,
-    LEARNING_RATE, FORCE_TOL, VMIN, VMAX,
+    FORCE_TOL
 )
+VMIN = 1e-3
+VMAX = 1e2
+
+LEARNING_RATE = 1e-3
 
 # Import targeted config and task definitions
 from targeted_task_generator import (
@@ -125,10 +129,23 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         if not TRAINING_FUNCTIONS_AVAILABLE:
             raise ImportError("Training functions not available. Check imports.")
 
-        # 1. Get task configuration
-        if verbose:
-            print("Step 1: Loading targeted task configuration...")
-        task_config = get_targeted_task_config(task_id)
+        # Try to load checkpoint
+        checkpoint = None
+        if use_checkpoint:
+            checkpoint = load_checkpoint(task_id, realization_seed,
+                                         results_dir=TARGETED_RESULTS_DIR)
+            if checkpoint is not None:
+                print(f"Found checkpoint at step {checkpoint['current_step']}")
+                print(f"Resuming from checkpoint...")
+        # 1. Get task configuration (or load from checkpoint)
+        if checkpoint is not None:
+            task_config = checkpoint['task_config']
+            if verbose:
+                print("Step 1: Loaded task configuration from checkpoint...")
+        else:
+            if verbose:
+                print("Step 1: Loading targeted task configuration...")
+            task_config = get_targeted_task_config(task_id)
 
         print(f"  Compression strains: {task_config['compression_strains']}")
         print(f"  Target Poisson ratios: {task_config['target_poisson_ratios']}")
@@ -500,3 +517,4 @@ Examples:
 
 if __name__ == '__main__':
     main()
+

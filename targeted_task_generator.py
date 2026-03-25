@@ -25,7 +25,7 @@ from task_generator import generate_realization_stiffnesses, compute_target_exte
 # Targeted Training Configuration (overrides from config.py)
 # ============================================================================
 
-N_TASKS = 8
+N_TASKS = 10
 N_REALIZATIONS = 1
 N_STEPS = 3_000
 N_STRAIN_STEPS = 100  # Higher than default 20 to handle large compression strains
@@ -77,49 +77,49 @@ TARGETED_TASKS = [
     {
         'task_seed': 0,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4],
+        'compression_strains': [-0.2],
         'target_poisson_ratios': [-0.8],
     },
         {
         'task_seed': 1,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4, -0.2],
+        'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -0.8],
     },
     {
         'task_seed': 2,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4, -0.2],
+        'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -1.0],
     },
     {
         'task_seed': 3,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4, -0.2],
+        'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -0.4],
     },
     {
         'task_seed': 4,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4, -0.2],
+        'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -0.6],
     },
     {
         'task_seed': 5,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4, -0.2],
+        'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -0.3],
     },
     {
         'task_seed': 6,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4, -0.2],
+        'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -0.5],
     },
     {
         'task_seed': 7,
         'packing_seed': PACKING_SEED,
-        'compression_strains': [-0.4, -0.2],
+        'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -0.2],
     },
 ]

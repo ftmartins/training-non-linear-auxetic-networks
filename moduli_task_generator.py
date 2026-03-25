@@ -39,15 +39,15 @@ from task_generator import generate_realization_stiffnesses
 
 N_TASKS = 18
 N_REALIZATIONS = 3
-N_STEPS = 3_000
+N_STEPS = 10_000
 N_STRAIN_STEPS = 100
 PACKING_SEED = 42
 
-ENSEMBLE_DIR = BASE_DIR / 'ensemble_training'
+ENSEMBLE_DIR = Path('/data2/shared/felipetm/auxetic_networks/') / 'ensemble_training'
 MODULI_RESULTS_DIR = ENSEMBLE_DIR / 'moduli_results'
 
 # All compression strains used across categories
-ALL_COMPRESSION_STRAINS = [-0.2, -0.3, -0.4]
+ALL_COMPRESSION_STRAINS = [-0.1, -0.15, -0.2]
 
 # ============================================================================
 # Task Definitions (multiplier-based)
@@ -65,7 +65,7 @@ MODULI_TASKS = [
         'category': 1,
         'category_name': 'single_modulus_1strain',
         'training_goals_multipliers': {
-            -0.2: {'B': 0.5},
+            -0.1: {'B': 0.5},
         },
     },
     # Category 2: B and G at -0.2 (adds G×1.3 to task 0's B×0.5)
@@ -75,7 +75,7 @@ MODULI_TASKS = [
         'category': 2,
         'category_name': 'BG_1strain',
         'training_goals_multipliers': {
-            -0.2: {'B': 0.5, 'G': 1.3},
+            -0.1: {'B': 0.5, 'G': 1.3},
         },
     },
     # Category 3: B and G at -0.2 and -0.4 (adds strain -0.4 to task 3)
@@ -85,8 +85,8 @@ MODULI_TASKS = [
         'category': 3,
         'category_name': 'BG_2strains',
         'training_goals_multipliers': {
-            -0.2: {'B': 0.5, 'G': 1.3},
-            -0.4: {'B': 0.7, 'G': 1.5},
+            -0.1: {'B': 0.5, 'G': 1.3},
+            -0.2: {'B': 0.7, 'G': 1.5},
         },
     },
 
@@ -101,7 +101,7 @@ MODULI_TASKS = [
         'category': 1,
         'category_name': 'single_modulus_1strain',
         'training_goals_multipliers': {
-            -0.2: {'B': 1.5},
+            -0.1: {'B': 1.5},
         },
     },
     # Category 2 (adds G×0.7 to task 1's B×1.5)
@@ -111,7 +111,7 @@ MODULI_TASKS = [
         'category': 2,
         'category_name': 'BG_1strain',
         'training_goals_multipliers': {
-            -0.2: {'B': 1.5, 'G': 0.7},
+            -0.1: {'B': 1.5, 'G': 0.7},
         },
     },
     # Category 3 (adds strain -0.4 to task 4)
@@ -121,8 +121,8 @@ MODULI_TASKS = [
         'category': 3,
         'category_name': 'BG_2strains',
         'training_goals_multipliers': {
-            -0.2: {'B': 1.5, 'G': 0.7},
-            -0.4: {'B': 1.3, 'G': 0.5},
+            -0.1: {'B': 1.5, 'G': 0.7},
+            -0.2: {'B': 1.3, 'G': 0.5},
         },
     },
 
@@ -137,7 +137,7 @@ MODULI_TASKS = [
         'category': 1,
         'category_name': 'single_modulus_1strain',
         'training_goals_multipliers': {
-            -0.2: {'G': 0.5},
+            -0.1: {'G': 0.5},
         },
     },
     # Category 2 (adds B×1.5 to task 2's G×0.5)
@@ -147,7 +147,7 @@ MODULI_TASKS = [
         'category': 2,
         'category_name': 'BG_1strain',
         'training_goals_multipliers': {
-            -0.2: {'B': 1.5, 'G': 0.5},
+            -0.1: {'B': 1.5, 'G': 0.5},
         },
     },
     # Category 3 (adds strain -0.4 to task 5)
@@ -157,8 +157,8 @@ MODULI_TASKS = [
         'category': 3,
         'category_name': 'BG_2strains',
         'training_goals_multipliers': {
-            -0.2: {'B': 1.5, 'G': 0.5},
-            -0.4: {'B': 1.3, 'G': 0.7},
+            -0.1: {'B': 1.5, 'G': 0.5},
+            -0.2: {'B': 1.3, 'G': 0.7},
         },
     },
 
@@ -173,7 +173,7 @@ MODULI_TASKS = [
         'category': 4,
         'category_name': 'Cij_triplet_1strain',
         'training_goals_multipliers': {
-            -0.2: {'C_11': 0.7, 'C_22': 1.3, 'C_12': 0.5},
+            -0.1: {'C_11': 0.7, 'C_22': 1.3, 'C_12': 0.5},
         },
     },
     # Category 5: adds strain -0.4 (same keys, different multipliers)
@@ -183,8 +183,8 @@ MODULI_TASKS = [
         'category': 5,
         'category_name': 'Cij_triplet_2strains',
         'training_goals_multipliers': {
-            -0.2: {'C_11': 0.7, 'C_22': 1.3, 'C_12': 0.5},
-            -0.4: {'C_11': 1.3, 'C_22': 0.7, 'C_12': 1.5},
+            -0.1: {'C_11': 0.7, 'C_22': 1.3, 'C_12': 0.5},
+            -0.2: {'C_11': 1.3, 'C_22': 0.7, 'C_12': 1.5},
         },
     },
     # Category 6: adds strain -0.3
@@ -194,9 +194,9 @@ MODULI_TASKS = [
         'category': 6,
         'category_name': 'Cij_triplet_3strains',
         'training_goals_multipliers': {
-            -0.2: {'C_11': 0.7, 'C_22': 1.3, 'C_12': 0.5},
-            -0.3: {'C_11': 1.0, 'C_22': 1.0, 'C_12': 0.7},
-            -0.4: {'C_11': 1.3, 'C_22': 0.7, 'C_12': 1.5},
+            -0.1: {'C_11': 0.7, 'C_22': 1.3, 'C_12': 0.5},
+            -0.15: {'C_11': 1.0, 'C_22': 1.0, 'C_12': 0.7},
+            -0.2: {'C_11': 1.3, 'C_22': 0.7, 'C_12': 1.5},
         },
     },
 
@@ -211,7 +211,7 @@ MODULI_TASKS = [
         'category': 4,
         'category_name': 'Cij_triplet_1strain',
         'training_goals_multipliers': {
-            -0.2: {'C_11': 1.3, 'C_33': 0.7, 'C_12': 1.5},
+            -0.1: {'C_11': 1.3, 'C_33': 0.7, 'C_12': 1.5},
         },
     },
     # Category 5 (adds strain -0.4, same -0.2 targets as task 10)
@@ -221,8 +221,8 @@ MODULI_TASKS = [
         'category': 5,
         'category_name': 'Cij_triplet_2strains',
         'training_goals_multipliers': {
-            -0.2: {'C_11': 1.3, 'C_33': 0.7, 'C_12': 1.5},
-            -0.4: {'C_11': 0.5, 'C_33': 1.3, 'C_12': 0.7},
+            -0.1: {'C_11': 1.3, 'C_33': 0.7, 'C_12': 1.5},
+            -0.2: {'C_11': 0.5, 'C_33': 1.3, 'C_12': 0.7},
         },
     },
     # Category 6 (adds strain -0.3, same -0.2 and -0.4 as task 13)
@@ -232,9 +232,9 @@ MODULI_TASKS = [
         'category': 6,
         'category_name': 'Cij_triplet_3strains',
         'training_goals_multipliers': {
-            -0.2: {'C_11': 1.3, 'C_33': 0.7, 'C_12': 1.5},
-            -0.3: {'C_11': 0.7, 'C_33': 1.3, 'C_12': 0.5},
-            -0.4: {'C_11': 0.5, 'C_33': 1.3, 'C_12': 0.7},
+            -0.1: {'C_11': 1.3, 'C_33': 0.7, 'C_12': 1.5},
+            -0.15: {'C_11': 0.7, 'C_33': 1.3, 'C_12': 0.5},
+            -0.2: {'C_11': 0.5, 'C_33': 1.3, 'C_12': 0.7},
         },
     },
 
@@ -249,7 +249,7 @@ MODULI_TASKS = [
         'category': 4,
         'category_name': 'Cij_triplet_1strain',
         'training_goals_multipliers': {
-            -0.2: {'C_22': 0.5, 'C_33': 1.5, 'C_23': 0.7},
+            -0.1: {'C_22': 0.5, 'C_33': 1.5, 'C_23': 0.7},
         },
     },
     # Category 5 (adds strain -0.4, same -0.2 targets as task 11)
@@ -259,8 +259,8 @@ MODULI_TASKS = [
         'category': 5,
         'category_name': 'Cij_triplet_2strains',
         'training_goals_multipliers': {
-            -0.2: {'C_22': 0.5, 'C_33': 1.5, 'C_23': 0.7},
-            -0.4: {'C_22': 1.5, 'C_33': 0.5, 'C_23': 1.3},
+            -0.1: {'C_22': 0.5, 'C_33': 1.5, 'C_23': 0.7},
+            -0.2: {'C_22': 1.5, 'C_33': 0.5, 'C_23': 1.3},
         },
     },
     # Category 6 (adds strain -0.3, same -0.2 and -0.4 as task 14)
@@ -270,9 +270,9 @@ MODULI_TASKS = [
         'category': 6,
         'category_name': 'Cij_triplet_3strains',
         'training_goals_multipliers': {
-            -0.2: {'C_22': 0.5, 'C_33': 1.5, 'C_23': 0.7},
-            -0.3: {'C_22': 1.3, 'C_33': 0.7, 'C_23': 1.5},
-            -0.4: {'C_22': 1.5, 'C_33': 0.5, 'C_23': 1.3},
+            -0.1: {'C_22': 0.5, 'C_33': 1.5, 'C_23': 0.7},
+            -0.15: {'C_22': 1.3, 'C_33': 0.7, 'C_23': 1.5},
+            -0.2: {'C_22': 1.5, 'C_33': 0.5, 'C_23': 1.3},
         },
     },
 ]

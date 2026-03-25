@@ -480,6 +480,9 @@ def compute_quasistatic_trajectory_auxetic_jax(crf, stiffnesses, edges, rest_len
     edges = jnp.asarray(edges)
     rest_lengths = jnp.asarray(rest_lengths)
 
+    top_nodes = jnp.asarray(np.array(top_nodes))
+    bottom_nodes = jnp.asarray(np.array(bottom_nodes))
+
     pos_2d = jnp.reshape(positions_flat, (-1, d))
     top_nodes = jnp.asarray(top_nodes, dtype=jnp.int32)
     bottom_nodes = jnp.asarray(bottom_nodes, dtype=jnp.int32)
@@ -698,7 +701,7 @@ def finish_training_GD_auxetic_batch(
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
     verbose=False, stiffnesses_filename=None, force_tol=1e-6,
     vmin=1e-3, vmax=1e3,
-    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None
+    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol = 1e-5
 ):
     """
     Train the network for auxetic response using gradient descent.
@@ -862,7 +865,7 @@ def finish_training_GD_auxetic_batch(
             min_loss = loss
 
         # Update progress bar
-        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e})')
+        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}), grad_norm = {np.linalg.norm(update):.4e}')
 
         # Verbose output
         if verbose and step % 100 == 0:
@@ -881,6 +884,7 @@ def finish_training_GD_auxetic_batch(
                 task_config=task_config,
                 results_dir=TARGETED_RESULTS_DIR,
             )
+
             save_checkpoint(
                 task_seed=task_seed,
                 realization_seed=realization_seed,
@@ -890,6 +894,9 @@ def finish_training_GD_auxetic_batch(
                 current_step=step,
                 results_dir=TARGETED_RESULTS_DIR,
             )
+
+        if loss < loss_tol:
+            break
 
     # Final summary
     print(f"\n{'='*60}")
