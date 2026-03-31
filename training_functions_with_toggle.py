@@ -5,6 +5,7 @@ This module provides all necessary functions for training elastic networks
 with optimized Cython FIRE minimization.
 """
 
+import warnings
 import numpy as np
 import copy
 import time
@@ -182,6 +183,7 @@ def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_node
             constrained_idx_dof,
             1 if force_type == 'quartic' else 0
         )
+        assert force_norm<=tol, f"FIRE did not converge at step {step}: force_norm={force_norm:.3e}"
 
         positions = min_pos
         traj.append(np.copy(min_pos))
@@ -400,15 +402,31 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4, a
             return jax.lax.cond(active > 0.5, do_update, skip_update, (pos, vel, dt, alpha, npos, gnorm))
 
         final_state = jax.lax.fori_loop(0, max_steps, body_fn, state0)
-        final_pos_flat, *_ = final_state
-        return final_pos_flat  # (N*d,)
+        final_pos_flat, _, _, _, _, final_gnorm, _ = final_state
+        return final_pos_flat, final_gnorm  # (N*d,), scalar
+
+    def _make_convergence_check(n_dof):
+        def _warn_if_not_converged(gnorm):
+            if float(gnorm) / n_dof >= tol:
+                warnings.warn(
+                    f"FIRE did not converge after {max_steps} steps: "
+                    f"gnorm/n_dof={float(gnorm)/n_dof:.2e}, tol={tol:.2e}. "
+                    "Gradients may be inaccurate.",
+                    RuntimeWarning, stacklevel=6,
+                )
+        return _warn_if_not_converged
 
     @jax.custom_vjp
     def compute_response_fire(stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions):
-        return _fire_forward(stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions)
+        pos_final, gnorm = _fire_forward(stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions)
+        n_dof = positions0.flatten().shape[0]
+        jax.debug.callback(_make_convergence_check(n_dof), gnorm)
+        return pos_final
 
     def crf_fwd(stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions):
-        pos_final = _fire_forward(stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions)
+        pos_final, gnorm = _fire_forward(stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions)
+        n_dof = positions0.flatten().shape[0]
+        jax.debug.callback(_make_convergence_check(n_dof), gnorm)
         saved = (pos_final, stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions)
         return pos_final, saved
 
@@ -445,7 +463,7 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4, a
 
 
 # ---------- Build the solver instance (capture hyperparams by closure) ----------
-crf = make_compute_response_fire(d=2, max_steps=500_000, tol=FORCE_TOL, force_type="quadratic")
+crf = make_compute_response_fire(d=2, max_steps=1_000_000, tol=FORCE_TOL, force_type="quadratic")
 
 
 # ============================================================================
