@@ -46,13 +46,20 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent))
 
 import jax
+import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
+
+from scipy.sparse.linalg import LinearOperator, eigsh
 
 from config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_strain_steps, get_n_nodes
 from network_utils import create_auxetic_network, get_square_boundary_nodes
 from elastic_network import ElasticNetwork
 from task_generator import generate_task_config
-from training_functions_with_toggle import compute_quasistatic_trajectory_auxetic
+from training_functions_with_toggle import (
+    compute_quasistatic_trajectory_auxetic,
+    compute_poisson_ratio_single_jax,
+    crf as _crf_default,
+)
 from generalized_susceptibility import (
     compute_physical_hessian_strained,
     compute_constrained_hessian_inverse,
@@ -152,6 +159,58 @@ def compute_unconstrained_hessian(network, positions):
     return H
 
 
+def compute_cost_hessian_evec(
+    network, target_poisson, compression_strain,
+    top_nodes, bottom_nodes, left_nodes, right_nodes,
+    n_strain_steps, force_type=FORCE_TYPE,
+    k_eigs=5, hvp_epsilon=1e-4,
+):
+    """Leading eigenvector of the loss Hessian w.r.t. stiffnesses.
+
+    Uses Lanczos + matrix-free HVPs via JAX autodiff (same approach as
+    compute_cost_hessian.py).  Eigenvectors sorted ascending; returns
+    ``|eigenvectors[:, -1]|`` (largest eigenvalue), shape (n_edges,).
+    """
+    n_edges = len(network.stiffnesses)
+    base_k = np.array(network.stiffnesses, dtype=float)
+
+    edges_jax        = jnp.asarray(np.array(network.edges,        dtype=np.int32))
+    rest_lengths_jax = jnp.asarray(np.array(network.rest_lengths, dtype=np.float64))
+    positions_jax    = jnp.asarray(np.array(network.positions,    dtype=np.float64).flatten())
+
+    def loss_jax(k_jax):
+        pr = compute_poisson_ratio_single_jax(
+            _crf_default, k_jax, edges_jax, rest_lengths_jax, positions_jax,
+            top_nodes, bottom_nodes, left_nodes, right_nodes,
+            compression_strain, n_strain_steps,
+        )
+        return (pr - target_poisson) ** 2
+
+    grad_loss = jax.jit(jax.grad(loss_jax))
+
+    def jax_gradient(k):
+        return np.array(grad_loss(jnp.asarray(k)))
+
+    print(f"      Computing base gradient ({n_edges} edges) ...", flush=True)
+    g0 = jax_gradient(base_k)
+
+    def hvp(v):
+        v = np.asarray(v, dtype=float)
+        norm_v = np.linalg.norm(v)
+        if norm_v < 1e-14:
+            return np.zeros_like(v)
+        g_fwd = jax_gradient(base_k + hvp_epsilon * v / norm_v)
+        return norm_v * (g_fwd - g0) / hvp_epsilon
+
+    H_op = LinearOperator((n_edges, n_edges), matvec=hvp, dtype=float)
+    k = min(k_eigs, n_edges - 1)
+    print(f"      Starting eigsh (k={k}) ...", flush=True)
+    eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LM')
+
+    order = np.argsort(eigenvalues)
+    return np.abs(eigenvectors[:, order[-1]])   # leading eigenvec, shape (n_edges,)
+
+
 def compute_actuation_and_modes(
     task_seed,
     realization_seed,
@@ -173,8 +232,10 @@ def compute_actuation_and_modes(
     network, boundary_dict = load_network_topology(task_seed, realization_seed, data_dir)
     network.stiffnesses = np.array(best_stiffness, dtype=float)
 
-    top_nodes = boundary_dict["top"]
-    bot_nodes = boundary_dict["bottom"]
+    top_nodes   = boundary_dict["top"]
+    bot_nodes   = boundary_dict["bottom"]
+    left_nodes  = boundary_dict["left"]
+    right_nodes = boundary_dict["right"]
 
     subtask_results = []
     for cs, tp in zip(compression_strains, target_poissons):
@@ -209,6 +270,13 @@ def compute_actuation_and_modes(
             overlaps_list.append(overlap)
             dr_norms.append(norm_dr)
 
+        print(f"    Computing cost Hessian eigenvector ...", flush=True)
+        cost_hess_evec = compute_cost_hessian_evec(
+            network, tp, cs,
+            top_nodes, bot_nodes, left_nodes, right_nodes,
+            n_strain_steps=n_strain_steps, force_type=force_type,
+        )
+
         subtask_results.append({
             "compression_strain": cs,
             "target_poisson": tp,
@@ -217,6 +285,7 @@ def compute_actuation_and_modes(
             "mode_eigenvectors": np.array(evecs_list),
             "mode_overlaps": np.array(overlaps_list),
             "displacement_norms": np.array(dr_norms),
+            "cost_hessian_evec": cost_hess_evec,
         })
 
     return {
@@ -322,6 +391,8 @@ def compute_unified_mode_data(
     thresholds = np.asarray(thresholds, dtype=float)
     P = len(thresholds)
 
+    cost_hess_evec = subtask.get("cost_hessian_evec")   # (n_edges,) or None
+
     t_indices = np.arange(0, T_m1_full, subsample)
     T_sub = len(t_indices)
 
@@ -368,7 +439,8 @@ def compute_unified_mode_data(
 
         strain_abs = np.abs((edge_len - restl) / (restl + eps))
         stress_abs = np.abs(stiff * strain_abs)
-        hess_edge_mode = sigma[:, 0] if k > 0 else np.zeros_like(s_tot_abs)
+        assert cost_hess_evec is not None, "Cost Hessian eigenvector missing from subtask results"
+        hess_edge_mode = cost_hess_evec                         # (n_edges,), already |·|
 
         if feat_acc is None:
             feat_acc = {k_: np.zeros_like(v) for k_, v in [
