@@ -12,7 +12,7 @@ from pathlib import Path
 # Network Parameters
 # ============================================================================
 
-N_NODES = 100  # Number of nodes in packing
+N_NODES = 300  # Number of nodes in packing
 PACKING_DIM = 2  # Spatial dimension
 FORCE_TYPE = 'quadratic'  # Force law: 'quadratic' or 'quartic'
 
@@ -20,23 +20,23 @@ FORCE_TYPE = 'quadratic'  # Force law: 'quadratic' or 'quartic'
 # Task Configuration
 # ============================================================================
 
-N_TASKS = 10  # Number of distinct training tasks
-N_REALIZATIONS = 20  # Number of realizations per task
+N_TASKS = 20  # Number of distinct training tasks
+N_REALIZATIONS = 10  # Number of realizations per task
 
 # Compression strain pool (9 options)
-COMPRESSION_POOL = (-np.arange(0.05, 0.31, 0.05)).tolist()  #(-np.arange(0.01, 0.10, 0.01)).tolist()  # [-0.01, -0.02, ..., -0.09]
+COMPRESSION_POOL = (-np.arange(0.025, 0.16, 0.025)).tolist()  #(-np.arange(0.05, 0.31, 0.05)).tolist()  # [-0.01, -0.02, ..., -0.09]
 
 # Poisson ratio pool (6 options)
-POISSON_POOL = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
+POISSON_POOL = [-0.05, -0.1, -0.15, -0.2, -0.3, -0.4]
 
 # ============================================================================
 # Training Hyperparameters
 # ============================================================================
 
-LEARNING_RATE = 1e-3
-N_STEPS = 10_000  # Number of training iterations
+LEARNING_RATE = 1e-1
+N_STEPS = 3_000  # Number of training iterations
 N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory
-FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
+FORCE_TOL = 1e-7  # Force convergence tolerance for FIRE
 VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
 ETA = 0.1  # Coupling factor (from notebook)
@@ -77,7 +77,7 @@ CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new/'
 # Network Creation Parameters
 # ============================================================================
 
-BOUNDARY_MARGIN = 0.05  # Margin for identifying boundary nodes
+BOUNDARY_MARGIN = 0.02  # Margin for identifying boundary nodes
 PACKING_PARAMS = {
     'central': 0.0005,
     'drag': 0.05,
@@ -100,7 +100,7 @@ USE_CHECKPOINTING = True  # Enable checkpoint/resume functionality
 
 def validate_config():
     """Validate configuration settings."""
-    assert len(COMPRESSION_POOL) == 9, f"Expected 9 compressions, got {len(COMPRESSION_POOL)}"
+    assert len(COMPRESSION_POOL) == 6, f"Expected 6 compressions, got {len(COMPRESSION_POOL)}"
     assert len(POISSON_POOL) == 6, f"Expected 6 Poisson ratios, got {len(POISSON_POOL)}"
     assert N_TASKS <= (len(COMPRESSION_POOL) * (len(COMPRESSION_POOL) - 1) // 2) * \
                        (len(POISSON_POOL) * (len(POISSON_POOL) - 1) // 2), \

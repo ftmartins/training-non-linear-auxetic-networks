@@ -103,7 +103,7 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         reduction_ratio = initial_loss / min_loss
 
         # Check if 3+ orders of magnitude (1000×)
-        if reduction_ratio >= 1_000.0:
+        if reduction_ratio >= 10_000_000.0:
             # Create alternative completion marker
             mark_training_complete_small_loss(
                 task_seed, realization_seed,
