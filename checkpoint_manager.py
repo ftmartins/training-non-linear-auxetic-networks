@@ -317,6 +317,7 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
     # Save loss and stiffness trajectories as separate numpy files
     np.save(result_path / "loss_trajectory.npy", loss_array)
     np.save(result_path / "stiffness_trajectory.npy", stiffness_array)
+    np.save(result_path / "edges.npy", np.array(network.edges))
 
     # Save final network state
     network_dict = {

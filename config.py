@@ -12,7 +12,9 @@ from pathlib import Path
 # Network Parameters
 # ============================================================================
 
-N_NODES = 300  # Number of nodes in packing
+# Legacy scalar — use get_n_nodes(task_seed) for task-aware code.
+# Kept for backward compatibility with runners that have fixed network sizes.
+N_NODES = 100  # Number of nodes in packing (default / tasks < 10 and >= 20)
 PACKING_DIM = 2  # Spatial dimension
 FORCE_TYPE = 'quadratic'  # Force law: 'quadratic' or 'quartic'
 
@@ -23,20 +25,80 @@ FORCE_TYPE = 'quadratic'  # Force law: 'quadratic' or 'quartic'
 N_TASKS = 20  # Number of distinct training tasks
 N_REALIZATIONS = 10  # Number of realizations per task
 
-# Compression strain pool (9 options)
-COMPRESSION_POOL = (-np.arange(0.025, 0.16, 0.025)).tolist()  #(-np.arange(0.05, 0.31, 0.05)).tolist()  # [-0.01, -0.02, ..., -0.09]
+# ---------------------------------------------------------------------------
+# Pool definitions — indexed by task range
+#
+#   task <  10  : Pool 0  (large compressions, extreme Poisson ratios)
+#   10 <= task < 20 : Pool 1  (moderate compressions / Poisson)
+#   20 <= task < 30 : Pool 2  (hybrid subset drawn from pools 0 and 1)
+# ---------------------------------------------------------------------------
 
-# Poisson ratio pool (6 options)
-POISSON_POOL = [-0.05, -0.1, -0.15, -0.2, -0.3, -0.4]
+# Pool 0: tasks 0–9
+_COMPRESSION_POOL_0 = (-np.arange(0.05, 0.31, 0.05)).tolist()   # 6 values: -0.05 … -0.30
+_POISSON_POOL_0     = [-0.1, -0.25, -0.3, -0.5, -0.8, -1.0]
+
+# Pool 1: tasks 10–19
+_COMPRESSION_POOL_1 = (-np.arange(0.025, 0.16, 0.025)).tolist()  # 6 values: -0.025 … -0.150
+_POISSON_POOL_1     = [-0.05, -0.1, -0.15, -0.2, -0.3, -0.4]
+
+# Pool 2: tasks 20–29 — 6 values drawn from _POOL_0 ∪ _POOL_1
+_COMPRESSION_POOL_2 = [-0.05, -0.10, -0.125, -0.15, -0.20, -0.25]  # spans both pools
+_POISSON_POOL_2     = [-0.10, -0.15, -0.25, -0.30, -0.40, -0.50]   # spans both pools
+
+# Legacy scalar aliases — point to pool 1 (current active range).
+# Prefer get_compression_pool(task_seed) / get_poisson_pool(task_seed).
+COMPRESSION_POOL = _COMPRESSION_POOL_1
+POISSON_POOL     = _POISSON_POOL_1
+
+
+def get_compression_pool(task_seed: int) -> list:
+    """Return the compression strain pool for the given task seed."""
+    if task_seed < 10:
+        return _COMPRESSION_POOL_0
+    elif task_seed < 20:
+        return _COMPRESSION_POOL_1
+    elif task_seed < 30:
+        return _COMPRESSION_POOL_2
+    else:
+        raise ValueError(f"No compression pool defined for task_seed={task_seed} (>= 30).")
+
+
+def get_poisson_pool(task_seed: int) -> list:
+    """Return the Poisson ratio pool for the given task seed."""
+    if task_seed < 10:
+        return _POISSON_POOL_0
+    elif task_seed < 20:
+        return _POISSON_POOL_1
+    elif task_seed < 30:
+        return _POISSON_POOL_2
+    else:
+        raise ValueError(f"No Poisson pool defined for task_seed={task_seed} (>= 30).")
+
+
+def get_n_strain_steps(task_seed: int) -> int:
+    """Return the quasistatic trajectory step count for the given task seed."""
+    return 100 if task_seed < 20 else 400
+
+
+def get_n_nodes(task_seed: int) -> int:
+    """Return the network node count for the given task seed."""
+    if task_seed < 10:
+        return 100
+    elif task_seed < 20:
+        return 300
+    else:
+        return 100
+
 
 # ============================================================================
 # Training Hyperparameters
 # ============================================================================
 
-LEARNING_RATE = 1e-1
+LEARNING_RATE = 1e-3
 N_STEPS = 3_000  # Number of training iterations
-N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory
-FORCE_TOL = 1e-7  # Force convergence tolerance for FIRE
+# Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
+N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory (tasks < 20)
+FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
 VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
 ETA = 0.1  # Coupling factor (from notebook)
@@ -45,7 +107,7 @@ ETA = 0.1  # Coupling factor (from notebook)
 # Stiffness Initialization
 # ============================================================================
 
-STIFFNESS_LOG_MIN = np.log(1e-6)  # log(minimum stiffness)
+STIFFNESS_LOG_MIN = np.log(1e-3)  # log(minimum stiffness)
 STIFFNESS_LOG_MAX = np.log(1.0)   # log(maximum stiffness)
 
 # ============================================================================
@@ -100,11 +162,29 @@ USE_CHECKPOINTING = True  # Enable checkpoint/resume functionality
 
 def validate_config():
     """Validate configuration settings."""
-    assert len(COMPRESSION_POOL) == 6, f"Expected 6 compressions, got {len(COMPRESSION_POOL)}"
-    assert len(POISSON_POOL) == 6, f"Expected 6 Poisson ratios, got {len(POISSON_POOL)}"
-    assert N_TASKS <= (len(COMPRESSION_POOL) * (len(COMPRESSION_POOL) - 1) // 2) * \
-                       (len(POISSON_POOL) * (len(POISSON_POOL) - 1) // 2), \
-           f"N_TASKS={N_TASKS} too large for available pool combinations"
+    for pool_name, pool in [
+        ('_COMPRESSION_POOL_0', _COMPRESSION_POOL_0),
+        ('_COMPRESSION_POOL_1', _COMPRESSION_POOL_1),
+        ('_COMPRESSION_POOL_2', _COMPRESSION_POOL_2),
+    ]:
+        assert len(pool) == 6, f"Expected 6 compressions in {pool_name}, got {len(pool)}"
+    for pool_name, pool in [
+        ('_POISSON_POOL_0', _POISSON_POOL_0),
+        ('_POISSON_POOL_1', _POISSON_POOL_1),
+        ('_POISSON_POOL_2', _POISSON_POOL_2),
+    ]:
+        assert len(pool) == 6, f"Expected 6 Poisson ratios in {pool_name}, got {len(pool)}"
+
+    # Check each pool has enough combinations for N_TASKS
+    for task_seed in [0, 10, 20]:
+        cp = get_compression_pool(task_seed)
+        pp = get_poisson_pool(task_seed)
+        max_tasks = (len(cp) * (len(cp) - 1) // 2) * (len(pp) * (len(pp) - 1) // 2)
+        assert N_TASKS <= max_tasks, (
+            f"N_TASKS={N_TASKS} too large for pool at task_seed={task_seed} "
+            f"(max {max_tasks} combinations)"
+        )
+
     assert LEARNING_RATE > 0, "Learning rate must be positive"
     assert VMIN < VMAX, "VMIN must be less than VMAX"
     assert N_STEPS > 0, "N_STEPS must be positive"

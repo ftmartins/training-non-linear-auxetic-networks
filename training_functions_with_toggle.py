@@ -158,7 +158,7 @@ def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_node
 
     traj = [np.copy(positions)]
 
-    for step in range(n_steps):
+    for step in range(1, n_steps):
         frac = step / (n_steps - 1)
         height_to_impose = initial_height - frac * (initial_height - target_height)
         y_top_new = y_bottom.mean() + height_to_impose

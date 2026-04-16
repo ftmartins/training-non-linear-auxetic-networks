@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import jax
 jax.config.update("jax_enable_x64", True)
 
-from config import BOUNDARY_MARGIN, FORCE_TYPE, N_STRAIN_STEPS, N_NODES
+from config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_strain_steps, get_n_nodes
 from network_utils import create_auxetic_network, get_square_boundary_nodes
 from elastic_network import ElasticNetwork
 from task_generator import generate_task_config
@@ -124,7 +124,7 @@ def load_network_topology(task_seed, realization_seed, data_dir):
             f"real {realization_seed}. Regenerating from packing seed."
         )
         network, boundary_dict = create_auxetic_network(
-            n_nodes=N_NODES,
+            n_nodes=get_n_nodes(task_seed),
             packing_seed=task_seed,
             boundary_margin=BOUNDARY_MARGIN,
         )
@@ -156,9 +156,12 @@ def compute_actuation_and_modes(
     task_seed,
     realization_seed,
     data_dir,
-    n_strain_steps=N_STRAIN_STEPS,
+    n_strain_steps=None,
     force_type=FORCE_TYPE,
 ):
+    if n_strain_steps is None:
+        n_strain_steps = get_n_strain_steps(task_seed)
+
     loss, stiffness_traj = load_trajectories(task_seed, realization_seed, data_dir)
     best_step = int(np.argmin(loss))
     best_stiffness = stiffness_traj[best_step]
@@ -465,10 +468,12 @@ def main():
         help="Number of modes used for correlation curves (default 10).",
     )
     parser.add_argument(
-        "--n-strain-steps", type=int, default=N_STRAIN_STEPS,
-        help=f"Quasistatic trajectory steps (default {N_STRAIN_STEPS} from config).",
+        "--n-strain-steps", type=int, default=None,
+        help="Quasistatic trajectory steps (default: get_n_strain_steps(task)).",
     )
     args = parser.parse_args()
+    if args.n_strain_steps is None:
+        args.n_strain_steps = get_n_strain_steps(args.task)
 
     task = args.task
     data_dir = Path(args.data_dir)
