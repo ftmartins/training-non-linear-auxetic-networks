@@ -7,8 +7,9 @@ initializations with proper seed management for reproducibility.
 
 import numpy as np
 from config import (
-    COMPRESSION_POOL, POISSON_POOL, N_TASKS, N_REALIZATIONS,
-    STIFFNESS_LOG_MIN, STIFFNESS_LOG_MAX
+    get_compression_pool, get_poisson_pool,
+    N_TASKS, N_REALIZATIONS,
+    STIFFNESS_LOG_MIN, STIFFNESS_LOG_MAX,
 )
 
 
@@ -32,18 +33,18 @@ def generate_task_config(task_seed):
     # Create random state for reproducibility
     rng = np.random.RandomState(task_seed)
 
-    # Select 2 compressions (without replacement)
+    # Select 2 compressions (without replacement) from the task-appropriate pool
     compression_strains = rng.choice(
-        COMPRESSION_POOL,
+        get_compression_pool(task_seed),
         size=2,
-        replace=False
+        replace=False,
     ).tolist()
 
-    # Select 2 Poisson ratios (without replacement)
+    # Select 2 Poisson ratios (without replacement) from the task-appropriate pool
     target_poisson_ratios = rng.choice(
-        POISSON_POOL,
+        get_poisson_pool(task_seed),
         size=2,
-        replace=False
+        replace=False,
     ).tolist()
 
     # Use task_seed as packing_seed (one unique network topology per task)

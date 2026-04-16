@@ -103,7 +103,7 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         reduction_ratio = initial_loss / min_loss
 
         # Check if 3+ orders of magnitude (1000×)
-        if reduction_ratio >= 1_000.0:
+        if reduction_ratio >= 1_000_000.0:
             # Create alternative completion marker
             mark_training_complete_small_loss(
                 task_seed, realization_seed,
@@ -317,6 +317,7 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
     # Save loss and stiffness trajectories as separate numpy files
     np.save(result_path / "loss_trajectory.npy", loss_array)
     np.save(result_path / "stiffness_trajectory.npy", stiffness_array)
+    np.save(result_path / "edges.npy", np.array(network.edges))
 
     # Save final network state
     network_dict = {

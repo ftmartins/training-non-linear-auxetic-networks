@@ -29,7 +29,7 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 sys.path.insert(0, str(Path(__file__).parent))
 
 from task_generator import generate_task_config
-from config import N_NODES, BOUNDARY_MARGIN, FORCE_TYPE, N_STRAIN_STEPS
+from config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_nodes, get_n_strain_steps
 from network_utils import create_auxetic_network, get_square_boundary_nodes
 from elastic_network import ElasticNetwork
 from training_functions_with_toggle import (
@@ -71,7 +71,7 @@ def load_network_topology(task_seed, realization_seed, data_dir):
     else:
         print(f"  WARNING: final_network.pkl missing — regenerating topology.")
         network, boundary_dict = create_auxetic_network(
-            n_nodes=N_NODES,
+            n_nodes=get_n_nodes(task_seed),
             packing_seed=task_seed,
             boundary_margin=BOUNDARY_MARGIN,
         )
@@ -83,7 +83,7 @@ def load_network_topology(task_seed, realization_seed, data_dir):
 def compute_cost_hessian_single_subtask(
     network, target_poisson, compression_strain,
     top_nodes, bottom_nodes, left_nodes, right_nodes,
-    n_strain_steps=N_STRAIN_STEPS, force_type='quadratic',
+    n_strain_steps=100, force_type='quadratic',
     k_eigs=20, hvp_epsilon=1e-4,
     # kept for backward compatibility but unused:
     epsilon=None, n_jobs=None,
@@ -170,11 +170,14 @@ def main():
     parser.add_argument('--hvp_epsilon',  type=float, default=1e-4)
     parser.add_argument('--k_eigs',       type=int,   default=20)
     parser.add_argument('--n_jobs',       type=int,   default=4)
-    parser.add_argument('--n_strain_steps', type=int, default=N_STRAIN_STEPS)
+    parser.add_argument('--n_strain_steps', type=int, default=None,
+                        help='Quasistatic steps; defaults to get_n_strain_steps(task).')
     parser.add_argument('--force_type',   type=str,   default=FORCE_TYPE)
     parser.add_argument('--overwrite',    action='store_true',
                         help='Recompute even if output file already exists.')
     args = parser.parse_args()
+    if args.n_strain_steps is None:
+        args.n_strain_steps = get_n_strain_steps(args.task)
 
     out_path = (
         Path(args.data_dir)
