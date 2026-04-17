@@ -349,6 +349,73 @@ def _susceptibility_components_per_edge(positions, network, boundary_dict):
     )
 
 
+def _force_from_susceptibility(pos, edges, stiff, nhats, s_vec):
+    """f = B_par^T (K_e * S): nodal force in 2D from edge susceptibility.
+
+    Implements B^T K_e S where B is the (E, 2N) parallel compatibility matrix.
+    For each edge e with nodes (i, j) and unit vector n̂_e:
+      f[j] += stiff[e]*s_vec[e]*n̂_e,   f[i] -= stiff[e]*s_vec[e]*n̂_e
+
+    Returns f of shape (2N,).
+    """
+    N = pos.shape[0]
+    ks = stiff * s_vec                                  # (E,)
+    force = np.zeros((N, 2))
+    np.add.at(force, edges[:, 1],  ks[:, None] * nhats)
+    np.add.at(force, edges[:, 0], -ks[:, None] * nhats)
+    return force.flatten()                              # (2N,)
+
+
+def _project_susceptibility_onto_modes(f, evecs, evals, edges, nhats, stiff, k, eps=1e-12):
+    """Steps 3 & 4 of summary_for_new_plot.txt.
+
+    Parameters
+    ----------
+    f      : (2N,)   force vector  f = B^T K_e S
+    evecs  : (2N, M) ALL non-trivial Hessian eigenvectors (orthonormal columns)
+    evals  : (M,)    corresponding eigenvalues
+    edges  : (E, 2)  edge connectivity
+    nhats  : (E, 2)  unit edge vectors (for S_comp reconstruction)
+    stiff  : (E,)    edge stiffnesses (for ||S_comp||_Ke^2 norm)
+    k      : int     number of modes to return
+    eps    : float   regulariser for near-zero eigenvalues
+
+    Returns
+    -------
+    a_norm : (k,) a_i / ||u_S||_H              (node-space, normalised, Step 3)
+    c_norm : (k,) c_i / ||S_comp||_Ke          (edge-space, normalised, Step 4)
+    a_raw  : (k,) a_i = u_i^T f = u_i^T H u_S  (raw node-space amplitudes)
+    c_raw  : (k,) c_i = proj[i] / sqrt(lambda_i) (raw edge-space amplitudes)
+    """
+    n_nodes = evecs.shape[0] // 2
+    safe_evals = np.maximum(evals, eps)
+
+    proj = evecs.T @ f                          # (M,) — u_i^T f for all M modes
+
+    # --- Step 3: node-space ---
+    # ||u_S||_H^2 = sum_i proj[i]^2 / lambda_i  (all M modes)
+    u_S_H_norm = np.sqrt(np.sum(proj**2 / safe_evals))
+    a_raw  = proj[:k]                           # (k,)
+    a_norm = a_raw / (u_S_H_norm + eps)         # (k,)
+
+    # --- Step 4: edge-space ---
+    # c_i = e_i^T K_e S = (B u_i)^T (K_e S) / sqrt(lambda_i) = proj[i] / sqrt(lambda_i)
+    c_raw = proj[:k] / np.sqrt(safe_evals[:k])  # (k,)
+
+    # Reconstruct u_S = H^{-1} f via spectral expansion (all M modes)
+    u_S_vec = evecs @ (proj / safe_evals)       # (2N,)
+    u_S_2d  = u_S_vec.reshape(n_nodes, 2)
+
+    # S_comp = B u_S: edge extensions of u_S displacement
+    du_S   = u_S_2d[edges[:, 1]] - u_S_2d[edges[:, 0]]   # (E, 2)
+    S_comp = np.einsum("ed,ed->e", nhats, du_S)            # (E,) — n̂_e · Delta u_S
+    S_comp_Ke_norm = np.sqrt(np.sum(stiff * S_comp**2) + eps)
+
+    c_norm = c_raw / S_comp_Ke_norm             # (k,)
+
+    return a_norm, c_norm, a_raw, c_raw
+
+
 def _pearson_batch(x, Y, eps=1e-12):
     xc = x - x.mean()
     Yc = Y - Y.mean(axis=0)
@@ -401,6 +468,11 @@ def compute_unified_mode_data(
     pearson_vals = np.full((T_sub, P, k_corr), np.nan)
     spearman_vals = np.full((T_sub, P, k_corr), np.nan)
 
+    susc_a_norm = np.zeros((T_sub, k), dtype=float)
+    susc_c_norm = np.zeros((T_sub, k), dtype=float)
+    susc_a_raw  = np.zeros((T_sub, k), dtype=float)
+    susc_c_raw  = np.zeros((T_sub, k), dtype=float)
+
     feat_acc = None
     n_feat_frames = 0
 
@@ -420,6 +492,14 @@ def compute_unified_mode_data(
         P_raw[ti] = s_tot_abs @ sigma
         norm_sigma = np.linalg.norm(sigma, axis=0)
         cosine[ti] = P_raw[ti] / (norm_s * norm_sigma + eps)
+
+        # --- Steps 3-4 from summary_for_new_plot.txt ---
+        f_tot = _force_from_susceptibility(pos_t, edges, stiff, edge_hat, s_tot_abs)
+        susc_a_norm[ti], susc_c_norm[ti], susc_a_raw[ti], susc_c_raw[ti] = \
+            _project_susceptibility_onto_modes(
+                f_tot, evecs_all[t], evals_all[t],
+                edges, edge_hat, stiff, k, eps=eps,
+            )
 
         sigma_c = sigma[:, :k_corr]
         for pi, thr in enumerate(thresholds):
@@ -500,6 +580,10 @@ def compute_unified_mode_data(
             "s_par", "s_perp", "s_eq", "s_tot",
             "stiffness", "strain", "stress", "hessian_evec",
         ],
+        "susc_a_norm": susc_a_norm,   # (T_sub, k) a_i/||u_S||_H  node-space normalised
+        "susc_c_norm": susc_c_norm,   # (T_sub, k) c_i/||S_comp||_Ke  edge-space normalised
+        "susc_a_raw":  susc_a_raw,    # (T_sub, k) a_i = u_i^T f  raw node-space amplitudes
+        "susc_c_raw":  susc_c_raw,    # (T_sub, k) c_i = a_i/sqrt(lambda_i) raw edge-space
     }
 
 
