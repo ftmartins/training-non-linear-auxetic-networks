@@ -342,10 +342,10 @@ def _susceptibility_components_per_edge(positions, network, boundary_dict):
     )
     s_par, s_perp, s_eq, s_tot = susceptibilities_from_jacobian(Hjac_parts)
     return (
-        np.abs(np.asarray(s_par, dtype=float)),
-        np.abs(np.asarray(s_perp, dtype=float)),
-        np.abs(np.asarray(s_eq, dtype=float)),
-        np.abs(np.asarray(s_tot, dtype=float)),
+        np.asarray(s_par, dtype=float),
+        np.asarray(s_perp, dtype=float),
+        np.asarray(s_eq, dtype=float),
+        np.asarray(s_tot, dtype=float),
     )
 
 
@@ -465,8 +465,10 @@ def compute_unified_mode_data(
 
     P_raw = np.zeros((T_sub, k), dtype=float)
     cosine = np.zeros((T_sub, k), dtype=float)
-    pearson_vals = np.full((T_sub, P, k_corr), np.nan)
-    spearman_vals = np.full((T_sub, P, k_corr), np.nan)
+    pearson_mode_strain_vals = np.full((T_sub, P, k_corr), np.nan)
+    spearman_mode_strain_vals = np.full((T_sub, P, k_corr), np.nan)
+    pearson_top_cost_evector_vals = np.full((T_sub, P), np.nan)
+    spearman_top_cost_evector_vals = np.full((T_sub, P), np.nan)
 
     susc_a_norm = np.zeros((T_sub, k), dtype=float)
     susc_c_norm = np.zeros((T_sub, k), dtype=float)
@@ -478,10 +480,10 @@ def compute_unified_mode_data(
 
     for ti, t in enumerate(t_indices):
         pos_t = np.asarray(traj[t], dtype=float)
-        s_par_abs, s_perp_abs, s_eq_abs, s_tot_abs = _susceptibility_components_per_edge(
+        s_par, s_perp, s_eq, s_tot = _susceptibility_components_per_edge(
             pos_t, result["network"], result["boundary_dict"]
         )
-        norm_s = float(np.linalg.norm(s_tot_abs))
+        norm_s = float(np.linalg.norm(s_tot))
 
         edge_hat, edge_len = _edge_geometry_from_positions(pos_t, edges, eps=eps)
 
@@ -489,12 +491,12 @@ def compute_unified_mode_data(
         dU = U[edges[:, 1]] - U[edges[:, 0]]
         sigma = np.abs(np.einsum("ed,edk->ek", edge_hat, dU))
 
-        P_raw[ti] = s_tot_abs @ sigma
+        P_raw[ti] = s_tot @ sigma
         norm_sigma = np.linalg.norm(sigma, axis=0)
         cosine[ti] = P_raw[ti] / (norm_s * norm_sigma + eps)
 
         # --- Steps 3-4 from summary_for_new_plot.txt ---
-        f_tot = _force_from_susceptibility(pos_t, edges, stiff, edge_hat, s_tot_abs)
+        f_tot = _force_from_susceptibility(pos_t, edges, stiff, edge_hat, s_tot)
         susc_a_norm[ti], susc_c_norm[ti], susc_a_raw[ti], susc_c_raw[ti] = \
             _project_susceptibility_onto_modes(
                 f_tot, evecs_all[t], evals_all[t],
@@ -502,42 +504,47 @@ def compute_unified_mode_data(
             )
 
         sigma_c = sigma[:, :k_corr]
+        abs_s_tot = np.abs(s_tot)
         for pi, thr in enumerate(thresholds):
-            cutoff = np.percentile(s_tot_abs, thr)
-            mask = s_tot_abs >= cutoff
+            cutoff = np.percentile(abs_s_tot, thr)
+            mask = abs_s_tot >= cutoff
             if mask.sum() < 3:
                 continue
-            s_m = s_tot_abs[mask]
+            s_m = abs_s_tot[mask]
             sig_m = sigma_c[mask]
             valid = np.std(sig_m, axis=0) > eps
-            if np.std(s_m) < eps or not valid.any():
+            if np.std(s_m) < eps:
                 continue
-            p_r = _pearson_batch(s_m, sig_m, eps=eps)
-            s_r = _spearman_batch(s_m, sig_m, eps=eps)
-            pearson_vals[ti, pi, valid] = p_r[valid]
-            spearman_vals[ti, pi, valid] = s_r[valid]
+            if valid.any():
+                p_r = _pearson_batch(s_m, sig_m, eps=eps)
+                s_r = _spearman_batch(s_m, sig_m, eps=eps)
+                pearson_mode_strain_vals[ti, pi, valid] = p_r[valid]
+                spearman_mode_strain_vals[ti, pi, valid] = s_r[valid]
+            h_m = np.abs(cost_hess_evec[mask])
+            if np.std(h_m) > eps:
+                pearson_top_cost_evector_vals[ti, pi] = _pearson_batch(s_m, h_m, eps=eps)
+                spearman_top_cost_evector_vals[ti, pi] = _spearman_batch(s_m, h_m, eps=eps)
 
-        strain_abs = np.abs((edge_len - restl) / (restl + eps))
-        stress_abs = np.abs(stiff * strain_abs)
+        strain = (edge_len - restl) / (restl + eps)
+        stress = stiff * strain
         assert cost_hess_evec is not None, "Cost Hessian eigenvector missing from subtask results"
-        hess_edge_mode = cost_hess_evec                         # (n_edges,), already |·|
 
         if feat_acc is None:
             feat_acc = {k_: np.zeros_like(v) for k_, v in [
-                ("s_par", s_par_abs), ("s_perp", s_perp_abs),
-                ("s_eq", s_eq_abs), ("s_tot", s_tot_abs),
-                ("stiffness", stiff), ("strain", strain_abs),
-                ("stress", stress_abs), ("hessian_evec", hess_edge_mode),
+                ("s_par", s_par), ("s_perp", s_perp),
+                ("s_eq", s_eq), ("s_tot", s_tot),
+                ("stiffness", stiff), ("strain", strain),
+                ("stress", stress), ("hessian_evec", cost_hess_evec),
             ]}
 
-        feat_acc["s_par"] += s_par_abs
-        feat_acc["s_perp"] += s_perp_abs
-        feat_acc["s_eq"] += s_eq_abs
-        feat_acc["s_tot"] += s_tot_abs
+        feat_acc["s_par"] += s_par
+        feat_acc["s_perp"] += s_perp
+        feat_acc["s_eq"] += s_eq
+        feat_acc["s_tot"] += s_tot
         feat_acc["stiffness"] += stiff
-        feat_acc["strain"] += strain_abs
-        feat_acc["stress"] += stress_abs
-        feat_acc["hessian_evec"] += hess_edge_mode
+        feat_acc["strain"] += strain
+        feat_acc["stress"] += stress
+        feat_acc["hessian_evec"] += cost_hess_evec
         n_feat_frames += 1
 
     row_sum = P_raw.sum(axis=1, keepdims=True)
@@ -565,15 +572,16 @@ def compute_unified_mode_data(
         "eigenvalues": evals_all[t_indices, :k],
         "n_modes": k,
         "compression_strain": float(subtask["compression_strain"]),
-        "weighted_raw": P_raw,
-        "weighted_norm": P_norm,
-        "cosine_raw": cosine,
         "selected_modes_nontrivial": np.arange(k, dtype=int),
         "thresholds": thresholds,
-        "pearson": pearson_vals,
-        "spearman": spearman_vals,
-        "pearson_tmean": np.nanmean(pearson_vals, axis=0),
-        "spearman_tmean": np.nanmean(spearman_vals, axis=0),
+        "pearson_mode_strain": pearson_mode_strain_vals,
+        "spearman_mode_strain": spearman_mode_strain_vals,
+        "pearson_mode_strain_tmean": np.nanmean(pearson_mode_strain_vals, axis=0),
+        "spearman_mode_strain_tmean": np.nanmean(spearman_mode_strain_vals, axis=0),
+        "pearson_top_cost_evector": pearson_top_cost_evector_vals,    # (T_sub, P)
+        "spearman_top_cost_evector": spearman_top_cost_evector_vals,  # (T_sub, P)
+        "pearson_top_cost_evector_tmean": np.nanmean(pearson_top_cost_evector_vals, axis=0),   # (P,)
+        "spearman_top_cost_evector_tmean": np.nanmean(spearman_top_cost_evector_vals, axis=0), # (P,)
         "n_corr_modes": k_corr,
         "analysis9_feature_vectors": feat_vec,
         "analysis9_feature_labels": [
