@@ -8,10 +8,10 @@ initializations with proper seed management for reproducibility.
 import numpy as np
 from config import (
     get_compression_pool, get_poisson_pool,
-    N_TASKS, N_REALIZATIONS,
     STIFFNESS_LOG_MIN, STIFFNESS_LOG_MAX,
 )
-
+N_TASKS = 20
+N_REALIZATIONS = 10
 
 def generate_task_config(task_seed):
     """
@@ -58,7 +58,7 @@ def generate_task_config(task_seed):
     }
 
 
-def generate_realization_stiffnesses(realization_seed, n_edges):
+def generate_realization_stiffnesses(task_seed, realization_seed, n_edges):
     """
     Generate random initial stiffnesses from log-uniform distribution.
 
@@ -69,14 +69,22 @@ def generate_realization_stiffnesses(realization_seed, n_edges):
     Returns:
         stiffnesses: Array of shape (n_edges,) with log-uniform values
     """
-    rng = np.random.RandomState(realization_seed)
-    log_stiffnesses = rng.uniform(
-        STIFFNESS_LOG_MIN,
-        STIFFNESS_LOG_MAX,
-        size=n_edges
-    )
-    return np.exp(log_stiffnesses)
-
+    if task_seed < 20:
+        rng = np.random.RandomState(realization_seed)
+        log_stiffnesses = rng.uniform(
+            STIFFNESS_LOG_MIN,
+            STIFFNESS_LOG_MAX,
+            size=n_edges
+            )
+        return np.exp(log_stiffnesses)
+    else:
+        rng = np.random.RandomState(realization_seed)
+        stiffnesses = rng.uniform(
+            np.exp(STIFFNESS_LOG_MIN),
+            np.exp(STIFFNESS_LOG_MAX),
+            size=n_edges
+            )
+        return stiffnesses
 
 def get_all_task_configs(n_tasks=N_TASKS):
     """

@@ -22,8 +22,8 @@ FORCE_TYPE = 'quadratic'  # Force law: 'quadratic' or 'quartic'
 # Task Configuration
 # ============================================================================
 
-N_TASKS = 10  # Number of distinct training tasks
-N_REALIZATIONS = 20  # Number of realizations per task
+N_TASKS = 30  # Number of distinct training tasks
+N_REALIZATIONS = 10  # Number of realizations per task
 
 # ---------------------------------------------------------------------------
 # Pool definitions — indexed by task range
@@ -97,7 +97,7 @@ def get_n_nodes(task_seed: int) -> int:
 LEARNING_RATE = 1e-3
 N_STEPS = 10_000  # Number of training iterations
 # Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
-N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory (tasks < 20)
+N_STRAIN_STEPS = 200  # Number of steps in quasistatic trajectory (tasks < 20)
 FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
 VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
@@ -139,7 +139,7 @@ CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new/'
 # Network Creation Parameters
 # ============================================================================
 
-BOUNDARY_MARGIN = 0.05  # Margin for identifying boundary nodes
+BOUNDARY_MARGIN = 0.02  # Margin for identifying boundary nodes
 PACKING_PARAMS = {
     'central': 0.0005,
     'drag': 0.05,

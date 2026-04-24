@@ -30,7 +30,6 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
-
 # ============================================================================
 # JAX ELASTIC ENERGY
 # ============================================================================
@@ -186,7 +185,7 @@ def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_node
             np.array(network.rest_lengths, dtype=np.float64),
             np.array(network.stiffnesses, dtype=np.float64),
             1e-2,  # deltaT for trajectory (smaller for accuracy)
-            500_000,
+            1_000_000,
             tol,
             constrained_idx_dof,
             1 if force_type == 'quartic' else 0
@@ -257,7 +256,7 @@ def compute_quasistatic_trajectory_full_cycle(network, amp, top_nodes, bottom_no
             np.array(network.rest_lengths, dtype=np.float64),
             np.array(network.stiffnesses, dtype=np.float64),
             1e-3,
-            500_000,
+            800_000,
             tol,
             constrained_idx_dof,
             1 if force_type == 'quartic' else 0
@@ -1114,3 +1113,4 @@ def finish_training_GD_auxetic_batch_jax(
     trained_network.stiffnesses = np.array(network.stiffnesses)
 
     return history, trained_network
+

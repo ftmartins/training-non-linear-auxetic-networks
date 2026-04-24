@@ -102,7 +102,13 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
 
         # 1. Generate task configuration (or load from checkpoint)
         if checkpoint is not None:
-            task_config = checkpoint['task_config']
+            print(checkpoint)
+            try:
+                task_config = checkpoint['task_config']
+                assert task_config is not None
+            except:
+                task_config = generate_task_config(task_seed)
+                print('Regenerated task config due to checkpoint not having task config')
             if verbose:
                 print("Step 1: Loaded task configuration from checkpoint...")
         else:
@@ -146,6 +152,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 print("Step 3: Initializing random stiffnesses...")
             n_edges = len(network.edges)
             initial_stiffnesses = generate_realization_stiffnesses(
+                task_seed, 
                 realization_seed,
                 n_edges
             )
@@ -223,7 +230,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
             realization_seed=realization_seed,
             history=history,
             network=trained_network,
-            task_config=task_config
+            task_config=generate_task_config(task_seed)
         )
 
         # Remove checkpoint file after successful completion

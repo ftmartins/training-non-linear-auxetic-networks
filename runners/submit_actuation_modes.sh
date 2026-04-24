@@ -20,7 +20,7 @@
 #   <OUTPUT_DIR>/task_<NN>/all_mode_data.pkl  – overlap, correlation, feature vectors
 #
 # ============================================================================
-#SBATCH -t 2-00:00:00
+#SBATCH -t 3-00:00:00
 #SBATCH --qos=low
 #SBATCH --partition=low
 #SBATCH --nodes=1
@@ -53,13 +53,13 @@ echo "Task seed: ${TASK_SEED}"
 echo ""
 
 DATA_DIR=/data2/shared/felipetm/auxetic_networks/ensemble_training_new/results_new/
-OUTPUT_DIR=${SLURM_SUBMIT_DIR}/../figure_data/
+OUTPUT_DIR=/data2/shared/felipetm/auxetic_networks/ensemble_training_new/results_new/figure_data/
 
 python ../analysis/compute_actuation_modes.py \
     --task           ${TASK_SEED} \
     --data-dir       ${DATA_DIR} \
     --output-dir     ${OUTPUT_DIR} \
-    --loss-threshold 0.01 \
+    --loss-threshold 0.0001 \
     --traj-subsample 4 \
     --n-modes        25 \
     --n-corr-modes   10

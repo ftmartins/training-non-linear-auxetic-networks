@@ -24,15 +24,19 @@ import sys
 import time
 import numpy as np
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+import os
+# Add necessary paths
+sys.path.append('../src')
+sys.path.append(str(Path(__file__).parent.parent / 'instruments'))
+sys.path.append(str(Path(__file__).parent.parent / 'production'))
+sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'physical_learning'))
 
 # Import shared config (not validate_config)
 from config import (
     get_n_nodes, FORCE_TYPE, BOUNDARY_MARGIN,
     FORCE_TOL
 )
-VMIN = 1e-3
+VMIN = 1e-2
 VMAX = 1e2
 
 
@@ -81,8 +85,8 @@ try:
     )
     TRAINING_FUNCTIONS_AVAILABLE = True
 except ImportError as e:
-    print(f"Warning: Could not import training functions: {e}")
-    TRAINING_FUNCTIONS_AVAILABLE = False
+   print(f"Warning: Could not import training functions: {e}")
+   TRAINING_FUNCTIONS_AVAILABLE = False
 
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
@@ -187,7 +191,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         elif recovery_mode == 'from_scratch':
             n_edges = len(network.edges)
-            initial_stiffnesses = _uniform_stiffnesses(realization_seed, n_edges)
+            initial_stiffnesses = generate_realization_stiffnesses(task_id, realization_seed, n_edges)
             network.stiffnesses = initial_stiffnesses
             network.save_original_parameters()
             print(f"  Restarting from scratch with reduced LR "
@@ -213,7 +217,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 if verbose:
                     print("Step 3: Initializing random stiffnesses...")
                 n_edges = len(network.edges)
-                initial_stiffnesses = _uniform_stiffnesses(realization_seed, n_edges)
+                initial_stiffnesses = generate_realization_stiffnesses(task_id, realization_seed, n_edges)
                 network.stiffnesses = initial_stiffnesses
                 network.save_original_parameters()
                 print(f"  Stiffnesses initialized: range "
@@ -280,7 +284,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             print(f"Restarting from scratch with LR scale={LR_NAN_REDUCTION}.")
             print(f"{'!'*60}\n")
             n_edges = len(network.edges)
-            initial_stiffnesses = _uniform_stiffnesses(realization_seed, n_edges)
+            initial_stiffnesses = _uniform_stiffnesses(task_id, realization_seed, n_edges)
             trained_network.stiffnesses = initial_stiffnesses
             trained_network.save_original_parameters()
             history = {}
