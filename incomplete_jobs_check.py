@@ -1,6 +1,8 @@
 from checkpoint_manager import get_incomplete_jobs, get_complete_jobs
 from config import N_TASKS, N_REALIZATIONS
 
+data_dir = '/data2/shared/felipetm/auxetic_networks/ensemble_training_new/results_new/'
+
 complete = get_complete_jobs()
 incomplete = get_incomplete_jobs()
 total = N_TASKS * N_REALIZATIONS

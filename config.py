@@ -22,7 +22,7 @@ FORCE_TYPE = 'quadratic'  # Force law: 'quadratic' or 'quartic'
 # Task Configuration
 # ============================================================================
 
-N_TASKS = 20  # Number of distinct training tasks
+N_TASKS = 30  # Number of distinct training tasks
 N_REALIZATIONS = 10  # Number of realizations per task
 
 # ---------------------------------------------------------------------------
@@ -95,9 +95,9 @@ def get_n_nodes(task_seed: int) -> int:
 # ============================================================================
 
 LEARNING_RATE = 1e-3
-N_STEPS = 3_000  # Number of training iterations
+N_STEPS = 10_000  # Number of training iterations
 # Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
-N_STRAIN_STEPS = 100  # Number of steps in quasistatic trajectory (tasks < 20)
+N_STRAIN_STEPS = 200  # Number of steps in quasistatic trajectory (tasks < 20)
 FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
 VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value

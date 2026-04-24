@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH -t 5-00:00:00
-#SBATCH --qos=low
-#SBATCH --partition=low
+#SBATCH -t 2-00:00:00
+#SBATCH --qos=liu
+#SBATCH --partition=liu_compute
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=5gb
-#SBATCH --array=0-200%20
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=20gb
+#SBATCH --array=400-600%80
 #SBATCH --begin=now
 #SBATCH --job-name=auxetic_ensemble
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/auxetic_training_%A_%a.out

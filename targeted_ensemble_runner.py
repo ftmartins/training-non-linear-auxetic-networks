@@ -35,7 +35,7 @@ from config import (
     N_NODES, FORCE_TYPE, BOUNDARY_MARGIN,
     FORCE_TOL
 )
-VMIN = 1e-3
+VMIN = 1e-2
 VMAX = 1e2
 
 LEARNING_RATE = 1e-3
@@ -185,7 +185,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         elif recovery_mode == 'from_scratch':
             n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+            initial_stiffnesses = generate_realization_stiffnesses(task_seed, realization_seed, n_edges)
             network.stiffnesses = initial_stiffnesses
             network.save_original_parameters()
             print(f"  Restarting from scratch with reduced LR "
@@ -211,7 +211,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 if verbose:
                     print("Step 3: Initializing random stiffnesses...")
                 n_edges = len(network.edges)
-                initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+                initial_stiffnesses = generate_realization_stiffnesses(task_seed, realization_seed, n_edges)
                 network.stiffnesses = initial_stiffnesses
                 network.save_original_parameters()
                 print(f"  Stiffnesses initialized: range "
@@ -278,7 +278,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             print(f"Restarting from scratch with LR scale={LR_NAN_REDUCTION}.")
             print(f"{'!'*60}\n")
             n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+            initial_stiffnesses = generate_realization_stiffnesses(task_seed, realization_seed, n_edges)
             trained_network.stiffnesses = initial_stiffnesses
             trained_network.save_original_parameters()
             history = {}
