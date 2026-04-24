@@ -27,10 +27,7 @@ import time
 import numpy as np
 from pathlib import Path
 
-# Add necessary paths
-sys.path.append(str(Path(__file__).parent.parent / 'instruments'))
-sys.path.append(str(Path(__file__).parent.parent / 'production'))
-sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'physical_learning'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 # Import shared config
 from config import (

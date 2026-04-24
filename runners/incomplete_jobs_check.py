@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
 from checkpoint_manager import get_incomplete_jobs, get_complete_jobs
 from config import N_TASKS, N_REALIZATIONS
 

@@ -5,12 +5,20 @@ This module provides all necessary functions for training elastic networks
 with optimized Cython FIRE minimization.
 """
 
+import sys
 import warnings
 import numpy as np
 import copy
 import time
 from tqdm import tqdm
 from joblib import Parallel, delayed
+from pathlib import Path
+
+# Root dir needed for compiled Cython extension (.so files live at project root)
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 from fire_minimize_memview_cy import fire_minimize_dof
 from checkpoint_manager import (
     save_training_results,

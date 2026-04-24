@@ -24,7 +24,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=12gb
+#SBATCH --mem=8gb
 #SBATCH --job-name=cost_hessian
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/cost_hessian_%A_%a.out
 #SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/cost_hessian_%A_%a.err
@@ -71,4 +71,3 @@ echo "End time:  $(date)"
 echo "=========================================="
 
 exit ${EXIT_CODE}
-
