@@ -2,12 +2,21 @@
 """
 Allosteric network trainer — single-network script for SLURM array submission.
 
-Adapts EnsembleGenerator030726.ipynb with:
-  - Uniformly distributed initial stiffnesses in [1e-3, 1e1]
-  - No stiffness rescaling; clip to [1e-3, 1e1] instead
-  - Auto-calibrated learning rate (mean log10 |delta_K| in [-4, -3])
-  - Post-training quality check with one automatic retry at 2x steps
-  - Self-resubmission via sbatch if training fails after retry
+Dimensions:
+  geometry    — controls network topology (random node perturbations)
+  task        — controls training targets (soi1 / soi2 → strain pairs)
+  realization — controls initial stiffnesses (IID uniform draw)
+
+Output layout:
+  <output_dir>/geometry_<gid>/task_<tid>/realization_<rid>/
+    tasks.txt          — geometry_seed, strain_output2, strain_output
+    stiffnesses.npy
+    mse1.npy
+    mse2.npy
+
+Retry logic: attempt 1 runs N_TRAINING_STEPS; on failure attempt 2 runs
+2× steps with a recalibrated LR. If both fail the job resubmits with a
+fresh realization index (rid + N_REALIZATIONS).
 """
 
 import argparse
@@ -21,23 +30,43 @@ import textwrap
 import numpy as np
 from scipy.optimize import fsolve
 
-# functions.py lives next to the source notebook
-sys.path.append('../src/')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'data', 'ToFelipe0422'))
-import functions as f  # noqa: E402  (LAMMPS helper; writes bond_coeffs_*.in to cwd)
+import functions as f  # noqa: E402
 
-K_MIN = 1e-3
-K_MAX = 1e1
-ETA = 1.0
+# ── Constants ─────────────────────────────────────────────────────────────────
+K_MIN    = 1e-3
+K_MAX    = 1e1
+ETA      = 1.0
 K_OUTPUT = 1e3
-LR_TARGET_LOG = -3.5   # midpoint of [-4, -3]
+LR_TARGET_LOG = -3.5   # target mean(log10|delta_K|)
+
+N_GEOMETRIES   = 5
+N_TASKS        = 5
+N_REALIZATIONS = 5
+N_TRAINING_STEPS = 100_000
+
+# Non-overlapping seed namespaces
+_GEOMETRY_BASE    = 1_000_000
+_TASK_BASE        = 2_000_000
+_REALIZATION_BASE = 3_000_000
 
 
-# ---------------------------------------------------------------------------
-# Network creation  (verbatim from notebook cell 1)
-# ---------------------------------------------------------------------------
+# ── Seed helpers ──────────────────────────────────────────────────────────────
+
+def geometry_seed(gid: int) -> int:
+    return _GEOMETRY_BASE + gid
+
+def task_rng(tid: int) -> np.random.RandomState:
+    return np.random.RandomState(_TASK_BASE + tid)
+
+def realization_rng(rid: int) -> np.random.RandomState:
+    return np.random.RandomState(_REALIZATION_BASE + rid)
+
+
+# ── Network creation (verbatim from notebook) ─────────────────────────────────
 
 def create_network(L, p, R):
+    """Geometry seeded externally via random.seed() before this call."""
     a1 = np.array([1.0, 0.0])
     a2 = np.array([0.5, np.sqrt(3) / 2.0])
     moves = np.array([[(random.random() - 0.5) * 2 * p for _ in range(2)]
@@ -58,8 +87,7 @@ def create_network(L, p, R):
         for j in range(i):
             if np.linalg.norm(nodes[i] - nodes[j]) < R:
                 row = np.zeros(len(nodes))
-                row[j] = 1
-                row[i] = -1
+                row[j] = 1; row[i] = -1
                 if len(incidence_matrix) == 0:
                     incidence_matrix = row
                 else:
@@ -114,8 +142,7 @@ def create_network(L, p, R):
     nodesnew = np.vstack((nodesnew, nodes[in_node_2]))
     nodesnew = np.vstack((nodesnew, nodes[out_node_1]))
     nodesnew = np.vstack((nodesnew, nodes[out_node_2]))
-    rest = [i for i in range(len(nodes)) if i not in special]
-    for i in rest:
+    for i in [i for i in range(len(nodes)) if i not in special]:
         nodesnew = np.vstack((nodesnew, nodes[i]))
     nodes = nodesnew
 
@@ -124,24 +151,19 @@ def create_network(L, p, R):
         for j in range(i):
             if np.linalg.norm(nodes[i] - nodes[j]) < R:
                 row = np.zeros(len(nodes))
-                row[j] = 1
-                row[i] = -1
+                row[j] = 1; row[i] = -1
                 if len(incidence_matrix) == 0:
                     incidence_matrix = row
                 else:
                     incidence_matrix = np.vstack((incidence_matrix, row))
 
-    # remove edge between input nodes
     incidence_matrix = np.delete(incidence_matrix, 0, axis=0)
-
-    eq_lengths = np.linalg.norm(incidence_matrix @ nodes, axis=1)
+    eq_lengths  = np.linalg.norm(incidence_matrix @ nodes, axis=1)
     stiffnesses = np.ones(len(incidence_matrix))
     return nodes, incidence_matrix, eq_lengths, stiffnesses
 
 
-# ---------------------------------------------------------------------------
-# Learning rule  (modified: clip instead of rescale, returns delta_K)
-# ---------------------------------------------------------------------------
+# ── Learning rule ─────────────────────────────────────────────────────────────
 
 def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
                     stiffnesses, incidence_matrix, eta, learning_rate):
@@ -154,13 +176,11 @@ def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
     return stiffnesses, mse, delta_K
 
 
-# ---------------------------------------------------------------------------
-# Learning rate calibration (called once per training attempt)
-# ---------------------------------------------------------------------------
+# ── Learning-rate calibration ─────────────────────────────────────────────────
 
 def calibrate_learning_rate(nodes, incidence_matrix, eq_lengths, stiffnesses,
                              eta, tod, dx, nsteps):
-    """Run one LAMMPS step with lr=1 and scale so mean(log10|delta_K|) = LR_TARGET_LOG."""
+    """One LAMMPS step at lr=1; scale so mean(log10|delta_K|) = LR_TARGET_LOG."""
     f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses)
     nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
                                   dx=dx, nsteps=nsteps)[nsteps - 1]
@@ -180,33 +200,23 @@ def calibrate_learning_rate(nodes, incidence_matrix, eq_lengths, stiffnesses,
     base = (1.0 / eta) * stiffnesses * factors
     mask = base != 0
     if not np.any(mask):
-        print("  [calibrate] All delta_K are zero; defaulting lr=1e-3")
+        print("  [calibrate] All delta_K zero; defaulting lr=1e-3")
         return 1e-3
 
     base_log_mean = np.mean(np.log10(np.abs(base[mask])))
     lr = float(10 ** (LR_TARGET_LOG - base_log_mean))
-    print(f"  [calibrate] base_log_mean={base_log_mean:.3f} → lr={lr:.3e} "
-          f"(target log10|delta_K|={LR_TARGET_LOG})")
+    print(f"  [calibrate] base_log_mean={base_log_mean:.3f} → lr={lr:.3e}")
     return lr
 
 
-# ---------------------------------------------------------------------------
-# Core training loop for one attempt
-# ---------------------------------------------------------------------------
+# ── Core training loop ────────────────────────────────────────────────────────
 
 def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                        learning_rate, tod, tod2, dinputdistance, dinputdistance2,
-                       nsteps, nsteps2, n_steps, output_path, network_id, seed,
+                       nsteps, nsteps2, n_steps, output_path,
                        msearray=None, msearray2=None, step_offset=0):
-    """
-    Run training loop for n_steps steps.
-    Continues from existing mse arrays if provided (for retry attempts).
-    Returns (msearray1, msearray2, stiffnesses).
-    """
-    if msearray is None:
-        msearray = np.array([])
-    if msearray2 is None:
-        msearray2 = np.array([])
+    if msearray  is None: msearray  = np.array([])
+    if msearray2 is None: msearray2 = np.array([])
 
     dx  = dinputdistance  / nsteps
     dx2 = dinputdistance2 / nsteps2
@@ -246,7 +256,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         msearray2 = np.append(msearray2, mse2)
 
         global_step = step_offset + j + 1
-        if global_step % 100 == 0:
+        if global_step % 500 == 0:
             print(f"  step {global_step}: MSE1={mse:.4e}  MSE2={mse2:.4e}")
             np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
             np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
@@ -259,12 +269,9 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
     return msearray, msearray2, stiffnesses
 
 
-# ---------------------------------------------------------------------------
-# Success check
-# ---------------------------------------------------------------------------
+# ── Success check ─────────────────────────────────────────────────────────────
 
 def check_success(msearray1, msearray2):
-    """True if combined loss dropped by at least 2 orders of magnitude."""
     if len(msearray1) == 0 or len(msearray2) == 0:
         return False
     combined = (msearray1 + msearray2) / 2.0
@@ -274,14 +281,11 @@ def check_success(msearray1, msearray2):
     return ratio < 0.01
 
 
-# ---------------------------------------------------------------------------
-# Resubmission via sbatch with a new seed
-# ---------------------------------------------------------------------------
+# ── Resubmission with a fresh realization ─────────────────────────────────────
 
-def resubmit_new_seed(network_id, seed, training_steps, output_dir, log_dir,
-                      conda_env='auxetic_nets'):
-    rng = np.random.default_rng(seed)
-    new_seed = int(rng.integers(2 ** 31))
+def resubmit_new_realization(gid, tid, rid, training_steps, output_dir, log_dir,
+                              conda_env='auxetic_nets'):
+    new_rid = rid + N_REALIZATIONS   # step outside the normal index range
     script_path = os.path.abspath(__file__)
 
     script = textwrap.dedent(f"""\
@@ -293,21 +297,22 @@ def resubmit_new_seed(network_id, seed, training_steps, output_dir, log_dir,
         #SBATCH --ntasks=1
         #SBATCH --cpus-per-task=2
         #SBATCH --mem=4gb
-        #SBATCH --job-name=allosteric_{network_id}
-        #SBATCH --output={log_dir}/allosteric_{network_id}_%j.out
-        #SBATCH --error={log_dir}/allosteric_{network_id}_%j.err
+        #SBATCH --job-name=allosteric_g{gid}t{tid}r{new_rid}
+        #SBATCH --output={log_dir}/allosteric_g{gid}t{tid}r{new_rid}_%j.out
+        #SBATCH --error={log_dir}/allosteric_g{gid}t{tid}r{new_rid}_%j.err
 
         eval "$(conda shell.bash hook)"
         conda activate {conda_env}
 
         python {script_path} \\
-            --network-id {network_id} \\
-            --seed {new_seed} \\
+            --geometry-id    {gid} \\
+            --task-id        {tid} \\
+            --realization-id {new_rid} \\
             --training-steps {training_steps} \\
-            --output-dir {output_dir}
+            --output-dir     {output_dir}
     """)
 
-    tmp = f"/tmp/allosteric_resubmit_{network_id}_{new_seed}.sh"
+    tmp = f"/tmp/allosteric_resubmit_g{gid}t{tid}r{new_rid}.sh"
     with open(tmp, 'w') as fh:
         fh.write(script)
 
@@ -315,58 +320,58 @@ def resubmit_new_seed(network_id, seed, training_steps, output_dir, log_dir,
     os.remove(tmp)
 
     if result.returncode == 0:
-        print(f"  Resubmitted net {network_id} with new seed {new_seed}: "
+        print(f"  Resubmitted g{gid}/t{tid} with new realization {new_rid}: "
               f"{result.stdout.strip()}")
     else:
         print(f"  sbatch failed: {result.stderr.strip()}")
-    return new_seed
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Train one allosteric network and save results.')
-    parser.add_argument('--network-id',    type=int, required=True)
-    parser.add_argument('--seed',          type=int, required=True)
-    parser.add_argument('--training-steps', type=int, default=10000)
-    parser.add_argument('--output-dir',    type=str,
+        description='Train one allosteric network (geometry × task × realization).')
+    parser.add_argument('--geometry-id',    type=int, required=True,
+                        help=f'Geometry index (0 to {N_GEOMETRIES-1})')
+    parser.add_argument('--task-id',        type=int, required=True,
+                        help=f'Task index (0 to {N_TASKS-1})')
+    parser.add_argument('--realization-id', type=int, required=True,
+                        help=f'Realization index (0 to {N_REALIZATIONS-1})')
+    parser.add_argument('--training-steps', type=int, default=N_TRAINING_STEPS)
+    parser.add_argument('--output-dir',     type=str,
                         default='/data2/shared/felipetm/allosteric_nets')
     args = parser.parse_args()
 
-    network_id    = args.network_id
-    seed          = args.seed
+    gid = args.geometry_id
+    tid = args.task_id
+    rid = args.realization_id
     training_steps = args.training_steps
-    output_dir    = args.output_dir
+    output_dir     = args.output_dir
 
     log_dir = '/home1/felipetm/auxetic_networks/ensemble_training/Logs'
 
-    print(f"=== Allosteric trainer: net {network_id}, seed {seed} ===")
+    print(f"=== Allosteric trainer: geometry={gid}, task={tid}, realization={rid} ===")
 
-    # Per-job working directory so parallel LAMMPS jobs don't share temp files
-    work_dir = f"/tmp/allosteric_{network_id}_{seed}_{os.getpid()}"
+    # Per-job temp dir so parallel LAMMPS jobs don't share files
+    work_dir = f"/tmp/allosteric_g{gid}_t{tid}_r{rid}_{os.getpid()}"
     os.makedirs(work_dir, exist_ok=True)
     original_dir = os.getcwd()
     os.chdir(work_dir)
 
-    # Output directory for this run
-    output_path = os.path.join(output_dir, f'net_{network_id}_seed_{seed}')
+    # Output subfolder
+    output_path = os.path.join(output_dir,
+                               f'geometry_{gid}', f'task_{tid}', f'realization_{rid}')
     os.makedirs(output_path, exist_ok=True)
 
     try:
-        # Seed both RNGs before network creation
-        random.seed(seed)
-        np.random.seed(seed)
-
+        # ── Build geometry ────────────────────────────────────────────────────
+        random.seed(geometry_seed(gid))
         nodes, incidence_matrix, eq_lengths, _ = create_network(10, 0.15, 1.6)
 
-        # Uniform stiffness initialisation (NOT all-ones, NOT log-uniform)
-        stiffnesses = np.random.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
-
-        soi1 = random.randint(0, 10)
-        soi2 = random.randint(0, 10)
+        # ── Draw task (soi1, soi2) ────────────────────────────────────────────
+        trng = task_rng(tid)
+        soi1 = int(trng.randint(0, 11))   # inclusive [0, 10]
+        soi2 = int(trng.randint(0, 11))
 
         strain_input   = 1.0
         strain_input2  = 0.5
@@ -374,7 +379,12 @@ def main():
         strain_output2 = -0.1 * soi1
 
         np.savetxt(os.path.join(output_path, 'tasks.txt'),
-                   [seed, strain_output2, strain_output])
+                   [geometry_seed(gid), strain_output2, strain_output])
+
+        # Save network structure (shared across all realizations of this geometry/task)
+        np.save(os.path.join(output_path, 'nodes.npy'),             nodes)
+        np.save(os.path.join(output_path, 'incidence_matrix.npy'),  incidence_matrix)
+        np.save(os.path.join(output_path, 'eq_lengths.npy'),        eq_lengths)
 
         tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
         tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
@@ -387,34 +397,36 @@ def main():
         dx  = dinputdistance  / nsteps
         dx2 = dinputdistance2 / nsteps2
 
-        # ------------------------------------------------------------------
-        # Attempt 1
-        # ------------------------------------------------------------------
+        # ── Draw initial stiffnesses ──────────────────────────────────────────
+        rrng = realization_rng(rid)
+        stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
+
+        print(f"  Geometry seed : {geometry_seed(gid)}")
+        print(f"  Task          : soi1={soi1}, soi2={soi2}  "
+              f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
+        print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
+        print(f"  Training steps: {training_steps:,}")
+
+        # ── Attempt 1 ─────────────────────────────────────────────────────────
         print("\n--- Attempt 1 ---")
-        print("  Calibrating learning rate...")
         lr = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
                                      stiffnesses.copy(), ETA, tod, dx, nsteps)
-
         msearray, msearray2, stiffnesses = _run_training_loop(
             nodes, incidence_matrix, eq_lengths, stiffnesses,
             lr, tod, tod2, dinputdistance, dinputdistance2,
-            nsteps, nsteps2, training_steps, output_path, network_id, seed)
+            nsteps, nsteps2, training_steps, output_path)
 
         if check_success(msearray, msearray2):
             print("\nAttempt 1 succeeded.")
         else:
-            # ------------------------------------------------------------------
-            # Attempt 2: continue from current stiffnesses, 2× steps
-            # ------------------------------------------------------------------
+            # ── Attempt 2: 2× steps, recalibrated LR ─────────────────────────
             print("\n--- Attempt 2 (2× steps, recalibrated LR) ---")
-            print("  Calibrating learning rate with evolved stiffnesses...")
             lr2 = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
                                           stiffnesses.copy(), ETA, tod, dx, nsteps)
-
             msearray, msearray2, stiffnesses = _run_training_loop(
                 nodes, incidence_matrix, eq_lengths, stiffnesses,
                 lr2, tod, tod2, dinputdistance, dinputdistance2,
-                nsteps, nsteps2, 2 * training_steps, output_path, network_id, seed,
+                nsteps, nsteps2, 2 * training_steps, output_path,
                 msearray=msearray, msearray2=msearray2,
                 step_offset=len(msearray))
 
@@ -424,11 +436,11 @@ def main():
                 print("\nBoth attempts failed. Deleting output and resubmitting.")
                 os.chdir(original_dir)
                 shutil.rmtree(output_path, ignore_errors=True)
-                resubmit_new_seed(network_id, seed, training_steps,
-                                  output_dir, log_dir)
+                resubmit_new_realization(gid, tid, rid, training_steps,
+                                         output_dir, log_dir)
                 return
 
-        # Final save
+        # ── Final save ────────────────────────────────────────────────────────
         np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
         np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
         np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
