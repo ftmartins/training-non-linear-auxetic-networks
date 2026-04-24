@@ -24,8 +24,9 @@ import sys
 import time
 import numpy as np
 from pathlib import Path
-
+import os
 # Add necessary paths
+sys.path.append('../src')
 sys.path.append(str(Path(__file__).parent.parent / 'instruments'))
 sys.path.append(str(Path(__file__).parent.parent / 'production'))
 sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'physical_learning'))
@@ -72,15 +73,15 @@ import pickle
 LR_NAN_REDUCTION = 0.1
 
 # Import training functions
-try:
-    from training_functions_with_toggle import (
+#try:
+from training_functions_with_toggle import (
         finish_training_GD_auxetic_batch,
         finish_training_GD_auxetic_batch_jax,
     )
-    TRAINING_FUNCTIONS_AVAILABLE = True
-except ImportError as e:
-    print(f"Warning: Could not import training functions: {e}")
-    TRAINING_FUNCTIONS_AVAILABLE = False
+TRAINING_FUNCTIONS_AVAILABLE = True
+#except ImportError as e:
+#    print(f"Warning: Could not import training functions: {e}")
+#    TRAINING_FUNCTIONS_AVAILABLE = False
 
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
@@ -185,7 +186,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         elif recovery_mode == 'from_scratch':
             n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(task_seed, realization_seed, n_edges)
+            initial_stiffnesses = generate_realization_stiffnesses(task_id, realization_seed, n_edges)
             network.stiffnesses = initial_stiffnesses
             network.save_original_parameters()
             print(f"  Restarting from scratch with reduced LR "
@@ -211,7 +212,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 if verbose:
                     print("Step 3: Initializing random stiffnesses...")
                 n_edges = len(network.edges)
-                initial_stiffnesses = generate_realization_stiffnesses(task_seed, realization_seed, n_edges)
+                initial_stiffnesses = generate_realization_stiffnesses(task_id, realization_seed, n_edges)
                 network.stiffnesses = initial_stiffnesses
                 network.save_original_parameters()
                 print(f"  Stiffnesses initialized: range "

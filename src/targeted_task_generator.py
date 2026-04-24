@@ -25,10 +25,10 @@ from task_generator import generate_realization_stiffnesses, compute_target_exte
 # Targeted Training Configuration (overrides from config.py)
 # ============================================================================
 
-N_TASKS = 10
+N_TASKS = 16
 N_REALIZATIONS = 1
-N_STEPS = 3_000
-N_STRAIN_STEPS = 100  # Higher than default 20 to handle large compression strains
+N_STEPS = 5_000
+N_STRAIN_STEPS = 300  # Higher than default 20 to handle large compression strains
 
 PACKING_SEED = 42  # Same network topology for all tasks
 
@@ -122,6 +122,54 @@ TARGETED_TASKS = [
         'compression_strains': [-0.2, -0.1],
         'target_poisson_ratios': [-0.8, -0.2],
     },
+    {
+        'task_seed':8,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3],
+        'target_poisson_ratios': [-0.6],
+    },
+    {
+        'task_seed': 9,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.6, -0.6],
+    },
+    {
+        'task_seed': 10,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.6, -0.8],
+    },
+    {
+        'task_seed': 11,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.6, -0.3],
+    },
+    {
+        'task_seed': 12,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.6, -0.45],
+    },
+    {
+        'task_seed': 13,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.6, -0.225],
+    },
+    {
+        'task_seed': 14,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.6, -0.375],
+    },
+    {
+        'task_seed': 15,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.6, -0.15],
+    }
 ]
 
 # ============================================================================

@@ -8,10 +8,10 @@ initializations with proper seed management for reproducibility.
 import numpy as np
 from config import (
     get_compression_pool, get_poisson_pool,
-    N_TASKS, N_REALIZATIONS,
     STIFFNESS_LOG_MIN, STIFFNESS_LOG_MAX,
 )
-
+N_TASKS = 20
+N_REALIZATIONS = 10
 
 def generate_task_config(task_seed):
     """

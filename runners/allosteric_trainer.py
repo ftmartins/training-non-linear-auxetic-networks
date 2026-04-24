@@ -22,6 +22,7 @@ import numpy as np
 from scipy.optimize import fsolve
 
 # functions.py lives next to the source notebook
+sys.path.append('../src')
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'data', 'ToFelipe0422'))
 import functions as f  # noqa: E402  (LAMMPS helper; writes bond_coeffs_*.in to cwd)
 
