@@ -10,7 +10,9 @@ eval "$(conda shell.bash hook)"
 conda activate auxetic_nets
 
 # Get list of incomplete jobs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python -c "
+import sys; sys.path.insert(0, '${SCRIPT_DIR}/../src')
 from checkpoint_manager import get_incomplete_jobs, get_complete_jobs
 from config import N_TASKS, N_REALIZATIONS
 

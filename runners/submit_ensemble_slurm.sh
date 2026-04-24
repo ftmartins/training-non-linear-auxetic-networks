@@ -40,8 +40,8 @@ echo "Node: $(hostname)"
 echo "Start time: $(date)"
 echo "=========================================="
 
-# Navigate to submission directory
-cd $SLURM_SUBMIT_DIR/
+# Navigate to submission directory (runners/)
+cd $SLURM_SUBMIT_DIR
 
 # Activate conda environment
 eval "$(conda shell.bash hook)"
@@ -50,9 +50,6 @@ conda activate auxetic_nets
 # Verify environment
 echo "Python: $(which python)"
 echo "Conda env: ${CONDA_DEFAULT_ENV}"
-
-# Navigate to ensemble_training directory
-cd ensemble_training
 
 # Calculate task and realization seeds from array index
 TASK_SEED=$((SLURM_ARRAY_TASK_ID / 20))

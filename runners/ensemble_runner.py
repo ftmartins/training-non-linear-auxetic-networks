@@ -22,13 +22,11 @@ import time
 import numpy as np
 from pathlib import Path
 
-# Add necessary paths
-sys.path.append(str(Path(__file__).parent.parent / 'instruments'))
-sys.path.append(str(Path(__file__).parent.parent / 'production'))
-sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'physical_learning'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 # Import config and modules
 from config import *
+from config import get_n_nodes, get_n_strain_steps
 from network_utils import create_auxetic_network
 from task_generator import (
     generate_task_config,
@@ -121,7 +119,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 print("Step 2: Restoring network from checkpoint...")
             # Create base network structure
             network, boundary_dict = create_auxetic_network(
-                n_nodes=N_NODES,
+                n_nodes=get_n_nodes(task_seed),
                 packing_seed=task_config['packing_seed'],
                 force_type=FORCE_TYPE,
                 boundary_margin=BOUNDARY_MARGIN
@@ -136,7 +134,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
             if verbose:
                 print("Step 2: Creating network from packing...")
             network, boundary_dict = create_auxetic_network(
-                n_nodes=N_NODES,
+                n_nodes=get_n_nodes(task_seed),
                 packing_seed=task_config['packing_seed'],
                 force_type=FORCE_TYPE,
                 boundary_margin=BOUNDARY_MARGIN
@@ -173,7 +171,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         print(f"  Training parameters:")
         print(f"    Learning rate: {LEARNING_RATE}")
         print(f"    Steps: {N_STEPS:,}")
-        print(f"    Strain steps: {N_STRAIN_STEPS}")
+        print(f"    Strain steps: {get_n_strain_steps(task_seed)}")
         print(f"    Force tolerance: {FORCE_TOL}")
 
         # Initialize or restore history
@@ -203,7 +201,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 left_nodes=boundary_dict['left'],
                 right_nodes=boundary_dict['right'],
                 force_type=FORCE_TYPE,
-                n_strain_steps=N_STRAIN_STEPS,
+                n_strain_steps=get_n_strain_steps(task_seed),
                 source_compression_strain_list=compression_strains,
                 desired_target_extension_list=target_extensions,
                 force_tol=FORCE_TOL,

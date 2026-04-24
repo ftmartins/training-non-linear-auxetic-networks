@@ -53,9 +53,9 @@ echo "Task seed: ${TASK_SEED}"
 echo ""
 
 DATA_DIR=/data2/shared/felipetm/auxetic_networks/ensemble_training_new/results_new/
-OUTPUT_DIR=${SLURM_SUBMIT_DIR}/figure_data/
+OUTPUT_DIR=${SLURM_SUBMIT_DIR}/../figure_data/
 
-python compute_actuation_modes.py \
+python ../analysis/compute_actuation_modes.py \
     --task           ${TASK_SEED} \
     --data-dir       ${DATA_DIR} \
     --output-dir     ${OUTPUT_DIR} \

@@ -25,18 +25,20 @@ import time
 import numpy as np
 from pathlib import Path
 
-# Add necessary paths
-sys.path.append(str(Path(__file__).parent.parent / 'instruments'))
-sys.path.append(str(Path(__file__).parent.parent / 'production'))
-sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'physical_learning'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 # Import shared config (not validate_config)
 from config import (
-    N_NODES, FORCE_TYPE, BOUNDARY_MARGIN,
+    get_n_nodes, FORCE_TYPE, BOUNDARY_MARGIN,
     FORCE_TOL
 )
 VMIN = 1e-3
 VMAX = 1e2
+
+
+def _uniform_stiffnesses(realization_seed, n_edges):
+    rng = np.random.RandomState(realization_seed)
+    return rng.uniform(VMIN, VMAX, size=n_edges)
 
 LEARNING_RATE = 1e-3
 
@@ -51,7 +53,7 @@ from targeted_task_generator import (
 
 
 # Import shared utilities
-from task_generator import generate_realization_stiffnesses, compute_target_extensions
+from task_generator import compute_target_extensions
 from network_utils import create_auxetic_network
 from checkpoint_manager import (
     is_training_complete,
@@ -154,7 +156,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         if verbose:
             print("Step 2: Creating network from packing...")
         network, boundary_dict = create_auxetic_network(
-            n_nodes=N_NODES,
+            n_nodes=get_n_nodes(task_id),
             packing_seed=task_config['packing_seed'],
             force_type=FORCE_TYPE,
             boundary_margin=BOUNDARY_MARGIN
@@ -185,7 +187,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         elif recovery_mode == 'from_scratch':
             n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+            initial_stiffnesses = _uniform_stiffnesses(realization_seed, n_edges)
             network.stiffnesses = initial_stiffnesses
             network.save_original_parameters()
             print(f"  Restarting from scratch with reduced LR "
@@ -211,7 +213,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 if verbose:
                     print("Step 3: Initializing random stiffnesses...")
                 n_edges = len(network.edges)
-                initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+                initial_stiffnesses = _uniform_stiffnesses(realization_seed, n_edges)
                 network.stiffnesses = initial_stiffnesses
                 network.save_original_parameters()
                 print(f"  Stiffnesses initialized: range "
@@ -278,7 +280,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             print(f"Restarting from scratch with LR scale={LR_NAN_REDUCTION}.")
             print(f"{'!'*60}\n")
             n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
+            initial_stiffnesses = _uniform_stiffnesses(realization_seed, n_edges)
             trained_network.stiffnesses = initial_stiffnesses
             trained_network.save_original_parameters()
             history = {}

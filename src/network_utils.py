@@ -5,13 +5,8 @@ This module contains functions for creating elastic networks from packing
 objects, cleaning network topology, and identifying boundary nodes.
 """
 
-import sys
 import numpy as np
 from pathlib import Path
-
-# Add necessary paths
-sys.path.append(str(Path(__file__).parent.parent / 'instruments'))
-sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'physical_learning'))
 
 from elastic_network import ElasticNetwork
 from packing_utils import Packing

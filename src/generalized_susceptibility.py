@@ -166,7 +166,6 @@ def compute_physical_hessian_strained(
     odiags  = odiags1 + odiags2                                # (E, 2, 2)
 
     # Hessian (N, 2, N, 2)
-    print(k_j.shape, B_j.shape, odiags.shape)
     H4 = jnp.einsum('i,ia,ib,imn->ambn', k_j, B_j, B_j, odiags)
     H_flat = np.array(H4).reshape(2 * n_nodes, 2 * n_nodes)
 
@@ -402,12 +401,15 @@ def compute_full_jacobian_matrixwise(
             raise ValueError(
                 "Either H_full_inv or (H_ff_inv, mask) must be provided."
             )
-        mask = np.asarray(mask, dtype=bool)
-        n_dof = 2 * n_nodes
-        H_inv_full_flat = np.zeros((n_dof, n_dof), dtype=float)
-        free_idx = np.where(mask)[0]
-        H_inv_full_flat[np.ix_(free_idx, free_idx)] = np.asarray(H_ff_inv)
-        Hinv = H_inv_full_flat.reshape(n_nodes, 2, n_nodes, 2)
+        raise NotImplementedError(
+            "Fallback to H_ff_inv + mask is not implemented. Please provide H_full_inv directly."
+        )
+        # mask = np.asarray(mask, dtype=bool)
+        # n_dof = 2 * n_nodes
+        # H_inv_full_flat = np.zeros((n_dof, n_dof), dtype=float)
+        # free_idx = np.where(mask)[0]
+        # H_inv_full_flat[np.ix_(free_idx, free_idx)] = np.asarray(H_ff_inv)
+        # Hinv = H_inv_full_flat.reshape(n_nodes, 2, n_nodes, 2)
 
     # ----------------------------------------------------------------
     # JAX arrays

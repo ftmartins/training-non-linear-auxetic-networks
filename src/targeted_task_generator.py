@@ -28,7 +28,7 @@ from task_generator import generate_realization_stiffnesses, compute_target_exte
 N_TASKS = 10
 N_REALIZATIONS = 1
 N_STEPS = 3_000
-N_STRAIN_STEPS = 100  # Higher than default 20 to handle large compression strains
+N_STRAIN_STEPS = 300  # Higher than default 20 to handle large compression strains
 
 PACKING_SEED = 42  # Same network topology for all tasks
 
