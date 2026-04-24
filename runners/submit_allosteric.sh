@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -t 5-00:00:00
-#SBATCH --qos=low
-#SBATCH --partition=low
+#SBATCH --qos=liu
+#SBATCH --partition=liu_tesla,liu_titan
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
