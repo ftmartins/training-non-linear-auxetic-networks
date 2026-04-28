@@ -262,7 +262,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
             np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
 
-        if mse < 5e-4 and mse2 < 5e-4:
+        if mse < 5e-8 and mse2 < 5e-8:
             print(f"  Early stop at step {global_step}: both tasks converged.")
             break
 
@@ -277,7 +277,7 @@ def check_success(msearray1, msearray2):
     combined = (msearray1 + msearray2) / 2.0
     ratio = np.min(combined) / combined[0]
     print(f"  Success check: min_loss/loss[0] = {ratio:.4e} "
-          f"({'PASS' if ratio < 0.01 else 'FAIL'})")
+          f"({'PASS' if ratio < 1e-6 else 'FAIL'})")
     return ratio < 0.01
 
 
