@@ -50,6 +50,20 @@ _GEOMETRY_BASE    = 1_000_000
 _TASK_BASE        = 2_000_000
 _REALIZATION_BASE = 3_000_000
 
+# ── Targeted ensemble ─────────────────────────────────────────────────────────
+# Fixed geometry shared across all 5 tasks; IC seed independent of task.
+# Each entry: strain_output2 = target at input_strain 0.5,
+#             strain_output  = target at input_strain 1.0.
+_TARGETED_GEOMETRY_SEED = _GEOMETRY_BASE + 100   # = 1_000_100
+
+TARGETED_ENSEMBLE = [
+    {'strain_output2': -0.6, 'strain_output': -0.8},
+    {'strain_output2': -0.8, 'strain_output': -0.8},
+    {'strain_output2': -1.0, 'strain_output': -0.8},
+    {'strain_output2': -0.4, 'strain_output': -0.8},
+    {'strain_output2': -0.2, 'strain_output': -0.8},
+]
+
 
 # ── Seed helpers ──────────────────────────────────────────────────────────────
 
@@ -284,9 +298,10 @@ def check_success(msearray1, msearray2):
 # ── Resubmission with a fresh realization ─────────────────────────────────────
 
 def resubmit_new_realization(gid, tid, rid, training_steps, output_dir, log_dir,
-                              conda_env='auxetic_nets'):
+                              conda_env='auxetic_nets', targeted=False):
     new_rid = rid + N_REALIZATIONS   # step outside the normal index range
     script_path = os.path.abspath(__file__)
+    targeted_flag = '\n            --targeted-ensemble' if targeted else ''
 
     script = textwrap.dedent(f"""\
         #!/bin/bash
@@ -309,7 +324,7 @@ def resubmit_new_realization(gid, tid, rid, training_steps, output_dir, log_dir,
             --task-id        {tid} \\
             --realization-id {new_rid} \\
             --training-steps {training_steps} \\
-            --output-dir     {output_dir}
+            --output-dir     {output_dir}{targeted_flag}
     """)
 
     tmp = f"/tmp/allosteric_resubmit_g{gid}t{tid}r{new_rid}.sh"
@@ -331,8 +346,8 @@ def resubmit_new_realization(gid, tid, rid, training_steps, output_dir, log_dir,
 def main():
     parser = argparse.ArgumentParser(
         description='Train one allosteric network (geometry × task × realization).')
-    parser.add_argument('--geometry-id',    type=int, required=True,
-                        help=f'Geometry index (0 to {N_GEOMETRIES-1})')
+    parser.add_argument('--geometry-id',    type=int, default=0,
+                        help=f'Geometry index (0 to {N_GEOMETRIES-1}); ignored with --targeted-ensemble')
     parser.add_argument('--task-id',        type=int, required=True,
                         help=f'Task index (0 to {N_TASKS-1})')
     parser.add_argument('--realization-id', type=int, required=True,
@@ -340,6 +355,8 @@ def main():
     parser.add_argument('--training-steps', type=int, default=N_TRAINING_STEPS)
     parser.add_argument('--output-dir',     type=str,
                         default='/data2/shared/felipetm/allosteric_nets')
+    parser.add_argument('--targeted-ensemble', action='store_true',
+                        help='Use TARGETED_ENSEMBLE fixed tasks with a shared fixed geometry')
     args = parser.parse_args()
 
     gid = args.geometry_id
@@ -347,39 +364,54 @@ def main():
     rid = args.realization_id
     training_steps = args.training_steps
     output_dir     = args.output_dir
+    targeted       = args.targeted_ensemble
 
     log_dir = '/home1/felipetm/auxetic_networks/ensemble_training/Logs'
 
-    print(f"=== Allosteric trainer: geometry={gid}, task={tid}, realization={rid} ===")
+    mode_tag = 'targeted' if targeted else f'geometry={gid}'
+    print(f"=== Allosteric trainer: {mode_tag}, task={tid}, realization={rid} ===")
 
     # Per-job temp dir so parallel LAMMPS jobs don't share files
-    work_dir = f"/tmp/allosteric_g{gid}_t{tid}_r{rid}_{os.getpid()}"
+    work_dir = f"/tmp/allosteric_{'tgt' if targeted else f'g{gid}'}_t{tid}_r{rid}_{os.getpid()}"
     os.makedirs(work_dir, exist_ok=True)
     original_dir = os.getcwd()
     os.chdir(work_dir)
 
     # Output subfolder
-    output_path = os.path.join(output_dir,
-                               f'geometry_{gid}', f'task_{tid}', f'realization_{rid}')
+    geom_dir = 'geometry_targeted' if targeted else f'geometry_{gid}'
+    output_path = os.path.join(output_dir, geom_dir, f'task_{tid}', f'realization_{rid}')
     os.makedirs(output_path, exist_ok=True)
 
     try:
         # ── Build geometry ────────────────────────────────────────────────────
-        random.seed(geometry_seed(gid))
+        gseed = _TARGETED_GEOMETRY_SEED if targeted else geometry_seed(gid)
+        random.seed(gseed)
         nodes, incidence_matrix, eq_lengths, _ = create_network(10, 0.15, 1.6)
 
-        # ── Draw task (soi1, soi2) ────────────────────────────────────────────
-        trng = task_rng(tid)
-        soi1 = int(trng.randint(0, 11))   # inclusive [0, 10]
-        soi2 = int(trng.randint(0, 11))
-
-        strain_input   = 1.0
-        strain_input2  = 0.5
-        strain_output  = -0.1 * soi2
-        strain_output2 = -0.1 * soi1
+        # ── Resolve task strains ──────────────────────────────────────────────
+        strain_input  = 1.0
+        strain_input2 = 0.5
+        if targeted:
+            if tid >= len(TARGETED_ENSEMBLE):
+                raise ValueError(f'--task-id {tid} out of range for TARGETED_ENSEMBLE '
+                                 f'(max {len(TARGETED_ENSEMBLE)-1})')
+            strain_output  = TARGETED_ENSEMBLE[tid]['strain_output']
+            strain_output2 = TARGETED_ENSEMBLE[tid]['strain_output2']
+            print(f"  Geometry seed : {gseed} (targeted, fixed)")
+            print(f"  Task          : TARGETED_ENSEMBLE[{tid}]  "
+                  f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
+        else:
+            trng = task_rng(tid)
+            soi1 = int(trng.randint(0, 11))   # inclusive [0, 10]
+            soi2 = int(trng.randint(0, 11))
+            strain_output  = -0.1 * soi2
+            strain_output2 = -0.1 * soi1
+            print(f"  Geometry seed : {gseed}")
+            print(f"  Task          : soi1={soi1}, soi2={soi2}  "
+                  f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
 
         np.savetxt(os.path.join(output_path, 'tasks.txt'),
-                   [geometry_seed(gid), strain_output2, strain_output])
+                   [gseed, strain_output2, strain_output])
 
         # Save network structure (shared across all realizations of this geometry/task)
         np.save(os.path.join(output_path, 'nodes.npy'),             nodes)
@@ -397,13 +429,10 @@ def main():
         dx  = dinputdistance  / nsteps
         dx2 = dinputdistance2 / nsteps2
 
-        # ── Draw initial stiffnesses ──────────────────────────────────────────
+        # ── Draw initial stiffnesses (task-independent: only depends on rid) ──
         rrng = realization_rng(rid)
         stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
 
-        print(f"  Geometry seed : {geometry_seed(gid)}")
-        print(f"  Task          : soi1={soi1}, soi2={soi2}  "
-              f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
         print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
         print(f"  Training steps: {training_steps:,}")
 
@@ -437,7 +466,7 @@ def main():
                 os.chdir(original_dir)
                 shutil.rmtree(output_path, ignore_errors=True)
                 resubmit_new_realization(gid, tid, rid, training_steps,
-                                         output_dir, log_dir)
+                                         output_dir, log_dir, targeted=targeted)
                 return
 
         # ── Final save ────────────────────────────────────────────────────────
