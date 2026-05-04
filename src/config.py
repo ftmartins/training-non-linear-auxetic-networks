@@ -77,8 +77,8 @@ def get_poisson_pool(task_seed: int) -> list:
 
 def get_n_strain_steps(task_seed: int) -> int:
     """Return the quasistatic trajectory step count for the given task seed."""
-    return 100 if task_seed < 20 else 400
-
+    return 400 if task_seed < 20 else 400
+#used to be 100 if task_seed < 20 before the may realizations
 
 def get_n_nodes(task_seed: int) -> int:
     """Return the network node count for the given task seed."""
@@ -131,15 +131,15 @@ PACKING_PATH = BASE_DIR.parent.parent / 'cl_mech_repo' / 'physical_learning'
 
 # Data paths
 DATA_DIR = Path('/data2/shared/felipetm/auxetic_networks')  # Change as needed
-ENSEMBLE_DIR = DATA_DIR / 'ensemble_training_new/'
-RESULTS_DIR = ENSEMBLE_DIR / 'results_new/'
-CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new/'
+ENSEMBLE_DIR = DATA_DIR / 'ensemble_training_new_may/'
+RESULTS_DIR = ENSEMBLE_DIR / 'results_new_may/'
+CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new_may/'
 
 # ============================================================================
 # Network Creation Parameters
 # ============================================================================
 
-BOUNDARY_MARGIN = 0.02  # Margin for identifying boundary nodes
+BOUNDARY_MARGIN = 0.04  # Margin for identifying boundary nodes
 PACKING_PARAMS = {
     'central': 0.0005,
     'drag': 0.05,
@@ -152,7 +152,7 @@ PACKING_FRAMES = 200
 # Save/Checkpoint Parameters
 # ============================================================================
 
-CHECKPOINT_INTERVAL = 50  # Save checkpoint every N steps
+CHECKPOINT_INTERVAL = 100  # Save checkpoint every N steps
 SAVE_FULL_HISTORY = True  # Save full training history (stiffnesses at each step)
 USE_CHECKPOINTING = True  # Enable checkpoint/resume functionality
 
