@@ -89,7 +89,7 @@ def strain_network(datafile, id_fixed, id_pull, clamped = False, dx=0.025, nstep
         data: array with step, extension, potential energy, Fx, Fy
         frames: list of node positions at each step
     """
-    lmp = lammps()
+    lmp = lammps(screen=False)
     lmp.command("units lj")
     lmp.command("atom_style bond")
     lmp.command("dimension 3")
