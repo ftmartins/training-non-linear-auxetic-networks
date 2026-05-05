@@ -486,8 +486,8 @@ def main():
                   f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
         else:
             trng = task_rng(tid)
-            soi1 = int(trng.randint(0, 11))   # inclusive [0, 10]
-            soi2 = int(trng.randint(0, 11))
+            soi1 = int(trng.randint(1, 11))   # inclusive [1, 10], excludes strain=0
+            soi2 = int(trng.randint(1, 11))
             strain_output  = -0.1 * soi2
             strain_output2 = -0.1 * soi1
             print(f"  Geometry seed : {gseed}")
