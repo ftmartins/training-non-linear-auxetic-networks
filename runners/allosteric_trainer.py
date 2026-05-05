@@ -177,6 +177,86 @@ def create_network(L, p, R):
     return nodes, incidence_matrix, eq_lengths, stiffnesses
 
 
+# ── Geometry: load from disk or recreate from seed ────────────────────────────
+
+def load_or_create_geometry(output_path, gseed):
+    """
+    Load nodes/incidence_matrix/eq_lengths from output_path if present; otherwise
+    recreate from gseed and save them.  Raises RuntimeError if existing stiffnesses
+    imply a different edge count than the geometry.
+    """
+    nodes_path = os.path.join(output_path, 'nodes.npy')
+    inc_path   = os.path.join(output_path, 'incidence_matrix.npy')
+    eq_path    = os.path.join(output_path, 'eq_lengths.npy')
+
+    if (os.path.exists(nodes_path) and os.path.exists(inc_path)
+            and os.path.exists(eq_path)):
+        nodes            = np.load(nodes_path)
+        incidence_matrix = np.load(inc_path)
+        eq_lengths       = np.load(eq_path)
+        print("  Geometry: loaded from disk.")
+    else:
+        print("  Geometry: files missing — recreating from seed.")
+        random.seed(gseed)
+        nodes, incidence_matrix, eq_lengths, _ = create_network(10, 0.15, 1.6)
+        np.save(nodes_path, nodes)
+        np.save(inc_path,   incidence_matrix)
+        np.save(eq_path,    eq_lengths)
+
+    stiff_path = os.path.join(output_path, 'stiffnesses.npy')
+    if os.path.exists(stiff_path):
+        n_edges_stiff = len(np.load(stiff_path))
+        n_edges_geom  = len(incidence_matrix)
+        if n_edges_stiff != n_edges_geom:
+            raise RuntimeError(
+                f"Edge-count mismatch: stiffnesses.npy has {n_edges_stiff} edges "
+                f"but the geometry produces {n_edges_geom} edges. "
+                f"The network-creation code may have been modified."
+            )
+
+    return nodes, incidence_matrix, eq_lengths
+
+
+# ── Resume: find the latest NaN-free stiffness state ──────────────────────────
+
+def load_resume_state(output_path):
+    """
+    Return (stiffnesses, mse1, mse2, start_step) if a prior run exists, else None.
+
+    stiffnesses.npy is the primary source; stiffnesses_ckpt.npy + ckpt_step.txt
+    (written at each 500-step checkpoint) serve as a fallback if the primary file
+    contains NaNs (run diverged after the last clean save).
+    """
+    stiff_path = os.path.join(output_path, 'stiffnesses.npy')
+    if not os.path.exists(stiff_path):
+        return None
+
+    mse1_path = os.path.join(output_path, 'mse1.npy')
+    mse2_path = os.path.join(output_path, 'mse2.npy')
+    mse1 = np.load(mse1_path) if os.path.exists(mse1_path) else np.array([])
+    mse2 = np.load(mse2_path) if os.path.exists(mse2_path) else np.array([])
+
+    stiff = np.load(stiff_path)
+    if not np.any(np.isnan(stiff)):
+        start_step = len(mse1)
+        print(f"  Resume: found clean stiffnesses at step {start_step}.")
+        return stiff, mse1, mse2, start_step
+
+    # stiffnesses.npy has NaNs — fall back to last NaN-free checkpoint
+    ckpt_stiff_path = os.path.join(output_path, 'stiffnesses_ckpt.npy')
+    ckpt_step_path  = os.path.join(output_path, 'ckpt_step.txt')
+    if os.path.exists(ckpt_stiff_path) and os.path.exists(ckpt_step_path):
+        ckpt_stiff = np.load(ckpt_stiff_path)
+        ckpt_step  = int(np.loadtxt(ckpt_step_path))
+        print(f"  Resume: stiffnesses.npy contains NaNs; "
+              f"rolling back to checkpoint at step {ckpt_step}.")
+        return ckpt_stiff, mse1[:ckpt_step], mse2[:ckpt_step], ckpt_step
+
+    print("  Resume: stiffnesses.npy contains NaNs and no clean checkpoint found; "
+          "starting fresh.")
+    return None
+
+
 # ── Learning rule ─────────────────────────────────────────────────────────────
 
 def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
@@ -275,6 +355,10 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
             np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
             np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
+            if not np.any(np.isnan(stiffnesses)):
+                np.save(os.path.join(output_path, 'stiffnesses_ckpt.npy'), stiffnesses)
+                np.savetxt(os.path.join(output_path, 'ckpt_step.txt'),
+                           [global_step], fmt='%d')
 
         if mse < 5e-8 and mse2 < 5e-8:
             print(f"  Early stop at step {global_step}: both tasks converged.")
@@ -383,10 +467,9 @@ def main():
     os.makedirs(output_path, exist_ok=True)
 
     try:
-        # ── Build geometry ────────────────────────────────────────────────────
+        # ── Build geometry (load if present, recreate from seed if missing) ───
         gseed = _TARGETED_GEOMETRY_SEED if targeted else geometry_seed(gid)
-        random.seed(gseed)
-        nodes, incidence_matrix, eq_lengths, _ = create_network(10, 0.15, 1.6)
+        nodes, incidence_matrix, eq_lengths = load_or_create_geometry(output_path, gseed)
 
         # ── Resolve task strains ──────────────────────────────────────────────
         strain_input  = 1.0
@@ -413,11 +496,6 @@ def main():
         np.savetxt(os.path.join(output_path, 'tasks.txt'),
                    [gseed, strain_output2, strain_output])
 
-        # Save network structure (shared across all realizations of this geometry/task)
-        np.save(os.path.join(output_path, 'nodes.npy'),             nodes)
-        np.save(os.path.join(output_path, 'incidence_matrix.npy'),  incidence_matrix)
-        np.save(os.path.join(output_path, 'eq_lengths.npy'),        eq_lengths)
-
         tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
         tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
 
@@ -429,35 +507,57 @@ def main():
         dx  = dinputdistance  / nsteps
         dx2 = dinputdistance2 / nsteps2
 
-        # ── Draw initial stiffnesses (task-independent: only depends on rid) ──
-        rrng = realization_rng(rid)
-        stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
+        # ── Resume or fresh start ─────────────────────────────────────────────
+        resume = load_resume_state(output_path)
+        if resume is not None:
+            stiffnesses, msearray, msearray2, start_step = resume
+            print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]"
+                  f"  (resumed from step {start_step})")
+        else:
+            rrng = realization_rng(rid)
+            stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
+            msearray  = np.array([])
+            msearray2 = np.array([])
+            start_step = 0
+            print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
 
-        print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
         print(f"  Training steps: {training_steps:,}")
 
-        # ── Attempt 1 ─────────────────────────────────────────────────────────
-        print("\n--- Attempt 1 ---")
-        lr = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
-                                     stiffnesses.copy(), ETA, tod, dx, nsteps)
-        msearray, msearray2, stiffnesses = _run_training_loop(
-            nodes, incidence_matrix, eq_lengths, stiffnesses,
-            lr, tod, tod2, dinputdistance, dinputdistance2,
-            nsteps, nsteps2, training_steps, output_path)
+        # ── Attempt 1 (or its remaining portion) ──────────────────────────────
+        attempt1_remaining = max(0, training_steps - start_step)
+        if attempt1_remaining > 0:
+            tag = ("Attempt 1" if start_step == 0
+                   else f"Attempt 1 resumed — {attempt1_remaining} steps remaining")
+            print(f"\n--- {tag} ---")
+            lr = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
+                                         stiffnesses.copy(), ETA, tod, dx, nsteps)
+            msearray, msearray2, stiffnesses = _run_training_loop(
+                nodes, incidence_matrix, eq_lengths, stiffnesses,
+                lr, tod, tod2, dinputdistance, dinputdistance2,
+                nsteps, nsteps2, attempt1_remaining, output_path,
+                msearray=msearray, msearray2=msearray2,
+                step_offset=start_step)
 
         if check_success(msearray, msearray2):
             print("\nAttempt 1 succeeded.")
         else:
-            # ── Attempt 2: 2× steps, recalibrated LR ─────────────────────────
-            print("\n--- Attempt 2 (2× steps, recalibrated LR) ---")
-            lr2 = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
-                                          stiffnesses.copy(), ETA, tod, dx, nsteps)
-            msearray, msearray2, stiffnesses = _run_training_loop(
-                nodes, incidence_matrix, eq_lengths, stiffnesses,
-                lr2, tod, tod2, dinputdistance, dinputdistance2,
-                nsteps, nsteps2, 2 * training_steps, output_path,
-                msearray=msearray, msearray2=msearray2,
-                step_offset=len(msearray))
+            # ── Attempt 2: recalibrated LR, up to 2× more steps ──────────────
+            # Total budget = training_steps (attempt 1) + 2 * training_steps (attempt 2).
+            # If resuming mid-attempt-2, only the remaining portion is run.
+            step_after_a1    = len(msearray)
+            attempt2_remaining = max(0, 3 * training_steps - step_after_a1)
+            if attempt2_remaining > 0:
+                tag = ("Attempt 2 (2× steps, recalibrated LR)" if step_after_a1 <= training_steps
+                       else f"Attempt 2 resumed — {attempt2_remaining} steps remaining")
+                print(f"\n--- {tag} ---")
+                lr2 = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
+                                              stiffnesses.copy(), ETA, tod, dx, nsteps)
+                msearray, msearray2, stiffnesses = _run_training_loop(
+                    nodes, incidence_matrix, eq_lengths, stiffnesses,
+                    lr2, tod, tod2, dinputdistance, dinputdistance2,
+                    nsteps, nsteps2, attempt2_remaining, output_path,
+                    msearray=msearray, msearray2=msearray2,
+                    step_offset=step_after_a1)
 
             if check_success(msearray, msearray2):
                 print("\nAttempt 2 succeeded.")
