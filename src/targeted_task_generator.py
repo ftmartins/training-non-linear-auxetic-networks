@@ -25,7 +25,7 @@ from task_generator import generate_realization_stiffnesses, compute_target_exte
 # Targeted Training Configuration (overrides from config.py)
 # ============================================================================
 
-N_TASKS = 16
+N_TASKS = 24
 N_REALIZATIONS = 1
 N_STEPS = 5_000
 N_STRAIN_STEPS = 300  # Higher than default 20 to handle large compression strains
@@ -169,7 +169,56 @@ TARGETED_TASKS = [
         'packing_seed': PACKING_SEED,
         'compression_strains': [-0.3, -0.15],
         'target_poisson_ratios': [-0.6, -0.15],
-    }
+    },
+    # Tasks 16-23: strains [-0.3, -0.15], Poisson ratios in [-0.4, -0.1], anchor at -0.25
+    {
+        'task_seed': 16,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3],
+        'target_poisson_ratios': [-0.25],
+    },
+    {
+        'task_seed': 17,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.25, -0.25],
+    },
+    {
+        'task_seed': 18,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.25, -0.4],  # non-monotonic: more auxetic at smaller compression
+    },
+    {
+        'task_seed': 19,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.25, -0.1],
+    },
+    {
+        'task_seed': 20,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.25, -0.175],
+    },
+    {
+        'task_seed': 21,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.25, -0.325],
+    },
+    {
+        'task_seed': 22,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.25, -0.15],
+    },
+    {
+        'task_seed': 23,
+        'packing_seed': PACKING_SEED,
+        'compression_strains': [-0.3, -0.15],
+        'target_poisson_ratios': [-0.25, -0.225],
+    },
 ]
 
 # ============================================================================
@@ -182,7 +231,7 @@ def get_targeted_task_config(task_id):
     Return task configuration for a specific targeted task.
 
     Args:
-        task_id: Integer 0-4
+        task_id: Integer 0-23
 
     Returns:
         config_dict with keys: task_seed, packing_seed,
@@ -194,7 +243,7 @@ def get_targeted_task_config(task_id):
 
 
 def get_all_targeted_task_configs():
-    """Return all 5 targeted task configurations."""
+    """Return all 24 targeted task configurations."""
     return TARGETED_TASKS
 
 
