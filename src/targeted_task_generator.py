@@ -27,13 +27,14 @@ from task_generator import generate_realization_stiffnesses, compute_target_exte
 
 N_TASKS = 16
 N_REALIZATIONS = 1
-N_STEPS = 5_000
+N_STEPS = 10_000
 N_STRAIN_STEPS = 300  # Higher than default 20 to handle large compression strains
 
 PACKING_SEED = 42  # Same network topology for all tasks
 
-ENSEMBLE_DIR = BASE_DIR / 'ensemble_training'
-TARGETED_RESULTS_DIR = ENSEMBLE_DIR / 'targeted_results'
+print(BASE_DIR)
+ENSEMBLE_DIR = BASE_DIR
+TARGETED_RESULTS_DIR = DATA_DIR = Path('/data2/shared/felipetm/auxetic_networks/targeted_results')
 
 # ============================================================================
 # Task Definitions
