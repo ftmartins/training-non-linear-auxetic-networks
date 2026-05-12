@@ -44,7 +44,7 @@ def _uniform_stiffnesses(realization_seed, n_edges):
     rng = np.random.RandomState(realization_seed)
     return rng.uniform(VMIN, VMAX, size=n_edges)
 
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-2
 
 # Import targeted config and task definitions
 from targeted_task_generator import (
@@ -57,7 +57,7 @@ from targeted_task_generator import (
 
 
 # Import shared utilities
-from task_generator import compute_target_extensions
+from task_generator import generate_realization_stiffnesses, compute_target_extensions
 from network_utils import create_auxetic_network
 from checkpoint_manager import (
     is_training_complete,
