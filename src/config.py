@@ -131,9 +131,9 @@ PACKING_PATH = BASE_DIR.parent.parent / 'cl_mech_repo' / 'physical_learning'
 
 # Data paths
 DATA_DIR = Path('/data2/shared/felipetm/auxetic_networks')  # Change as needed
-ENSEMBLE_DIR = DATA_DIR / 'ensemble_training_new/'
-RESULTS_DIR = ENSEMBLE_DIR / 'results_new/'
-CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new/'
+ENSEMBLE_DIR = DATA_DIR / 'ensemble_training_new_sqr/'
+RESULTS_DIR = ENSEMBLE_DIR / 'results_new_sqr/'
+CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new_sqr/'
 
 # ============================================================================
 # Network Creation Parameters
@@ -141,7 +141,7 @@ CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new/'
 
 BOUNDARY_MARGIN = 0.04  # Margin for identifying boundary nodes
 PACKING_PARAMS = {
-    'central': 0.0005,
+    'central': 0.00005,  # Reduced from 0.0005 for less hexagonal, more disordered packings
     'drag': 0.05,
     'contact': 0.1
 }

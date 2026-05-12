@@ -128,7 +128,8 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 n_nodes=get_n_nodes(task_seed),
                 packing_seed=task_config['packing_seed'],
                 force_type=FORCE_TYPE,
-                boundary_margin=BOUNDARY_MARGIN
+                boundary_margin=BOUNDARY_MARGIN,
+                central_force=PACKING_PARAMS['central']
             )
             # Restore network state from checkpoint
             network.positions = checkpoint['network']['positions']
@@ -143,7 +144,8 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 n_nodes=get_n_nodes(task_seed),
                 packing_seed=task_config['packing_seed'],
                 force_type=FORCE_TYPE,
-                boundary_margin=BOUNDARY_MARGIN
+                boundary_margin=BOUNDARY_MARGIN,
+                central_force=PACKING_PARAMS['central']
             )
             print(f"  Network created: {len(network.positions)} nodes, {len(network.edges)} edges")
 

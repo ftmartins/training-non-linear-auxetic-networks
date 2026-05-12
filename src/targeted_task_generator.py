@@ -33,8 +33,8 @@ N_TARGETED_NODES = 100  # Same network size for all targeted tasks
 
 PACKING_SEED = 42  # Same network topology for all tasks
 
-ENSEMBLE_DIR = BASE_DIR / 'ensemble_training'
-TARGETED_RESULTS_DIR = ENSEMBLE_DIR / 'targeted_results'
+ENSEMBLE_DIR = BASE_DIR / 'ensemble_training_sqr'
+TARGETED_RESULTS_DIR = ENSEMBLE_DIR / 'targeted_results_sqr'
 
 # ============================================================================
 # Task Definitions
