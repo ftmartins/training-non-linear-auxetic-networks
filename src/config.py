@@ -139,7 +139,7 @@ CHECKPOINT_DIR = ENSEMBLE_DIR / 'checkpoints_new/'
 # Network Creation Parameters
 # ============================================================================
 
-BOUNDARY_MARGIN = 0.02  # Margin for identifying boundary nodes
+BOUNDARY_MARGIN = 0.04  # Margin for identifying boundary nodes
 PACKING_PARAMS = {
     'central': 0.0005,
     'drag': 0.05,
