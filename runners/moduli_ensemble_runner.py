@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 from config import (
     N_NODES, FORCE_TYPE, BOUNDARY_MARGIN,
     LEARNING_RATE, FORCE_TOL, VMIN, VMAX,
+    PACKING_PARAMS,
 )
 
 LEARNING_RATE = 1e-4
@@ -104,6 +105,7 @@ def get_reference_moduli(verbose=False):
         packing_seed=PACKING_SEED,
         force_type=FORCE_TYPE,
         boundary_margin=BOUNDARY_MARGIN,
+        central_force=PACKING_PARAMS['central'],
     )
     # Ensure uniform stiffnesses
     network.stiffnesses = np.ones(len(network.edges))
@@ -200,6 +202,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
             packing_seed=task_config['packing_seed'],
             force_type=FORCE_TYPE,
             boundary_margin=BOUNDARY_MARGIN,
+            central_force=PACKING_PARAMS['central'],
         )
         print(f"  Network created: {len(network.positions)} nodes, "
               f"{len(network.edges)} edges")

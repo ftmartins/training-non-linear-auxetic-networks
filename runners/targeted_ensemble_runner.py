@@ -33,8 +33,8 @@ sys.path.append(str(Path(__file__).parent.parent.parent / 'cl_mech_repo' / 'phys
 
 # Import shared config (not validate_config)
 from config import (
-    get_n_nodes, FORCE_TYPE, BOUNDARY_MARGIN,
-    FORCE_TOL
+    FORCE_TYPE, BOUNDARY_MARGIN,
+    FORCE_TOL, PACKING_PARAMS
 )
 VMIN = 1e-2
 VMAX = 1e2
@@ -160,10 +160,11 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         if verbose:
             print("Step 2: Creating network from packing...")
         network, boundary_dict = create_auxetic_network(
-            n_nodes=get_n_nodes(task_id),
+            n_nodes=task_config['n_nodes'],
             packing_seed=task_config['packing_seed'],
             force_type=FORCE_TYPE,
-            boundary_margin=BOUNDARY_MARGIN
+            boundary_margin=BOUNDARY_MARGIN,
+            central_force=PACKING_PARAMS['central'],
         )
         print(f"  Network created: {len(network.positions)} nodes, {len(network.edges)} edges")
 
