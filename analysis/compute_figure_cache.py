@@ -33,13 +33,23 @@ N_EQUIL           = 1
 N_COST_EIGS       = 5
 HVP_EPSILON       = 1e-4
 LOCAL_MAX_STRAIN  = 1.0
-N_TRAJ_STEPS_BULK = 20
-MID_FRAME_BULK    = 10
+N_TRAJ_STEPS_BULK = 200   # matches current training standard (config.N_STRAIN_STEPS)
+MID_FRAME_BULK    = 100  # halfway through the trajectory
 
 DEFAULT_GLOBAL_TASK = 13
 DEFAULT_GLOBAL_REAL = 0
 DEFAULT_LOCAL_TASK  = 0
 DEFAULT_LOCAL_REAL  = 0
+
+# ── Cluster data paths ───────────────────────────────────────────────────────
+# Root directory that contains task_XX/ subdirectories for the non-targeted ensemble.
+ENSEMBLE_TRAINING_ROOT = Path('/data2/shared/felipetm/auxetic_networks/ensemble_training_new_sqr')
+# Subdirectory within ENSEMBLE_TRAINING_ROOT where task_XX/ folders live.
+# Set to '' if task_XX/ folders are directly inside ENSEMBLE_TRAINING_ROOT.
+ENSEMBLE_RESULTS_SUBDIR = ''
+
+TARGETED_ROOT   = Path('/data2/shared/felipetm/auxetic_networks/targeted_results_sqr')
+ALLOSTERIC_ROOT = Path('/data2/shared/felipetm/allosteric_nets')
 
 # ── Lazy globals set after imports ───────────────────────────────────────────
 _crf_diff = None   # differentiable FIRE solver, built once
@@ -87,14 +97,34 @@ def _setup_imports(repo_root: Path):
 
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-def build_paths(repo_root, cache_dir=None):
-    r = Path(repo_root)
+def build_paths(repo_root=None, cache_dir=None):
+    """Build all data and cache paths.
+
+    By default uses the cluster globals above (ENSEMBLE_TRAINING_ROOT, etc.).
+    Pass repo_root to fall back to repo-local data/ layout (local development).
+    Pass cache_dir to override the cache location explicitly.
+    """
+    if repo_root is not None:
+        # Local / repo-relative layout (development)
+        r = Path(repo_root)
+        results_dir = r / 'data' / 'results'
+        targeted_dir = r / 'data' / 'targeted_results'
+        allosteric_dir = r / 'data' / 'allosteric_nets'
+        default_cache = r / '.figure_notebook_cache'
+    else:
+        # Cluster layout derived from globals
+        results_dir = (ENSEMBLE_TRAINING_ROOT / ENSEMBLE_RESULTS_SUBDIR
+                       if ENSEMBLE_RESULTS_SUBDIR else ENSEMBLE_TRAINING_ROOT)
+        targeted_dir   = TARGETED_ROOT
+        allosteric_dir = ALLOSTERIC_ROOT
+        default_cache  = ENSEMBLE_TRAINING_ROOT / '.figure_notebook_cache'
+
     return {
-        'results':        r / 'data' / 'results',
-        'targeted':       r / 'data' / 'targeted_results',
-        'allosteric':     r / 'data' / 'allosteric_nets',
-        'allosteric_tgt': r / 'data' / 'allosteric_nets' / 'geometry_targeted',
-        'cache':          Path(cache_dir) if cache_dir else r / '.figure_notebook_cache',
+        'results':        results_dir,
+        'targeted':       targeted_dir,
+        'allosteric':     allosteric_dir,
+        'allosteric_tgt': allosteric_dir / 'geometry_targeted',
+        'cache':          Path(cache_dir) if cache_dir else default_cache,
     }
 
 
@@ -856,12 +886,14 @@ def main():
                         help='Override cache directory path')
     args = parser.parse_args()
 
-    repo_root = Path(args.repo_root) if args.repo_root else Path(__file__).resolve().parents[1]
+    repo_root = Path(args.repo_root) if args.repo_root else None
     paths     = build_paths(repo_root, args.cache_dir)
-    mods      = _setup_imports(repo_root)
+    # src/ imports always come from the repo where this script lives
+    src_root  = Path(args.repo_root) if args.repo_root else Path(__file__).resolve().parents[1]
+    mods      = _setup_imports(src_root)
 
     print(f'Mode       : {args.mode}')
-    print(f'Repo root  : {repo_root}')
+    print(f'Results dir: {paths["results"]}')
     print(f'Cache dir  : {paths["cache"]}')
     print(f'JAX devices: {mods["jax"].devices()}')
     print()
