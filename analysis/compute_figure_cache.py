@@ -104,20 +104,20 @@ def build_paths(repo_root=None, cache_dir=None):
     Pass repo_root to fall back to repo-local data/ layout (local development).
     Pass cache_dir to override the cache location explicitly.
     """
-    if repo_root is not None:
-        # Local / repo-relative layout (development)
-        r = Path(repo_root)
-        results_dir = r / 'data' / 'results'
-        targeted_dir = r / 'data' / 'targeted_results'
-        allosteric_dir = r / 'data' / 'allosteric_nets'
-        default_cache = r / '.figure_notebook_cache'
-    else:
+    #if repo_root is not None:
+    #    # Local / repo-relative layout (development)
+    #    r = Path(repo_root)
+    #    results_dir = r / 'data' / 'results'
+    #    targeted_dir = r / 'data' / 'targeted_results'
+    #    allosteric_dir = r / 'data' / 'allosteric_nets'
+    #    default_cache = r / '.figure_notebook_cache'
+    #else:
         # Cluster layout derived from globals
-        results_dir = (ENSEMBLE_TRAINING_ROOT / ENSEMBLE_RESULTS_SUBDIR
+    results_dir = (ENSEMBLE_TRAINING_ROOT / ENSEMBLE_RESULTS_SUBDIR
                        if ENSEMBLE_RESULTS_SUBDIR else ENSEMBLE_TRAINING_ROOT)
-        targeted_dir   = TARGETED_ROOT
-        allosteric_dir = ALLOSTERIC_ROOT
-        default_cache  = ENSEMBLE_TRAINING_ROOT / '.figure_notebook_cache'
+    targeted_dir   = TARGETED_ROOT
+    allosteric_dir = ALLOSTERIC_ROOT
+    default_cache  = ENSEMBLE_TRAINING_ROOT / '.figure_notebook_cache'
 
     return {
         'results':        results_dir,
@@ -687,6 +687,10 @@ def run_global_rep(paths, task_id, real_id, mods):
         return
 
     print(f'  Loading global representative task_{task_id:02d}/real_{real_id:02d}...', flush=True)
+
+    print(paths['targeted'], paths['cache'])
+    assert 1==2
+
     network, boundary, config = load_global_network(task_id, real_id, paths['targeted'], mods)
     comp_strains = config['compression_strains']
     target_pois  = config['target_poisson_ratios']
@@ -762,6 +766,10 @@ def run_local_rep(paths, task_id, real_id, mods):
 
     print(f'  Loading local representative task_{task_id}/real_{real_id}...', flush=True)
     net_l = load_local_targeted(task_id, real_id, paths, mods)
+
+    print(paths)
+    assert 1==2
+
     if net_l is None:
         raise RuntimeError(f'Local representative network not found (task {task_id}, real {real_id})')
 
