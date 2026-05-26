@@ -102,29 +102,38 @@ def build_paths(repo_root=None, cache_dir=None):
 
     By default uses the cluster globals above (ENSEMBLE_TRAINING_ROOT, etc.).
     Pass repo_root to fall back to repo-local data/ layout (local development).
-    Pass cache_dir to override the cache location explicitly.
+
+    Cache directories are co-located with their data by default:
+      cache_results        → <results_dir>/.figure_notebook_cache/
+      cache_targeted       → <targeted_dir>/.figure_notebook_cache/
+      cache_allosteric     → <allosteric_dir>/.figure_notebook_cache/
+      cache_allosteric_tgt → <allosteric_dir>/geometry_targeted/.figure_notebook_cache/
+
+    Pass cache_dir to override all four with a single directory.
     """
     if repo_root is not None:
-        # Local / repo-relative layout (development)
         r = Path(repo_root)
-        results_dir = r / 'data' / 'results'
-        targeted_dir = r / 'data' / 'targeted_results'
+        results_dir    = r / 'data' / 'results'
+        targeted_dir   = r / 'data' / 'targeted_results'
         allosteric_dir = r / 'data' / 'allosteric_nets'
-        default_cache = r / '.figure_notebook_cache'
     else:
-        # Cluster layout derived from globals
         results_dir = (ENSEMBLE_TRAINING_ROOT / ENSEMBLE_RESULTS_SUBDIR
                        if ENSEMBLE_RESULTS_SUBDIR else ENSEMBLE_TRAINING_ROOT)
         targeted_dir   = TARGETED_ROOT
         allosteric_dir = ALLOSTERIC_ROOT
-        default_cache  = ENSEMBLE_TRAINING_ROOT / '.figure_notebook_cache'
+
+    def _cache(data_dir):
+        return Path(cache_dir) if cache_dir else Path(data_dir) / '.figure_notebook_cache'
 
     return {
-        'results':        results_dir,
-        'targeted':       targeted_dir,
-        'allosteric':     allosteric_dir,
-        'allosteric_tgt': allosteric_dir / 'geometry_targeted',
-        'cache':          Path(cache_dir) if cache_dir else default_cache,
+        'results':             results_dir,
+        'targeted':            targeted_dir,
+        'allosteric':          allosteric_dir,
+        'allosteric_tgt':      allosteric_dir / 'geometry_targeted',
+        'cache_results':       _cache(results_dir),
+        'cache_targeted':      _cache(targeted_dir),
+        'cache_allosteric':    _cache(allosteric_dir),
+        'cache_allosteric_tgt': _cache(allosteric_dir / 'geometry_targeted'),
     }
 
 
@@ -571,7 +580,7 @@ def compute_mode_sensitivity(stiffnesses_np, pos_t, pos_t1, fdofs_np, edges_np, 
 # ── Mode runners ──────────────────────────────────────────────────────────────
 def run_global_nt(paths, task_id, real_id, mods):
     key = f'global_nt_t{task_id:02d}_r{real_id:02d}'
-    if cache_exists(paths['cache'], key):
+    if cache_exists(paths['cache_results'], key):
         print(f'  {key}: already cached, skipping.')
         return
 
@@ -632,13 +641,13 @@ def run_global_nt(paths, task_id, real_id, mods):
             print(f'  {key}/si{si}: FAILED — {e}')
 
     if ok:
-        save_cache(paths['cache'], key, **save_dict)
+        save_cache(paths['cache_results'], key, **save_dict)
         print(f'  {key}: saved.')
 
 
 def run_local_nt(paths, geom_id, task_id, real_id, mods):
     key = f'local_nt_g{geom_id}_t{task_id}_r{real_id}'
-    if cache_exists(paths['cache'], key):
+    if cache_exists(paths['cache_allosteric'], key):
         print(f'  {key}: already cached, skipping.')
         return
 
@@ -670,7 +679,7 @@ def run_local_nt(paths, geom_id, task_id, real_id, mods):
         rho, _ = spearmanr(psi, np.abs(s_shift))
         print(f'    rho_shift={rho:.3f}', flush=True)
 
-        save_cache(paths['cache'], key,
+        save_cache(paths['cache_allosteric'], key,
                    s_par=s_par, s_perp=s_perp, s_eq=s_eq, s_tot=s_tot,
                    s_shift=s_shift, bond_strain=b_strain, bond_stress=b_stress,
                    stiffnesses=net['stiffnesses'], psi=psi,
@@ -682,7 +691,7 @@ def run_local_nt(paths, geom_id, task_id, real_id, mods):
 
 def run_global_rep(paths, task_id, real_id, mods):
     key = f'global_rep_t{task_id:02d}_r{real_id:02d}'
-    if cache_exists(paths['cache'], key):
+    if cache_exists(paths['cache_targeted'], key):
         print(f'  {key}: already cached, skipping.')
         return
 
@@ -750,13 +759,13 @@ def run_global_rep(paths, task_id, real_id, mods):
             f'si{si}_s_eq':     sub_s_eq[si],
             f'si{si}_s_tot':    sub_s_tot[si],
         })
-    save_cache(paths['cache'], key, **save_dict)
+    save_cache(paths['cache_targeted'], key, **save_dict)
     print(f'  {key}: saved ({len(comp_strains)} subtask(s), {len(network.edges)} edges).')
 
 
 def run_local_rep(paths, task_id, real_id, mods):
     key = f'local_rep_tgt_t{task_id}_r{real_id}'
-    if cache_exists(paths['cache'], key):
+    if cache_exists(paths['cache_allosteric_tgt'], key):
         print(f'  {key}: already cached, skipping.')
         return
 
@@ -784,7 +793,7 @@ def run_local_rep(paths, task_id, real_id, mods):
         ss_par.append(sp); ss_perp.append(spe); ss_eq.append(seq)
         ss_tot.append(st); ss_shift.append(ssh)
 
-    save_cache(paths['cache'], key,
+    save_cache(paths['cache_allosteric_tgt'], key,
                nodes=net_l['nodes'],
                stiffnesses=net_l['stiffnesses'],
                eq_lengths=net_l['eq_lengths'],
@@ -806,7 +815,7 @@ def run_local_rep(paths, task_id, real_id, mods):
 
 def run_modesens_local(paths, geom_id, task_id, real_id, mods):
     key = f'modesens_local_g{geom_id}_t{task_id}_r{real_id}'
-    if cache_exists(paths['cache'], key):
+    if cache_exists(paths['cache_allosteric'], key):
         print(f'  {key}: already cached, skipping.')
         return
 
@@ -826,7 +835,7 @@ def run_modesens_local(paths, geom_id, task_id, real_id, mods):
                                          net['free_dofs'], net['edges'], net['eq_lengths'], mods)
         norms = np.linalg.norm(sens, axis=0)
         rho, _ = spearmanr(ssh, norms)
-        save_cache(paths['cache'], key, rho=np.array(rho), sshift=ssh, col_norms=norms)
+        save_cache(paths['cache_allosteric'], key, rho=np.array(rho), sshift=ssh, col_norms=norms)
         print(f'  {key}: rho={rho:.3f}, saved.')
     except Exception as e:
         print(f'  {key}: FAILED — {e}')
@@ -834,7 +843,7 @@ def run_modesens_local(paths, geom_id, task_id, real_id, mods):
 
 def run_modesens_global(paths, task_id, real_id, mods):
     key = f'modesens_global_t{task_id:02d}_r{real_id:02d}'
-    if cache_exists(paths['cache'], key):
+    if cache_exists(paths['cache_results'], key):
         print(f'  {key}: already cached, skipping.')
         return
 
@@ -863,7 +872,7 @@ def run_modesens_global(paths, task_id, real_id, mods):
                                          fdofs, network.edges, network.rest_lengths, mods)
         norms = np.linalg.norm(sens, axis=0)
         rho, _ = spearmanr(ssh, norms)
-        save_cache(paths['cache'], key, rho=np.array(rho), sshift=ssh, col_norms=norms)
+        save_cache(paths['cache_results'], key, rho=np.array(rho), sshift=ssh, col_norms=norms)
         print(f'  {key}: rho={rho:.3f}, saved.')
     except Exception as e:
         print(f'  {key}: FAILED — {e}')
@@ -892,10 +901,12 @@ def main():
     src_root  = Path(args.repo_root) if args.repo_root else Path(__file__).resolve().parents[1]
     mods      = _setup_imports(src_root)
 
-    print(f'Mode       : {args.mode}')
-    print(f'Results dir: {paths["results"]}')
-    print(f'Cache dir  : {paths["cache"]}')
-    print(f'JAX devices: {mods["jax"].devices()}')
+    print(f'Mode               : {args.mode}')
+    print(f'cache_results      : {paths["cache_results"]}')
+    print(f'cache_targeted     : {paths["cache_targeted"]}')
+    print(f'cache_allosteric   : {paths["cache_allosteric"]}')
+    print(f'cache_allosteric_tgt: {paths["cache_allosteric_tgt"]}')
+    print(f'JAX devices        : {mods["jax"].devices()}')
     print()
 
     if args.mode == 'global_nt':
