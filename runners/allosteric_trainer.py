@@ -551,6 +551,17 @@ def main():
             start_step = 0
             print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
 
+        # Load best state (survives resume across SLURM restarts)
+        best_path = os.path.join(output_path, 'best_stiffnesses.npy')
+        bmse_path = os.path.join(output_path, 'best_combined_mse.txt')
+        if os.path.exists(best_path) and os.path.exists(bmse_path):
+            best_stiffnesses  = np.load(best_path)
+            best_combined_mse = float(np.loadtxt(bmse_path))
+            print(f"  Best state    : combined_mse={best_combined_mse:.4e} (loaded from disk)")
+        else:
+            best_stiffnesses  = None   # _run_training_loop initialises from stiffnesses
+            best_combined_mse = np.inf
+
         print(f"  Training steps: {training_steps:,}")
 
         # ── Attempt 1 (or its remaining portion) ──────────────────────────────
@@ -561,12 +572,15 @@ def main():
             print(f"\n--- {tag} ---")
             lr = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
                                          stiffnesses.copy(), ETA, tod, dx, nsteps)
-            msearray, msearray2, stiffnesses = _run_training_loop(
-                nodes, incidence_matrix, eq_lengths, stiffnesses,
-                lr, tod, tod2, dinputdistance, dinputdistance2,
-                nsteps, nsteps2, attempt1_remaining, output_path,
-                msearray=msearray, msearray2=msearray2,
-                step_offset=start_step)
+            msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
+                _run_training_loop(
+                    nodes, incidence_matrix, eq_lengths, stiffnesses,
+                    lr, tod, tod2, dinputdistance, dinputdistance2,
+                    nsteps, nsteps2, attempt1_remaining, output_path,
+                    msearray=msearray, msearray2=msearray2,
+                    step_offset=start_step,
+                    best_stiffnesses=best_stiffnesses,
+                    best_combined_mse=best_combined_mse)
 
         if check_success(msearray, msearray2):
             print("\nAttempt 1 succeeded.")
@@ -582,12 +596,15 @@ def main():
                 print(f"\n--- {tag} ---")
                 lr2 = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
                                               stiffnesses.copy(), ETA, tod, dx, nsteps)
-                msearray, msearray2, stiffnesses = _run_training_loop(
-                    nodes, incidence_matrix, eq_lengths, stiffnesses,
-                    lr2, tod, tod2, dinputdistance, dinputdistance2,
-                    nsteps, nsteps2, attempt2_remaining, output_path,
-                    msearray=msearray, msearray2=msearray2,
-                    step_offset=step_after_a1)
+                msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
+                    _run_training_loop(
+                        nodes, incidence_matrix, eq_lengths, stiffnesses,
+                        lr2, tod, tod2, dinputdistance, dinputdistance2,
+                        nsteps, nsteps2, attempt2_remaining, output_path,
+                        msearray=msearray, msearray2=msearray2,
+                        step_offset=step_after_a1,
+                        best_stiffnesses=best_stiffnesses,
+                        best_combined_mse=best_combined_mse)
 
             if check_success(msearray, msearray2):
                 print("\nAttempt 2 succeeded.")
@@ -600,10 +617,13 @@ def main():
                 #return
 
         # ── Final save ────────────────────────────────────────────────────────
-        np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
-        np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
-        np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
-        print(f"\nResults saved to {output_path}")
+        np.save(os.path.join(output_path, 'stiffnesses.npy'),      stiffnesses)
+        np.save(os.path.join(output_path, 'best_stiffnesses.npy'), best_stiffnesses)
+        np.save(os.path.join(output_path, 'mse1.npy'),             msearray)
+        np.save(os.path.join(output_path, 'mse2.npy'),             msearray2)
+        np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'), [best_combined_mse])
+        print(f"\nResults saved to {output_path}"
+              f"  (best combined MSE: {best_combined_mse:.4e})")
 
     finally:
         os.chdir(original_dir)
