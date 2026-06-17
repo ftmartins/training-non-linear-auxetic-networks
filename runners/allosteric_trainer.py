@@ -305,16 +305,20 @@ def calibrate_learning_rate(nodes, incidence_matrix, eq_lengths, stiffnesses,
 
 
 # ── Core training loop ────────────────────────────────────────────────────────
-
 def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                        learning_rate, tod, tod2, dinputdistance, dinputdistance2,
                        nsteps, nsteps2, n_steps, output_path,
-                       msearray=None, msearray2=None, step_offset=0):
+                       msearray=None, msearray2=None, step_offset=0,
+                       best_stiffnesses=None, best_combined_mse=np.inf):
     if msearray  is None: msearray  = np.array([])
     if msearray2 is None: msearray2 = np.array([])
+    if best_stiffnesses is None:
+        best_stiffnesses = stiffnesses.copy()
 
     dx  = dinputdistance  / nsteps
     dx2 = dinputdistance2 / nsteps2
+
+    best_updated = False
 
     for j in range(n_steps):
         # Task 1
@@ -350,9 +354,16 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         msearray  = np.append(msearray,  mse)
         msearray2 = np.append(msearray2, mse2)
 
+        combined = (mse + mse2) / 2.0
+        if combined < best_combined_mse and not np.any(np.isnan(stiffnesses)):
+            best_combined_mse = combined
+            best_stiffnesses  = stiffnesses.copy()
+            best_updated      = True
+
         global_step = step_offset + j + 1
         if global_step % 500 == 0:
-            print(f"  step {global_step}: MSE1={mse:.4e}  MSE2={mse2:.4e}")
+            print(f"  step {global_step}: MSE1={mse:.4e}  MSE2={mse2:.4e}"
+                  f"  best_combined={best_combined_mse:.4e}")
             np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
             np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
             np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
@@ -360,12 +371,28 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                 np.save(os.path.join(output_path, 'stiffnesses_ckpt.npy'), stiffnesses)
                 np.savetxt(os.path.join(output_path, 'ckpt_step.txt'),
                            [global_step], fmt='%d')
+            if best_updated:
+                np.save(os.path.join(output_path, 'best_stiffnesses.npy'), best_stiffnesses)
+                np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'),
+                           [best_combined_mse])
+                best_updated = False
+            # Append current stiffnesses to trajectory (one row per checkpoint).
+            traj_path  = os.path.join(output_path, 'stiffnesses_traj.npy')
+            steps_path = os.path.join(output_path, 'stiffnesses_traj_steps.npy')
+            if os.path.exists(traj_path) and os.path.exists(steps_path):
+                traj  = np.vstack([np.load(traj_path),  stiffnesses])
+                steps = np.append(np.load(steps_path), global_step)
+            else:
+                traj  = stiffnesses[np.newaxis, :]
+                steps = np.array([global_step])
+            np.save(traj_path,  traj)
+            np.save(steps_path, steps)
 
         if mse < 5e-8 and mse2 < 5e-8:
             print(f"  Early stop at step {global_step}: both tasks converged.")
             break
 
-    return msearray, msearray2, stiffnesses
+    return msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse
 
 
 # ── Success check ─────────────────────────────────────────────────────────────
@@ -465,6 +492,8 @@ def main():
     # Output subfolder
     geom_dir = 'geometry_targeted' if targeted else f'geometry_{gid}'
     output_path = os.path.join(output_dir, geom_dir, f'task_{tid}', f'realization_{rid}')
+
+    print(geom_dir, output_path, 'test outputpath')
     os.makedirs(output_path, exist_ok=True)
 
     try:
@@ -562,13 +591,13 @@ def main():
 
             if check_success(msearray, msearray2):
                 print("\nAttempt 2 succeeded.")
-            else:
-                print("\nBoth attempts failed. Deleting output and resubmitting.")
-                os.chdir(original_dir)
-                shutil.rmtree(output_path, ignore_errors=True)
-                resubmit_new_realization(gid, tid, rid, training_steps,
-                                         output_dir, log_dir, targeted=targeted)
-                return
+            #else:
+            #    print("\nBoth attempts failed. Deleting output and resubmitting.")
+            #    os.chdir(original_dir)
+            #    shutil.rmtree(output_path, ignore_errors=True)
+                #resubmit_new_realization(gid, tid, rid, training_steps,
+                #                         output_dir, log_dir, targeted=targeted)
+                #return
 
         # ── Final save ────────────────────────────────────────────────────────
         np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
