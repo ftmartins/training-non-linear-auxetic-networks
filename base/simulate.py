@@ -6,21 +6,14 @@ computation (both Cython-FIRE and JAX-differentiable variants), and the
 JAX-differentiable Poisson-ratio observable.
 """
 
-import sys
 import warnings
 import numpy as np
-from pathlib import Path
 
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
-# Cython .so lives at project root
-_ROOT = Path(__file__).parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
-from fire_minimize_memview_cy import fire_minimize_dof
+from .fire_minimize_memview_cy import fire_minimize_dof
 from .config import FORCE_TOL
 
 
