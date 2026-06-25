@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+.venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+.figure_notebook_cache/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
+
+# Data and large outputs
+data/
+figure_data/
+videos/

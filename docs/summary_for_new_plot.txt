@@ -1,0 +1,198 @@
+## Task: Compare an edge quantity (S) to mechanical modes in a network
+
+### Goal
+
+Given:
+
+* Incidence matrix (B)
+* Edge stiffness matrix (K_e)
+* Hessian (H = B^T K_e B)
+* Edge quantity (S)
+
+Compute how (S) relates to mechanical modes (eigenvectors of (H)), using both:
+
+1. Node-space comparison (preferred, physically clean)
+2. Edge-space comparison (energy-orthonormal basis)
+
+Also compute:
+
+* **Amplitude coefficients**
+* **Normalized similarity coefficients**
+* **Heatmap of overlaps across a trajectory**
+
+---
+
+## Step 1: Project onto compatible subspace
+
+Remove self-stress component:
+[
+S_{\mathrm{comp}} = B H^{-1} B^T K_e S
+]
+
+Also compute:
+[
+u_S = H^{-1} B^T K_e S
+]
+
+Interpretation:
+
+* (u_S): displacement induced by (S)
+* (S_{\mathrm{comp}} = B u_S)
+
+---
+
+## Step 2: Eigen decomposition
+
+Solve:
+[
+H u_i = \lambda_i u_i
+]
+
+Store:
+
+* Eigenvectors (U = [u_i])
+* Eigenvalues (\lambda_i)
+
+---
+
+## Step 3: Node-space comparison (recommended)
+
+### Amplitudes
+
+[
+a_i = u_i^T H u_S
+]
+Equivalent:
+[
+a_i = \lambda_i (u_i^T u_S)
+]
+
+### Similarity (normalized)
+
+Define:
+[
+|u_S|_H^2 = u_S^T H u_S
+]
+
+Then:
+[
+\tilde{a}_i = \frac{a_i}{\sqrt{u_S^T H u_S}}
+]
+
+---
+
+## Step 4: Edge-space comparison
+
+Define energy-orthonormal edge modes:
+[
+e_i = \frac{B u_i}{\sqrt{\lambda_i}}
+]
+
+### Amplitudes
+
+[
+c_i = e_i^T K_e S
+]
+
+### Similarity (normalized)
+
+Define:
+[
+|S_{\mathrm{comp}}|*{K_e}^2 = S*{\mathrm{comp}}^T K_e S_{\mathrm{comp}}
+]
+
+Then:
+[
+\tilde{c}*i = \frac{c_i}{\sqrt{S*{\mathrm{comp}}^T K_e S_{\mathrm{comp}}}}
+]
+
+---
+
+## Step 5: Consistency check (important)
+
+These should match up to scaling:
+[
+c_i = \sqrt{\lambda_i} (u_i^T u_S)
+]
+
+Use this to verify correctness.
+
+---
+
+## Step 6: Implementation details
+
+* Use pseudoinverse or regularization for (H^{-1}) (handle zero modes):
+
+  * Remove rigid body modes or small eigenvalues
+* Use sparse linear algebra where possible
+* Avoid explicitly forming (H^{-1}); solve linear systems instead
+
+---
+
+## Step 7: Output data structures
+
+For each time step (t):
+
+* `a[i, t]` = node-space amplitudes
+* `a_norm[i, t]` = node-space similarities
+* `c[i, t]` = edge-space amplitudes
+* `c_norm[i, t]` = edge-space similarities
+
+---
+
+## Step 8: Heatmap visualization
+
+Construct a heatmap of overlaps across a trajectory.
+
+### Input
+
+* A sequence of edge quantities: (S(t))
+* Corresponding matrices (B(t), K_e(t), H(t)) if evolving
+
+### Compute
+
+For each time step (t):
+
+1. Compute (S_{\mathrm{comp}}(t))
+2. Compute modal coefficients (choose one):
+
+   * Node-space: (a_i(t)) or (\tilde{a}_i(t))
+   * Edge-space: (c_i(t)) or (\tilde{c}_i(t))
+
+### Plot
+
+* **x-axis**: time / trajectory index (t)
+* **y-axis**: mode index (i)
+* **values**: overlap coefficients (prefer normalized)
+
+### Notes
+
+* Use normalized coefficients for interpretability
+* Optionally log-scale or clip extreme values
+* Sort modes by eigenvalue (low → high frequency)
+
+---
+
+## Final guidance
+
+* Prefer **node-space projection** for stability and clarity
+* Use **edge-space formulation** if you want direct interpretation in strain space
+* Always remove self-stress via (S_{\mathrm{comp}}) before comparison
+* Use normalized overlaps for comparing across time
+
+---
+
+## Deliverables to implement
+
+1. Function to compute:
+
+   * (S_{\mathrm{comp}}), (u_S)
+2. Eigen decomposition of (H)
+3. Node-space amplitudes + normalized similarities
+4. Edge-space amplitudes + normalized similarities
+5. Heatmap over trajectory:
+
+   * modes × time
+   * using normalized overlaps
+
+Ensure numerical stability and consistency checks are included.

@@ -26,13 +26,15 @@ from joblib import Parallel, delayed
 from scipy.sparse.linalg import LinearOperator, eigsh
 
 # ── Path setup ────────────────────────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent))
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-from task_generator import generate_task_config
-from config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_nodes, get_n_strain_steps
-from network_utils import create_auxetic_network, get_square_boundary_nodes
-from elastic_network import ElasticNetwork
-from training_functions_with_toggle import (
+from training.src.task_generator import generate_task_config
+from base.config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_nodes, get_n_strain_steps
+from base.network_utils import create_auxetic_network, get_square_boundary_nodes
+from base.elastic_network import ElasticNetwork
+from training.src.training_functions import (
     compute_poisson_ratio_single,
     compute_poisson_ratio_single_jax,
     crf as _crf_default,
