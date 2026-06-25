@@ -57,15 +57,9 @@ from training.src.targeted_task_generator import (
 
 
 # Import shared utilities
-<<<<<<< HEAD:runners/targeted_ensemble_runner.py
-from task_generator import generate_realization_stiffnesses, compute_target_extensions
-from network_utils import create_auxetic_network
-from checkpoint_manager import (
-=======
 from training.src.task_generator import compute_target_extensions
 from base.network_utils import create_auxetic_network
 from training.src.checkpoint_manager import (
->>>>>>> 4bc8a67c406d3e910d5b9e046a13fb248ea987c2:training/runners/targeted_ensemble_runner.py
     is_training_complete,
     save_training_results,
     get_incomplete_jobs,
@@ -83,17 +77,12 @@ import pickle
 # Learning-rate reduction factor applied when NaN is detected in saved results
 LR_NAN_REDUCTION = 0.1
 
-# Import training functions
-try:
-    from training.src.training_functions import (
+# Import training function
+from training.src.training_functions import (
         finish_training_GD_auxetic_batch,
         finish_training_GD_auxetic_batch_jax,
     )
-    TRAINING_FUNCTIONS_AVAILABLE = True
-except ImportError as e:
-   print(f"Warning: Could not import training functions: {e}")
-   TRAINING_FUNCTIONS_AVAILABLE = False
-
+TRAINING_FUNCTIONS_AVAILABLE = True
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
                         gradient_method='jax'):
