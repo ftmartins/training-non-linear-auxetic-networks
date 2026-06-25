@@ -77,7 +77,7 @@ def get_poisson_pool(task_seed: int) -> list:
 
 def get_n_strain_steps(task_seed: int) -> int:
     """Return the quasistatic trajectory step count for the given task seed."""
-    return 400 if task_seed < 20 else 400
+    return 400
 #used to be 100 if task_seed < 20 before the may realizations
 
 def get_n_nodes(task_seed: int) -> int:
@@ -85,7 +85,7 @@ def get_n_nodes(task_seed: int) -> int:
     if task_seed < 10:
         return 100
     elif task_seed < 20:
-        return 300
+        return 100
     else:
         return 100
 
@@ -95,9 +95,9 @@ def get_n_nodes(task_seed: int) -> int:
 # ============================================================================
 
 LEARNING_RATE = 1e-2
-N_STEPS = 1_000  # Number of training iterations
+N_STEPS = 10_000  # Number of training iterations
 # Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
-N_STRAIN_STEPS = 200  # Number of steps in quasistatic trajectory (tasks < 20)
+N_STRAIN_STEPS = 300  # Number of steps in quasistatic trajectory (tasks < 20)
 FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
 VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value

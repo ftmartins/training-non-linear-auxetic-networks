@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH -t 5-00:00:00
-#SBATCH --qos=liu
-#SBATCH --partition=liu_tesla,liu_titan
+#SBATCH --qos=low
+#SBATCH --partition=low
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=4gb
-#SBATCH --array=0-124%20
+#SBATCH --array=0-23%25
 #SBATCH --job-name=allosteric
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_%A_%a.out
 #SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_%A_%a.err
@@ -40,7 +40,7 @@ echo "Conda env: ${CONDA_DEFAULT_ENV}"
 
 GEOMETRY_ID=$((SLURM_ARRAY_TASK_ID / 25))
 TASK_ID=$(((SLURM_ARRAY_TASK_ID / 5) % 5))
-REALIZATION_ID=$((SLURM_ARRAY_TASK_ID % 5))
+REALIZATION_ID=$((SLURM_ARRAY_TASK_ID % 10))
 
 echo ""
 echo "Geometry ID:    ${GEOMETRY_ID}"
@@ -52,8 +52,9 @@ python allosteric_trainer.py \
     --geometry-id    ${GEOMETRY_ID} \
     --task-id        ${TASK_ID} \
     --realization-id ${REALIZATION_ID} \
-    --training-steps 100000 \
-    --output-dir     /data2/shared/felipetm/allosteric_nets
+    --training-steps 25000 \
+    --output-dir     /data2/shared/felipetm/allosteric_nets \
+    --targeted-ensemble 
 
 EXIT_CODE=$?
 

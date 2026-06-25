@@ -43,7 +43,7 @@ LR_TARGET_LOG = -3.5   # target mean(log10|delta_K|)
 
 N_GEOMETRIES   = 5
 N_TASKS        = 5
-N_REALIZATIONS = 5
+N_REALIZATIONS = 10 # 5
 N_TRAINING_STEPS = 100_000
 
 # Non-overlapping seed namespaces

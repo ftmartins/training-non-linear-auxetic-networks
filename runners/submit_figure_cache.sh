@@ -43,13 +43,13 @@
 #        sbatch --export=CACHE_MODE=modesens_local  --array=0-124%40 submit_figure_cache.sh
 #
 # ============================================================================
-#SBATCH -t 1-00:00:00
-#SBATCH --qos=low
-#SBATCH --partition=low
+#SBATCH -t 0-01:00:00
+#SBATCH --qos=liu
+#SBATCH --partition=liu_compute
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16gb
+#SBATCH --mem=4gb
 #SBATCH --job-name=fig_cache
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/fig_cache_%A_%a.out
 #SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/fig_cache_%A_%a.err

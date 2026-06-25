@@ -985,6 +985,11 @@ def finish_training_GD_auxetic_batch_jax(
     last_relaxed_positions = np.copy(network.positions)
     loss = np.inf
     min_loss = np.inf
+    try:
+       loss = history['loss'][-1]
+       min_loss = np.min(history['loss'])
+    except:
+        pass
 
     # Initialize history
     for key in ('stiffnesses', 'loss', 'positions'):
@@ -1090,7 +1095,7 @@ def finish_training_GD_auxetic_batch_jax(
 
         if save_intermediate and step % save_interval == 0:
             save_training_results(
-                task_seed=task_seed, realization_seed=realization_seed,
+                               task_seed=task_seed, realization_seed=realization_seed,
                 history=history, network=network,
                 task_config=task_config, results_dir=TARGETED_RESULTS_DIR,
             )
