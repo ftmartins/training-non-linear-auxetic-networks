@@ -43,7 +43,9 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # Ensure project root is importable
 # ---------------------------------------------------------------------------
-sys.path.insert(0, str(Path(__file__).parent))
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 import jax
 import jax.numpy as jnp
@@ -51,16 +53,16 @@ jax.config.update("jax_enable_x64", True)
 
 from scipy.sparse.linalg import LinearOperator, eigsh
 
-from config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_strain_steps, get_n_nodes
-from network_utils import create_auxetic_network, get_square_boundary_nodes
-from elastic_network import ElasticNetwork
-from task_generator import generate_task_config
-from training_functions_with_toggle import (
+from base.config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_strain_steps, get_n_nodes
+from base.network_utils import create_auxetic_network, get_square_boundary_nodes
+from base.elastic_network import ElasticNetwork
+from training.src.task_generator import generate_task_config
+from training.src.training_functions import (
     compute_quasistatic_trajectory_auxetic,
     compute_poisson_ratio_single_jax,
     crf as _crf_default,
 )
-from generalized_susceptibility import (
+from analysis.susceptibility import (
     compute_physical_hessian_strained,
     compute_constrained_hessian_inverse,
     compute_full_jacobian_matrixwise,
