@@ -57,7 +57,7 @@ from training.src.targeted_task_generator import (
 
 
 # Import shared utilities
-from training.src.task_generator import compute_target_extensions
+from training.src.task_generator import generate_realization_stiffnesses, compute_target_extensions
 from base.network_utils import create_auxetic_network
 from training.src.checkpoint_manager import (
     is_training_complete,

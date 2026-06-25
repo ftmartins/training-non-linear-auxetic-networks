@@ -70,7 +70,7 @@ from analysis.susceptibility import (
 )
 
 try:
-    from fire_minimize_memview_cy import fire_minimize_dof
+    from base.fire_minimize_memview_cy import fire_minimize_dof
     print("Cython FIRE minimiser loaded.")
 except ImportError:
     fire_minimize_dof = None
