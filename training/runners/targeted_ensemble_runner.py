@@ -57,15 +57,9 @@ from training.src.targeted_task_generator import (
 
 
 # Import shared utilities
-<<<<<<< HEAD:runners/targeted_ensemble_runner.py
-from task_generator import generate_realization_stiffnesses, compute_target_extensions
-from network_utils import create_auxetic_network
-from checkpoint_manager import (
-=======
-from training.src.task_generator import compute_target_extensions
+from training.src.task_generator import generate_realization_stiffnesses, compute_target_extensions
 from base.network_utils import create_auxetic_network
 from training.src.checkpoint_manager import (
->>>>>>> 4bc8a67c406d3e910d5b9e046a13fb248ea987c2:training/runners/targeted_ensemble_runner.py
     is_training_complete,
     save_training_results,
     get_incomplete_jobs,

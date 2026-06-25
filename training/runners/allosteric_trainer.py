@@ -30,13 +30,7 @@ import textwrap
 import numpy as np
 from scipy.optimize import fsolve
 
-<<<<<<< HEAD:runners/allosteric_trainer.py
-sys.path.append('../src/')
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'data', 'ToFelipe0422'))
-=======
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'extra', 'ToFelipe0422'))
->>>>>>> 4bc8a67c406d3e910d5b9e046a13fb248ea987c2:training/runners/allosteric_trainer.py
-import functions as f  # noqa: E402
+import training.lammps_utils as f
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 K_MIN    = 1e-3
