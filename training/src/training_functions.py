@@ -262,6 +262,7 @@ def finish_training_GD_auxetic_batch(
     ]
 
     pbar = tqdm(range(n_steps), desc=f'(loss = {loss:.4e}, min loss={min_loss:.4e})')
+    _last_traj_best_step = -1  # sentinel: best trajectory not yet computed
 
     for step in pbar:
         # --- Minimize positions ---
@@ -403,6 +404,20 @@ def finish_training_GD_auxetic_batch(
 
         # Periodically save intermediate trajectories and checkpoint
         if save_intermediate and step % save_interval == 0:
+            # Update best trajectory when the best step has changed since last save
+            _cur_best = int(np.argmin(history['loss']))
+            if _cur_best != _last_traj_best_step:
+                _bn = copy.copy(network)
+                _bn.stiffnesses = np.array(history['stiffnesses'][_cur_best])
+                _bn.update_positions(np.array(history['positions'][_cur_best]))
+                history['best_trajectory'] = compute_quasistatic_trajectory_auxetic(
+                    _bn, min(source_compression_strain_list), top_nodes, bottom_nodes,
+                    n_steps=n_strain_steps, tol=force_tol,
+                    force_type=force_type, method=method,
+                )
+                history['best_step'] = _cur_best
+                _last_traj_best_step = _cur_best
+
             save_training_results(
                 task_seed=task_seed,
                 realization_seed=realization_seed,
@@ -425,11 +440,27 @@ def finish_training_GD_auxetic_batch(
         if loss < loss_tol:
             break
 
+    # --- Best-step trajectory (final update) ---
+    # Recompute only if the best step changed since the last checkpoint save,
+    # or if no trajectory was computed yet (e.g., save_intermediate=False).
+    best_step = int(np.argmin(history['loss']))
+    if best_step != _last_traj_best_step:
+        best_net = copy.copy(network)
+        best_net.stiffnesses = np.array(history['stiffnesses'][best_step])
+        best_net.update_positions(np.array(history['positions'][best_step]))
+        history['best_trajectory'] = compute_quasistatic_trajectory_auxetic(
+            best_net, min(source_compression_strain_list), top_nodes, bottom_nodes,
+            n_steps=n_strain_steps, tol=force_tol,
+            force_type=force_type, method=method,
+        )
+        history['best_step'] = best_step
+
     # Final summary
     print(f"\n{'='*60}")
     print(f"Training complete!")
     print(f"  Final loss: {loss:.6e}")
     print(f"  Minimum loss: {min_loss:.6e}")
+    print(f"  Best step: {best_step}  (trajectory stored in history['best_trajectory'])")
     print(f"{'='*60}")
 
     trained_network = network
