@@ -85,7 +85,7 @@ from training.src.training_functions import (
 TRAINING_FUNCTIONS_AVAILABLE = True
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
-                        gradient_method='jax'):
+                        gradient_method='newton'):
     """
     Run a single targeted training job with checkpoint support.
 
@@ -94,7 +94,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         realization_seed: Realization index (default: 0)
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing
-        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
+        gradient_method: 'newton' (IFT, default), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
 
     Returns:
         success: Boolean indicating success
@@ -240,9 +240,12 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             print("Step 4: Running training...")
 
         def _run_train(net, hist, lr, n_steps):
-            train_fn = (finish_training_GD_auxetic_batch_jax
-                        if gradient_method == 'jax'
-                        else finish_training_GD_auxetic_batch)
+            if gradient_method == 'jax':
+                train_fn = finish_training_GD_auxetic_batch_jax
+                method_kwarg = {}
+            else:
+                train_fn = finish_training_GD_auxetic_batch
+                method_kwarg = {'method': 'fire' if gradient_method in ('fire', 'parallel') else 'newton'}
             return train_fn(
                 network=net,
                 history=hist,
@@ -264,6 +267,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 save_interval=5,
                 task_config=task_config,
                 TARGETED_RESULTS_DIR=TARGETED_RESULTS_DIR,
+                **method_kwarg,
             )
 
         if remaining_steps > 0:
@@ -328,14 +332,14 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         return False
 
 
-def run_all_targeted(resume=True, verbose=False, gradient_method='jax'):
+def run_all_targeted(resume=True, verbose=False, gradient_method='newton'):
     """
     Run all 5 targeted training jobs sequentially.
 
     Args:
         resume: Skip already completed jobs
         verbose: Print detailed progress
-        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
+        gradient_method: 'newton' (IFT, default), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
     """
     print(f"\n{'#'*80}")
     print(f"# TARGETED ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -490,9 +494,9 @@ Examples:
     )
     parser.add_argument(
         '--gradient-method',
-        choices=['parallel', 'jax'],
-        default='jax',
-        help='Gradient computation method: parallel (finite-difference, default) or jax (autodiff)'
+        choices=['newton', 'jax', 'fire', 'parallel'],
+        default='newton',
+        help='Gradient computation method: newton (IFT, default), jax (autodiff), fire/parallel (finite-difference)'
     )
 
     args = parser.parse_args()

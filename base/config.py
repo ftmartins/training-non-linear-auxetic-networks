@@ -98,7 +98,7 @@ LEARNING_RATE = 1e-2
 N_STEPS = 10_000  # Number of training iterations
 # Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
 N_STRAIN_STEPS = 300  # Number of steps in quasistatic trajectory (tasks < 20)
-FORCE_TOL = 1e-8  # Force convergence tolerance for FIRE
+FORCE_TOL = 1e-10  # Force convergence tolerance
 VMIN = 1e-3  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
 ETA = 0.1  # Coupling factor (from notebook)
