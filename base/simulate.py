@@ -8,8 +8,11 @@ JAX-differentiable Poisson-ratio observable.
 
 import warnings
 import numpy as np
+from scipy.sparse import coo_matrix
+from scipy.sparse.linalg import spsolve
 
 import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
@@ -24,9 +27,9 @@ from .config import FORCE_TOL
 def elastic_energy(flat_positions, edges, rest_lengths, stiffnesses, *, d=2, force_type="quadratic"):
     """JAX-differentiable elastic energy. flat_positions: (N*d,)."""
     pos = jnp.reshape(flat_positions, (-1, d))
-    edges = jnp.asarray(edges)
-    k = jnp.asarray(stiffnesses)
-    L0 = jnp.asarray(rest_lengths)
+    edges = jnp.asarray(edges, dtype=jnp.int32)
+    k = jnp.asarray(stiffnesses, dtype=jnp.float64)
+    L0 = jnp.asarray(rest_lengths, dtype=jnp.float64)
 
     i = edges[:, 0]
     j = edges[:, 1]
@@ -87,20 +90,99 @@ def fire_minimize_network(network, constrained_dof_idx=None, force_type='quadrat
 
 
 # ============================================================================
-# QUASISTATIC TRAJECTORY — CYTHON FIRE
+# NEWTON QUASISTATIC HELPERS (private)
+# ============================================================================
+
+def _spring_forces(pos, edges, rest_lengths, stiffnesses):
+    """O(n_edges) numpy force computation for harmonic springs. Returns F = -dE/dx."""
+    i_n = edges[:, 0]; j_n = edges[:, 1]
+    r_ij = pos[j_n] - pos[i_n]
+    norms = np.linalg.norm(r_ij, axis=1)
+    fmag = stiffnesses * (norms - rest_lengths) / norms
+    F_edge = fmag[:, None] * r_ij
+    F = np.zeros_like(pos)
+    np.add.at(F, j_n, -F_edge)
+    np.add.at(F, i_n,  F_edge)
+    return F
+
+
+def _precompute_stiffness_coo_indices(edges, n_nodes):
+    """Precompute COO row/col indices for stiffness matrix assembly (constant for fixed graph)."""
+    i_n = edges[:, 0]; j_n = edges[:, 1]
+    ri = 2 * i_n; rj = 2 * j_n
+    rows = np.concatenate([ri,   ri,   ri+1, ri+1,
+                           rj,   rj,   rj+1, rj+1,
+                           ri,   ri,   ri+1, ri+1,
+                           rj,   rj,   rj+1, rj+1])
+    cols = np.concatenate([ri,   ri+1, ri,   ri+1,
+                           rj,   rj+1, rj,   rj+1,
+                           rj,   rj+1, rj,   rj+1,
+                           ri,   ri+1, ri,   ri+1])
+    return rows, cols
+
+
+def _stiffness_matrix_sparse(pos, edges, rest_lengths, stiffnesses, free_idx, n_dof,
+                              coo_rows, coo_cols):
+    """Assemble sparse stiffness matrix (free DOFs only) via COO → CSC for spsolve."""
+    i_n = edges[:, 0]; j_n = edges[:, 1]
+    r_ij = pos[j_n] - pos[i_n]
+    norms = np.linalg.norm(r_ij, axis=1)
+    k = stiffnesses; L0 = rest_lengths
+    t1 = k * (1 - L0 / norms)
+    t2 = k * L0 / norms ** 3
+    dx, dy = r_ij[:, 0], r_ij[:, 1]
+    K00 = t1 + t2 * dx * dx
+    K01 = t2 * dx * dy
+    K11 = t1 + t2 * dy * dy
+    vals = np.concatenate([ K00,  K01,  K01,  K11,
+                             K00,  K01,  K01,  K11,
+                            -K00, -K01, -K01, -K11,
+                            -K00, -K01, -K01, -K11])
+    H = coo_matrix((vals, (coo_rows, coo_cols)), shape=(n_dof, n_dof)).tocsc()
+    return H[free_idx, :][:, free_idx]
+
+
+def _grad_k_from_adjoint(pos_final, edges, rest_lengths, w_full):
+    """
+    O(n_edges) IFT gradient: -dR/dk^T @ w.
+
+    For spring e connecting (i,j):
+      -dR/dk^T @ w = stretch_e * r_hat_e · (w_i - w_j)
+    """
+    i_n = edges[:, 0]; j_n = edges[:, 1]
+    r_ij = pos_final[j_n] - pos_final[i_n]
+    norms = np.linalg.norm(r_ij, axis=1)
+    stretch = norms - rest_lengths
+    dx = r_ij[:, 0] / norms; dy = r_ij[:, 1] / norms
+    wi_x = w_full[2*i_n]; wi_y = w_full[2*i_n + 1]
+    wj_x = w_full[2*j_n]; wj_y = w_full[2*j_n + 1]
+    return stretch * (dx * (wi_x - wj_x) + dy * (wi_y - wj_y))
+
+
+# ============================================================================
+# QUASISTATIC TRAJECTORY
 # ============================================================================
 
 def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_nodes, bottom_nodes,
                                            n_steps=100, verbose=False, force_type='quadratic',
-                                           tol=1e-6, d=2):
+                                           tol=1e-6, d=2, method='newton', max_newton=1000):
     """
-    Quasistatic compression trajectory via Cython FIRE.
+    Quasistatic compression trajectory. Ramps strain from 0 to compression_strain over n_steps.
 
-    Ramps strain from 0 to compression_strain over n_steps increments.
+    Args:
+        method: 'newton' (default) or 'fire'.
+            'newton' uses sparse Newton-Raphson; convergence: ‖F_free‖/n_free < tol.
+            'fire'   uses Cython FIRE;            convergence: ‖F_free‖/n_dof < tol.
+        max_newton: max Newton iterations per quasistatic step (default 1000; ignored for 'fire').
 
     Returns:
         traj: list of (N, d) position arrays, length n_steps
     """
+    if method == 'newton':
+        return _quasistatic_newton(network, compression_strain, top_nodes, bottom_nodes,
+                                   n_steps=n_steps, tol=tol, max_newton=max_newton)
+
+    # ── FIRE branch (original implementation) ────────────────────────────────
     positions = np.copy(network.positions)
     y_top = positions[top_nodes, 1]
     y_bottom = positions[bottom_nodes, 1]
@@ -143,6 +225,178 @@ def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_node
         traj.append(np.copy(min_pos))
 
     return traj
+
+
+def _quasistatic_newton(network, compression_strain, top_nodes, bottom_nodes,
+                         n_steps=100, tol=1e-6, max_newton=1000):
+    """Newton-Raphson quasistatic trajectory (sparse spsolve). Called by compute_quasistatic_trajectory_auxetic."""
+    pos = np.copy(network.positions)
+    edges = np.array(network.edges, dtype=np.int32)
+    rest_lengths = np.array(network.rest_lengths, dtype=np.float64)
+    k = np.array(network.stiffnesses, dtype=np.float64)
+    n_nodes = len(pos)
+    n_dof = n_nodes * 2
+
+    y_top = pos[top_nodes, 1]
+    y_bot = pos[bottom_nodes, 1]
+    init_h = y_top.mean() - y_bot.mean()
+    top_offsets = y_top - y_top.mean()
+    x_top_init = pos[top_nodes, 0].copy()
+    x_bot_init = pos[bottom_nodes, 0].copy()
+
+    all_bdry = np.concatenate([np.asarray(top_nodes), np.asarray(bottom_nodes)])
+    bdry_dofs = np.concatenate([all_bdry * 2, all_bdry * 2 + 1])
+    free_mask = np.ones(n_dof, dtype=bool)
+    free_mask[bdry_dofs] = False
+    free_idx = np.where(free_mask)[0]
+    n_free = len(free_idx)
+
+    coo_rows, coo_cols = _precompute_stiffness_coo_indices(edges, n_nodes)
+    traj = [np.copy(pos)]
+
+    for step in range(1, n_steps):
+        frac = step / (n_steps - 1)
+        target_h = init_h * (1 + compression_strain * frac)
+        y_top_new = y_bot.mean() + target_h
+
+        pos[top_nodes, 1] = y_top_new + top_offsets
+        pos[bottom_nodes, 1] = y_bot
+        pos[top_nodes, 0] = x_top_init
+        pos[bottom_nodes, 0] = x_bot_init
+
+        converged = False
+        for _ in range(max_newton):
+            F = _spring_forces(pos, edges, rest_lengths, k)
+            F_free = F.flatten()[free_idx]
+            if np.linalg.norm(F_free) / n_free < tol:
+                converged = True
+                break
+            K_ff = _stiffness_matrix_sparse(pos, edges, rest_lengths, k,
+                                             free_idx, n_dof, coo_rows, coo_cols)
+            dx = spsolve(K_ff, F_free)
+            pos.flat[free_idx] += dx
+
+        if not converged:
+            warnings.warn(
+                f"Newton did not converge at quasistatic step {step}/{n_steps-1} "
+                f"(max_newton={max_newton}, tol={tol:.1e}). "
+                "Results may be inaccurate.",
+                stacklevel=3,
+            )
+        traj.append(np.copy(pos))
+
+    return traj
+
+
+# ============================================================================
+# IFT GRADIENT (Newton forward + numpy adjoint backward)
+# ============================================================================
+
+def compute_ift_gradient(network, compression_strains, target_poissons,
+                         top_nodes, bottom_nodes, left_nodes, right_nodes,
+                         tol, n_strain_steps):
+    """
+    Compute MSE loss and gradient w.r.t. stiffnesses using the implicit function theorem.
+
+    Forward pass: Newton-Raphson quasistatic trajectory (sparse spsolve, up to 1000 iters).
+    Backward pass: adjoint solve with K_ff at the final equilibrium + O(n_edges) grad formula.
+    No JAX autodiff — fully numpy/scipy.
+
+    Args:
+        network: ElasticNetwork with .positions, .edges, .rest_lengths, .stiffnesses
+        compression_strains: list of compression strain values (e.g. [-0.2])
+        target_poissons:     list of target Poisson ratios (e.g. [-0.8])
+        top_nodes, bottom_nodes: boundary node indices (constrained during trajectory)
+        left_nodes, right_nodes: measurement node indices (for Poisson ratio)
+        tol: Newton convergence tolerance (‖F_free‖/n_free < tol)
+        n_strain_steps: number of quasistatic steps
+
+    Returns:
+        (loss, grad): scalar MSE loss and gradient array of shape (n_edges,)
+    """
+    pos = np.copy(network.positions)
+    edges = np.array(network.edges, dtype=np.int32)
+    rest_lengths = np.array(network.rest_lengths, dtype=np.float64)
+    k = np.array(network.stiffnesses, dtype=np.float64)
+    n_nodes = len(pos)
+    n_dof = n_nodes * 2
+
+    all_bdry = np.concatenate([np.asarray(top_nodes), np.asarray(bottom_nodes)])
+    bdry_dofs = np.concatenate([all_bdry * 2, all_bdry * 2 + 1])
+    free_mask = np.ones(n_dof, dtype=bool)
+    free_mask[bdry_dofs] = False
+    free_idx = np.where(free_mask)[0]
+    n_free = len(free_idx)
+    coo_rows, coo_cols = _precompute_stiffness_coo_indices(edges, n_nodes)
+
+    total_loss = 0.0
+    total_grad = np.zeros(len(k))
+    n_pairs = len(compression_strains)
+
+    for cs, nu_tgt in zip(compression_strains, target_poissons):
+        pos_cur = np.copy(pos)
+        y_top = pos_cur[top_nodes, 1]
+        y_bot = pos_cur[bottom_nodes, 1]
+        init_h = y_top.mean() - y_bot.mean()
+        top_offsets = y_top - y_top.mean()
+        x_top_init = pos_cur[top_nodes, 0].copy()
+        x_bot_init = pos_cur[bottom_nodes, 0].copy()
+
+        K_ff_last = None
+
+        for step in range(1, n_strain_steps):
+            frac = step / (n_strain_steps - 1)
+            target_h = init_h * (1 + cs * frac)
+            y_top_new = y_bot.mean() + target_h
+            pos_cur[top_nodes, 1] = y_top_new + top_offsets
+            pos_cur[bottom_nodes, 1] = y_bot
+            pos_cur[top_nodes, 0] = x_top_init
+            pos_cur[bottom_nodes, 0] = x_bot_init
+
+            for _ in range(1000):
+                F = _spring_forces(pos_cur, edges, rest_lengths, k)
+                F_free = F.flatten()[free_idx]
+                if np.linalg.norm(F_free) / n_free < tol:
+                    break
+                K_ff = _stiffness_matrix_sparse(pos_cur, edges, rest_lengths, k,
+                                                free_idx, n_dof, coo_rows, coo_cols)
+                dx = spsolve(K_ff, F_free)
+                pos_cur.flat[free_idx] += dx
+
+            if step == n_strain_steps - 1:
+                # Recompute K_ff at the converged position for a correct IFT solve
+                K_ff_last = _stiffness_matrix_sparse(pos_cur, edges, rest_lengths, k,
+                                                      free_idx, n_dof, coo_rows, coo_cols)
+
+        pos_init = pos          # initial (unstrained)
+        pos_final = pos_cur     # final (at full compression)
+
+        # Loss: MSE Poisson ratio
+        w_init  = pos_init[right_nodes, 0].mean() - pos_init[left_nodes, 0].mean()
+        w_final = pos_final[right_nodes, 0].mean() - pos_final[left_nodes, 0].mean()
+        nu_obs = -((w_final - w_init) / w_init) / cs
+        residual = nu_obs - nu_tgt
+        total_loss += residual ** 2
+
+        # dL/d(pos_final): nonzero only on left/right x-DOFs
+        dL_dnu = 2.0 * residual / n_pairs
+        n_right, n_left = len(right_nodes), len(left_nodes)
+        dL_dpos = np.zeros(n_dof)
+        for j in right_nodes:
+            dL_dpos[j * 2] += dL_dnu * -(1.0 / cs) * (1.0 / w_init) / n_right
+        for j in left_nodes:
+            dL_dpos[j * 2] += dL_dnu * -(1.0 / cs) * (1.0 / w_init) * (-1.0 / n_left)
+
+        # Adjoint solve: K_ff @ w_free = dL/dpos[free_idx]
+        w_free = spsolve(K_ff_last, dL_dpos[free_idx])
+        w_full = np.zeros(n_dof)
+        w_full[free_idx] = w_free
+
+        # O(n_edges) gradient
+        total_grad += _grad_k_from_adjoint(pos_final, edges, rest_lengths, w_full)
+
+    total_loss /= n_pairs
+    return total_loss, total_grad
 
 
 def compute_quasistatic_trajectory_full_cycle(network, amp, top_nodes, bottom_nodes,
@@ -210,10 +464,10 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
 
     def _fire_forward(stiffnesses, edges, rest_lengths, positions0,
                       source_nodes_dof, imposed_positions):
-        positions0 = jnp.asarray(positions0).flatten()
-        imposed_positions = jnp.asarray(imposed_positions).flatten()
+        positions0 = jnp.asarray(positions0, dtype=jnp.float64).flatten()
+        imposed_positions = jnp.asarray(imposed_positions, dtype=jnp.float64).flatten()
         n_dof = positions0.shape[0]
-        mask = jnp.ones(n_dof, dtype=bool).at[jnp.asarray(source_nodes_dof)].set(False)
+        mask = jnp.ones(n_dof, dtype=bool).at[jnp.asarray(source_nodes_dof, dtype=jnp.int32)].set(False)
 
         def energy_fn(pos_flat, k):
             return elastic_energy(pos_flat, edges, rest_lengths, k, d=d, force_type=force_type)
@@ -302,7 +556,7 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
     def crf_bwd(saved, cot_pos_flat):
         pos_final, stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions = saved
         n_dof = pos_final.shape[0]
-        mask = jnp.ones((n_dof,), dtype=bool).at[jnp.asarray(source_nodes_dof)].set(False)
+        mask = jnp.ones((n_dof,), dtype=bool).at[jnp.asarray(source_nodes_dof, dtype=jnp.int32)].set(False)
 
         def energy_fn(p_flat, k):
             return elastic_energy(p_flat, edges, rest_lengths, k, d=d, force_type=force_type)
@@ -337,9 +591,9 @@ def compute_quasistatic_trajectory_auxetic_jax(crf_fn, stiffnesses, edges, rest_
     Returns:
         final_pos_flat: (N*d,) equilibrium positions at target strain
     """
-    positions_flat = jnp.asarray(positions_flat).flatten()
-    edges = jnp.asarray(edges)
-    rest_lengths = jnp.asarray(rest_lengths)
+    positions_flat = jnp.asarray(positions_flat, dtype=jnp.float64).flatten()
+    edges = jnp.asarray(edges, dtype=jnp.int32)
+    rest_lengths = jnp.asarray(rest_lengths, dtype=jnp.float64)
     top_nodes = jnp.asarray(np.array(top_nodes), dtype=jnp.int32)
     bottom_nodes = jnp.asarray(np.array(bottom_nodes), dtype=jnp.int32)
 
@@ -380,7 +634,7 @@ def compute_poisson_ratio_single_jax(crf_fn, stiffnesses, edges, rest_lengths, p
     Returns:
         poisson_ratio: scalar = -(lateral_strain / compression_strain)
     """
-    positions_flat = jnp.asarray(positions_flat).flatten()
+    positions_flat = jnp.asarray(positions_flat, dtype=jnp.float64).flatten()
     left_nodes = jnp.asarray(left_nodes, dtype=jnp.int32)
     right_nodes = jnp.asarray(right_nodes, dtype=jnp.int32)
 

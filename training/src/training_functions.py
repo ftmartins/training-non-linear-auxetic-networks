@@ -19,6 +19,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import jax
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from base.config import FORCE_TOL
@@ -27,6 +28,7 @@ from base.simulate import (
     fire_minimize_network,
     compute_quasistatic_trajectory_auxetic,
     compute_quasistatic_trajectory_full_cycle,
+    compute_ift_gradient,
     make_compute_response_fire,
     crf,
     compute_quasistatic_trajectory_auxetic_jax,
@@ -78,7 +80,8 @@ def compute_poisson_ratio_single(network, top_nodes, bottom_nodes, left_nodes, r
         n_steps=n_strain_steps,
         verbose=False,
         force_type=force_type,
-        tol=tol
+        tol=tol,
+        method='fire',
     )
 
     positions_free_final = traj[-1]
@@ -106,7 +109,7 @@ def poisson_loss_batch_parallel(network, target_poisson_list, top_nodes, bottom_
     computed_poisson_ratios = Parallel(n_jobs=n_jobs_inner)(
         delayed(compute_poisson_ratio_single)(
             network, top_nodes, bottom_nodes, left_nodes, right_nodes,
-            cs, n_strain_steps, force_type=force_type, tol=FORCE_TOL
+            cs, n_strain_steps, force_type=force_type, tol=tol
         )
         for cs in compression_strain_list
     )
@@ -167,7 +170,7 @@ def finite_difference_gradient_parallel_batch(network, target_poisson_list, top_
             i, network, target_poisson_list,
             top_nodes, bottom_nodes, left_nodes, right_nodes,
             compression_strain_list, epsilon, n_strain_steps,
-            n_jobs_inner, force_type=force_type, tol=FORCE_TOL
+            n_jobs_inner, force_type=force_type, tol=tol
         )
         for i in range(n_edges)
     )
@@ -190,7 +193,8 @@ def finish_training_GD_auxetic_batch(
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
     verbose=False, stiffnesses_filename=None, force_tol=1e-6,
     vmin=1e-3, vmax=1e3,
-    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol = 1e-5
+    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol=1e-5,
+    method='newton',
 ):
     """
     Train the network for auxetic response using gradient descent.
@@ -210,11 +214,13 @@ def finish_training_GD_auxetic_batch(
         desired_target_extension_list: List of target lateral extensions (e.g., [-0.02, -0.02])
         verbose: Print detailed progress
         stiffnesses_filename: Optional file to save stiffnesses
-        force_tol: Convergence tolerance for FIRE minimization
+        force_tol: Convergence tolerance for minimization
         vmin, vmax: Bounds for stiffness values
         task_seed: Task index (for saving intermediate results)
         realization_seed: Realization index (for saving intermediate results)
         save_interval: Save intermediate trajectories every N steps (default: 500)
+        method: 'newton' (default) — Newton quasistatic + IFT gradient (fast);
+                'fire'   — Cython FIRE quasistatic + finite-difference gradient (original).
 
     Returns:
         history: Updated history dictionary with training results
@@ -275,24 +281,40 @@ def finish_training_GD_auxetic_batch(
         network.update_positions(min_pos)
 
         # --- Gradient update ---
-        update = -finite_difference_gradient_parallel_batch(
-            copy.deepcopy(network),
-            target_poisson_list=desired_poisson_list,
-            top_nodes=top_nodes,
-            bottom_nodes=bottom_nodes,
-            left_nodes=left_nodes,
-            right_nodes=right_nodes,
-            compression_strain_list=source_compression_strain_list,
-            epsilon=1e-8,
-            n_strain_steps=n_strain_steps,
-            n_jobs_outer=4,
-            n_jobs_inner=2,
-            force_type=force_type,
-            tol=force_tol
-        )
+        if method == 'newton':
+            _, grad = compute_ift_gradient(
+                network,
+                compression_strains=source_compression_strain_list,
+                target_poissons=desired_poisson_list,
+                top_nodes=top_nodes,
+                bottom_nodes=bottom_nodes,
+                left_nodes=left_nodes,
+                right_nodes=right_nodes,
+                tol=force_tol,
+                n_strain_steps=n_strain_steps,
+            )
+            update = -grad
+        else:
+            update = -finite_difference_gradient_parallel_batch(
+                copy.deepcopy(network),
+                target_poisson_list=desired_poisson_list,
+                top_nodes=top_nodes,
+                bottom_nodes=bottom_nodes,
+                left_nodes=left_nodes,
+                right_nodes=right_nodes,
+                compression_strain_list=source_compression_strain_list,
+                epsilon=1e-8,
+                n_strain_steps=n_strain_steps,
+                n_jobs_outer=4,
+                n_jobs_inner=2,
+                force_type=force_type,
+                tol=force_tol,
+            )
 
         # --- Update stiffnesses ---
-        network.stiffnesses = np.array(network.stiffnesses) + learning_rate * np.array(update)/ np.linalg.norm(update)
+        update_norm = np.linalg.norm(update)
+        if update_norm > 0:
+            network.stiffnesses = np.array(network.stiffnesses) + learning_rate * np.array(update) / update_norm
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # Check for NaN in stiffnesses
@@ -313,18 +335,35 @@ def finish_training_GD_auxetic_batch(
                 )
             break
 
-        # --- Loss computation ---
+        # --- Loss computation (post-update, both methods) ---
+        # history['loss'][i] and history['stiffnesses'][i] are now aligned:
+        # both reflect the network state AFTER the stiffness update at step i.
         network.update_positions(min_pos)
-        loss, computed_poisson_ratios = poisson_loss_batch_parallel(
-            network,
-            target_poisson_list=desired_poisson_list,
-            top_nodes=top_nodes,
-            bottom_nodes=bottom_nodes,
-            left_nodes=left_nodes,
-            right_nodes=right_nodes,
-            compression_strain_list=source_compression_strain_list,
-            force_type=force_type,
-        )
+        if method == 'newton':
+            loss, _ = compute_ift_gradient(
+                network,
+                compression_strains=source_compression_strain_list,
+                target_poissons=desired_poisson_list,
+                top_nodes=top_nodes,
+                bottom_nodes=bottom_nodes,
+                left_nodes=left_nodes,
+                right_nodes=right_nodes,
+                tol=force_tol,
+                n_strain_steps=n_strain_steps,
+            )
+        else:
+            loss, computed_poisson_ratios = poisson_loss_batch_parallel(
+                network,
+                target_poisson_list=desired_poisson_list,
+                top_nodes=top_nodes,
+                bottom_nodes=bottom_nodes,
+                left_nodes=left_nodes,
+                right_nodes=right_nodes,
+                compression_strain_list=source_compression_strain_list,
+                n_strain_steps=n_strain_steps,
+                force_type=force_type,
+                tol=force_tol,
+            )
 
         # --- Update history ---
         history['stiffnesses'].append(np.copy(network.stiffnesses))
@@ -360,7 +399,6 @@ def finish_training_GD_auxetic_batch(
         if verbose and step % 100 == 0:
             print(f"\nStep {step}:")
             print(f"  Loss: {loss:.6e}")
-            print(f"  Computed Poisson ratios: {computed_poisson_ratios}")
             print(f"  Target Poisson ratios: {desired_poisson_list}")
 
         # Periodically save intermediate trajectories and checkpoint
@@ -470,12 +508,12 @@ def finish_training_GD_auxetic_batch_jax(
     )
 
     # Pre-convert static arrays to JAX
-    edges_jax = jnp.asarray(np.array(network.edges, dtype=np.int32))
-    rest_lengths_jax = jnp.asarray(np.array(network.rest_lengths, dtype=np.float64))
-    top_nodes_jax = jnp.asarray(top_nodes)
-    bottom_nodes_jax = jnp.asarray(bottom_nodes)
-    left_nodes_jax = jnp.asarray(left_nodes)
-    right_nodes_jax = jnp.asarray(right_nodes)
+    edges_jax = jnp.asarray(np.array(network.edges, dtype=np.int32), dtype=jnp.int32)
+    rest_lengths_jax = jnp.asarray(np.array(network.rest_lengths, dtype=np.float64), dtype=jnp.float64)
+    top_nodes_jax = jnp.asarray(top_nodes, dtype=jnp.int32)
+    bottom_nodes_jax = jnp.asarray(bottom_nodes, dtype=jnp.int32)
+    left_nodes_jax = jnp.asarray(left_nodes, dtype=jnp.int32)
+    right_nodes_jax = jnp.asarray(right_nodes, dtype=jnp.int32)
 
     # Build and JIT the loss+grad function
     # positions_flat is passed as argument (changes each step after free relaxation)
@@ -508,8 +546,8 @@ def finish_training_GD_auxetic_batch_jax(
         network.update_positions(min_pos)
 
         # --- JAX autodiff gradient ---
-        stiffnesses_jax = jnp.asarray(np.array(network.stiffnesses, dtype=np.float64))
-        positions_flat_jax = jnp.asarray(min_pos.flatten())
+        stiffnesses_jax = jnp.asarray(np.array(network.stiffnesses, dtype=np.float64), dtype=jnp.float64)
+        positions_flat_jax = jnp.asarray(min_pos.flatten(), dtype=jnp.float64)
 
         loss_val, grad = loss_and_grad_fn(stiffnesses_jax, positions_flat_jax)
         loss = float(loss_val)
