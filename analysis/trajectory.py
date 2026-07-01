@@ -7,7 +7,7 @@ from base.simulate import compute_quasistatic_trajectory_auxetic, fire_minimize_
 
 
 def compute_auxetic_trajectory(network, compression_strain, boundary, n_steps=100,
-                               force_type='quadratic', tol=1e-6):
+                               force_type='quadratic', tol=1e-6, method='fire'):
     """
     Quasistatic compression trajectory for an auxetic (Poisson-ratio) task.
 
@@ -18,7 +18,8 @@ def compute_auxetic_trajectory(network, compression_strain, boundary, n_steps=10
     boundary : dict with keys 'top', 'bottom', 'left', 'right' (node index arrays)
     n_steps : int
     force_type : str
-    tol : float   FIRE convergence tolerance
+    tol : float   convergence tolerance
+    method : str  'fire' (Cython FIRE) or 'newton' (Newton-Raphson, faster)
 
     Returns
     -------
@@ -28,7 +29,7 @@ def compute_auxetic_trajectory(network, compression_strain, boundary, n_steps=10
     bottom = boundary['bottom']
     return compute_quasistatic_trajectory_auxetic(
         network, compression_strain, top, bottom,
-        n_steps=n_steps, force_type=force_type, tol=tol,
+        n_steps=n_steps, force_type=force_type, tol=tol, method=method,
     )
 
 

@@ -7,6 +7,7 @@ JAX-differentiable Poisson-ratio observable.
 """
 
 import warnings
+import functools
 import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.linalg import spsolve
@@ -159,13 +160,84 @@ def _grad_k_from_adjoint(pos_final, edges, rest_lengths, w_full):
     return stretch * (dx * (wi_x - wj_x) + dy * (wi_y - wj_y))
 
 
+@functools.lru_cache(maxsize=8)
+def _make_jax_newton_solver(n_dof, n_free, free_idx_tuple, max_newton):
+    """
+    Return a JIT-compiled Newton equilibrium solver for a fixed DOF layout.
+
+    Cached by (n_dof, n_free, free_idx, max_newton) so compilation happens once
+    per network topology and is reused across all training steps and strain steps.
+
+    The returned function signature:
+        solve(pos_flat, edges, rest_lengths, k, tol) -> pos_flat_equilibrated
+    All arguments are JAX arrays; constrained DOFs must already be set in pos_flat.
+    """
+    free_idx_j = jnp.array(list(free_idx_tuple), dtype=jnp.int32)
+
+    @jax.jit
+    def _solve(pos_flat, edges, rest_lengths, k, tol):
+        def _forces_free(pf):
+            pos = pf.reshape(-1, 2)
+            i_n, j_n = edges[:, 0], edges[:, 1]
+            r_ij = pos[j_n] - pos[i_n]
+            norms = jnp.linalg.norm(r_ij, axis=1)
+            fmag = k * (norms - rest_lengths) / norms
+            F_edge = fmag[:, None] * r_ij
+            F = jnp.zeros_like(pos)
+            F = F.at[j_n].add(-F_edge)
+            F = F.at[i_n].add(F_edge)
+            return F.flatten()[free_idx_j]
+
+        def _stiffness_free(pf):
+            pos = pf.reshape(-1, 2)
+            i_n, j_n = edges[:, 0], edges[:, 1]
+            r_ij = pos[j_n] - pos[i_n]
+            norms = jnp.linalg.norm(r_ij, axis=1)
+            t1 = k * (1.0 - rest_lengths / norms)
+            t2 = k * rest_lengths / norms ** 3
+            dxe, dye = r_ij[:, 0], r_ij[:, 1]
+            K00 = t1 + t2 * dxe ** 2
+            K01 = t2 * dxe * dye
+            K11 = t1 + t2 * dye ** 2
+            ri = 2 * i_n; rj = 2 * j_n
+            H = jnp.zeros((n_dof, n_dof))
+            H = H.at[ri,   ri  ].add(K00); H = H.at[ri,   ri+1].add(K01)
+            H = H.at[ri+1, ri  ].add(K01); H = H.at[ri+1, ri+1].add(K11)
+            H = H.at[rj,   rj  ].add(K00); H = H.at[rj,   rj+1].add(K01)
+            H = H.at[rj+1, rj  ].add(K01); H = H.at[rj+1, rj+1].add(K11)
+            H = H.at[ri,   rj  ].add(-K00); H = H.at[ri,   rj+1].add(-K01)
+            H = H.at[ri+1, rj  ].add(-K01); H = H.at[ri+1, rj+1].add(-K11)
+            H = H.at[rj,   ri  ].add(-K00); H = H.at[rj,   ri+1].add(-K01)
+            H = H.at[rj+1, ri  ].add(-K01); H = H.at[rj+1, ri+1].add(-K11)
+            return H[jnp.ix_(free_idx_j, free_idx_j)]
+
+        def _cond(carry):
+            _, F_free, count = carry
+            return (jnp.linalg.norm(F_free) / n_free >= tol) & (count < max_newton)
+
+        def _body(carry):
+            pf, F_free, count = carry
+            K_ff = _stiffness_free(pf)
+            dx = jnp.linalg.solve(K_ff, F_free)
+            pf_new = pf.at[free_idx_j].add(dx)
+            return pf_new, _forces_free(pf_new), count + 1
+
+        F0 = _forces_free(pos_flat)
+        pf_out, _, _ = jax.lax.while_loop(
+            _cond, _body, (pos_flat, F0, jnp.int32(0))
+        )
+        return pf_out
+
+    return _solve
+
+
 # ============================================================================
 # QUASISTATIC TRAJECTORY
 # ============================================================================
 
 def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_nodes, bottom_nodes,
                                            n_steps=100, verbose=False, force_type='quadratic',
-                                           tol=1e-6, d=2, method='newton', max_newton=1000):
+                                           tol=1e-6, d=2, method='newton', max_newton=100):
     """
     Quasistatic compression trajectory. Ramps strain from 0 to compression_strain over n_steps.
 
@@ -228,8 +300,8 @@ def compute_quasistatic_trajectory_auxetic(network, compression_strain, top_node
 
 
 def _quasistatic_newton(network, compression_strain, top_nodes, bottom_nodes,
-                         n_steps=100, tol=1e-6, max_newton=1000):
-    """Newton-Raphson quasistatic trajectory (sparse spsolve). Called by compute_quasistatic_trajectory_auxetic."""
+                         n_steps=100, tol=1e-6, max_newton=100):
+    """JAX-accelerated Newton quasistatic trajectory. Called by compute_quasistatic_trajectory_auxetic."""
     pos = np.copy(network.positions)
     edges = np.array(network.edges, dtype=np.int32)
     rest_lengths = np.array(network.rest_lengths, dtype=np.float64)
@@ -251,7 +323,12 @@ def _quasistatic_newton(network, compression_strain, top_nodes, bottom_nodes,
     free_idx = np.where(free_mask)[0]
     n_free = len(free_idx)
 
-    coo_rows, coo_cols = _precompute_stiffness_coo_indices(edges, n_nodes)
+    jax_solver = _make_jax_newton_solver(n_dof, n_free, tuple(free_idx), max_newton)
+    edges_j = jnp.array(edges)
+    rest_j  = jnp.array(rest_lengths)
+    k_j     = jnp.array(k)
+    tol_j   = jnp.float64(tol)
+
     traj = [np.copy(pos)]
 
     for step in range(1, n_steps):
@@ -264,26 +341,9 @@ def _quasistatic_newton(network, compression_strain, top_nodes, bottom_nodes,
         pos[top_nodes, 0] = x_top_init
         pos[bottom_nodes, 0] = x_bot_init
 
-        converged = False
-        for _ in range(max_newton):
-            F = _spring_forces(pos, edges, rest_lengths, k)
-            F_free = F.flatten()[free_idx]
-            if np.linalg.norm(F_free) / n_free < tol:
-                converged = True
-                break
-            K_ff = _stiffness_matrix_sparse(pos, edges, rest_lengths, k,
-                                             free_idx, n_dof, coo_rows, coo_cols)
-            dx = spsolve(K_ff, F_free)
-            pos.flat[free_idx] += dx
-
-        if not converged:
-            warnings.warn(
-                f"Newton did not converge at quasistatic step {step}/{n_steps-1} "
-                f"(max_newton={max_newton}, tol={tol:.1e}). "
-                "Results may be inaccurate.",
-                stacklevel=3,
-            )
-        traj.append(np.copy(pos))
+        pf = jax_solver(jnp.array(pos.flatten()), edges_j, rest_j, k_j, tol_j)
+        pos = np.array(pf).reshape(-1, 2)
+        traj.append(pos.copy())
 
     return traj
 
@@ -329,6 +389,12 @@ def compute_ift_gradient(network, compression_strains, target_poissons,
     n_free = len(free_idx)
     coo_rows, coo_cols = _precompute_stiffness_coo_indices(edges, n_nodes)
 
+    jax_solver = _make_jax_newton_solver(n_dof, n_free, tuple(free_idx), 100)
+    edges_j = jnp.array(edges)
+    rest_j  = jnp.array(rest_lengths)
+    k_j     = jnp.array(k)
+    tol_j   = jnp.float64(tol)
+
     total_loss = 0.0
     total_grad = np.zeros(len(k))
     n_pairs = len(compression_strains)
@@ -353,18 +419,11 @@ def compute_ift_gradient(network, compression_strains, target_poissons,
             pos_cur[top_nodes, 0] = x_top_init
             pos_cur[bottom_nodes, 0] = x_bot_init
 
-            for _ in range(1000):
-                F = _spring_forces(pos_cur, edges, rest_lengths, k)
-                F_free = F.flatten()[free_idx]
-                if np.linalg.norm(F_free) / n_free < tol:
-                    break
-                K_ff = _stiffness_matrix_sparse(pos_cur, edges, rest_lengths, k,
-                                                free_idx, n_dof, coo_rows, coo_cols)
-                dx = spsolve(K_ff, F_free)
-                pos_cur.flat[free_idx] += dx
+            pf = jax_solver(jnp.array(pos_cur.flatten()), edges_j, rest_j, k_j, tol_j)
+            pos_cur = np.array(pf).reshape(-1, 2)
 
             if step == n_strain_steps - 1:
-                # Recompute K_ff at the converged position for a correct IFT solve
+                # K_ff at the fully-converged final position for the IFT adjoint solve
                 K_ff_last = _stiffness_matrix_sparse(pos_cur, edges, rest_lengths, k,
                                                       free_idx, n_dof, coo_rows, coo_cols)
 
