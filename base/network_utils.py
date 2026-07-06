@@ -7,6 +7,7 @@ objects, cleaning network topology, and identifying boundary nodes.
 
 import numpy as np
 from pathlib import Path
+from scipy.spatial import ConvexHull, cKDTree
 
 from .elastic_network import ElasticNetwork
 from .packing_utils import Packing
@@ -148,6 +149,127 @@ def get_square_boundary_nodes(positions, margin):
     return top_nodes, bottom_nodes, left_nodes, right_nodes
 
 
+def get_hull_boundary_nodes(positions, margin=None):
+    """
+    Identify boundary nodes near the convex hull of the point cloud, then
+    split them into top/bottom/left/right sides for a quasi-square domain.
+
+    The hull's *vertices* are only the outermost corner points — for a
+    jittered lattice, most of a nominally flat side sits slightly behind the
+    straight line connecting two adjacent hull vertices (by up to the jitter
+    amplitude), so restricting to `hull.vertices` misses most of that side.
+    Instead, every node within `margin` of the hull's supporting hyperplanes
+    (the facets connecting consecutive hull vertices) is treated as boundary:
+    for each facet, `ConvexHull.equations` gives a unit normal `n` and offset
+    `c` such that `n . x + c <= 0` for points inside the hull, with equality
+    on that facet. `max_facet(n . x + c)` is the signed distance from `x` to
+    the nearest supporting hyperplane (~0 for points on the surface, more
+    negative for interior points), so thresholding it selects a full boundary
+    layer rather than just the hull's corner points.
+
+    Args:
+        positions: Node positions array (N, 2)
+        margin: Distance tolerance from the hull surface. Defaults to
+            0.75x the median nearest-neighbor spacing, which is wide enough to
+            catch a full row/column of lattice nodes behind the hull surface
+            but narrow enough to exclude interior nodes.
+
+    Returns:
+        top_nodes, bottom_nodes, left_nodes, right_nodes: arrays of node indices
+    """
+    positions = np.array(positions)
+    hull = ConvexHull(positions)
+
+    if margin is None:
+        tree = cKDTree(positions)
+        nn_dist, _ = tree.query(positions, k=2)
+        margin = 0.75 * np.median(nn_dist[:, 1])
+
+    dist_to_hull = (positions @ hull.equations[:, :-1].T + hull.equations[:, -1]).max(axis=1)
+    boundary_idx = np.where(dist_to_hull > -margin)[0]
+
+    centroid = positions.mean(axis=0)
+    rel = positions[boundary_idx] - centroid
+
+    top, bottom, left, right = [], [], [], []
+    for node_idx, (dx, dy) in zip(boundary_idx, rel):
+        if abs(dy) >= abs(dx):
+            (top if dy > 0 else bottom).append(node_idx)
+        else:
+            (right if dx > 0 else left).append(node_idx)
+
+    return (np.array(sorted(top)), np.array(sorted(bottom)),
+            np.array(sorted(left)), np.array(sorted(right)))
+
+
+def create_lattice_square_network(L, p, R, seed=None, dilution=0.05):
+    """
+    Build an ElasticNetwork from a jittered triangular lattice cut to a
+    quasi-square domain, with boundary nodes assigned via the convex hull.
+
+    Same lattice + noise construction as
+    `training/runners/allosteric_trainer.py::create_network` (triangular
+    lattice with basis vectors a1=(1,0), a2=(0.5, sqrt(3)/2), each node
+    perturbed by uniform noise of amplitude `p`), but nodes are windowed to
+    a square (max(|x|, |y|) < L/2) instead of a circle, giving four flat
+    sides suitable for top/bottom/left/right boundary training.
+
+    A random `dilution` fraction of the lattice (distance-cutoff) bonds is
+    removed before any non-lattice bonds are added, so the diluted lattice is
+    the base topology that later disorder/rewiring steps build on top of.
+
+    Args:
+        L: Lattice size parameter (domain side length is ~L)
+        p: Disorder amplitude (uniform jitter on each node position)
+        R: Distance cutoff for bond formation
+        seed: Optional RNG seed for reproducibility
+        dilution: Fraction of lattice bonds to randomly remove (default 0.05)
+
+    Returns:
+        network: ElasticNetwork object
+        boundary_dict: Dict with keys 'top', 'bottom', 'left', 'right'
+            (convex-hull-derived boundary node indices)
+    """
+    rng = np.random.RandomState(seed)
+    a1 = np.array([1.0, 0.0])
+    a2 = np.array([0.5, np.sqrt(3) / 2.0])
+
+    n_candidates = 2 * L ** 2
+    moves = (rng.rand(n_candidates, 2) - 0.5) * 2 * p
+
+    nodes = []
+    for xidx in range(L):
+        for yidx in range(int((2 / np.sqrt(3)) * L)):
+            node = ((xidx - int((L / 2) * (1 - 1 / np.sqrt(3))) - np.floor(yidx / 2)) * a1
+                    + (yidx - int((1 / np.sqrt(3)) * L)) * a2
+                    + moves[len(nodes)])
+            if np.max(np.abs(node)) < L / 2:
+                nodes.append(node)
+    nodes = np.array(nodes)
+
+    edges = []
+    for i in range(len(nodes)):
+        for j in range(i):
+            if np.linalg.norm(nodes[i] - nodes[j]) < R:
+                edges.append((j, i))
+    edges = np.array(edges)
+
+    if dilution > 0 and len(edges) > 0:
+        n_remove = int(round(dilution * len(edges)))
+        remove_idx = rng.choice(len(edges), size=n_remove, replace=False)
+        edges = np.delete(edges, remove_idx, axis=0)
+
+    network = ElasticNetwork(positions=nodes, edges=edges, stiffnesses=np.ones(len(edges)))
+    network.save_original_parameters()
+
+    top, bottom, left, right = get_hull_boundary_nodes(nodes)
+    if not check_disjoint_sets([top, bottom, left, right]):
+        print("Warning: Boundary node sets are not disjoint!")
+
+    boundary_dict = {'top': top, 'bottom': bottom, 'left': left, 'right': right}
+    return network, boundary_dict
+
+
 def cut_square_from_packing(network, n_nodes):
     """
     Cut an approximately square subnetwork of n_nodes from a larger packing.
@@ -212,43 +334,76 @@ def check_disjoint_sets(sets):
 
 
 def create_auxetic_network(n_nodes, packing_seed, force_type='quadratic',
-                           boundary_margin=BOUNDARY_MARGIN, central_force=None):
+                           boundary_margin=BOUNDARY_MARGIN, central_force=None,
+                           network_type='jammed', lattice_jitter=0.15,
+                           lattice_cutoff=1.6, lattice_dilution=0.05):
     """
     High-level function to create a clean auxetic network ready for training.
 
-    Generates an oversampled packing (~n_nodes * pi/2 particles), cuts a square
-    region of approximately n_nodes nodes using Chebyshev-distance selection,
-    removes degree-1 nodes, and identifies boundary nodes.
+    Supports two network generation methods, selected via `network_type`:
+      - 'jammed' (default): generates an oversampled jammed packing
+        (~n_nodes * pi/2 particles) and cuts a square region of n_nodes
+        nodes from it.
+      - 'lattice': generates an oversampled perturbed (jittered) triangular
+        lattice square and cuts it down to n_nodes nodes.
+
+    In both cases the cut network has degree-1 nodes removed and boundary
+    nodes identified via the convex hull (`get_hull_boundary_nodes`).
 
     Args:
         n_nodes: Target number of nodes in the final square network
-        packing_seed: Random seed for packing generation
+        packing_seed: Random seed for network generation (packing or lattice)
         force_type: 'quadratic' or 'quartic' (reserved for future use)
-        boundary_margin: Tolerance for boundary node detection
-        central_force: Override for the central compression force in the packing
-            dynamics. Defaults to PACKING_PARAMS['central'] from config.
-            Smaller values yield less hexagonal, more disordered networks.
+        boundary_margin: Distance tolerance for hull-based boundary node
+            detection (passed to `get_hull_boundary_nodes`). If None, an
+            automatic margin based on nearest-neighbor spacing is used.
+        central_force: Override for the central compression force in the
+            packing dynamics. Only used when network_type='jammed'. Defaults
+            to PACKING_PARAMS['central'] from config. Smaller values yield
+            less hexagonal, more disordered networks.
+        network_type: 'jammed' or 'lattice' — selects the network generation
+            method (see above).
+        lattice_jitter: Jitter amplitude for lattice node positions. Only
+            used when network_type='lattice'.
+        lattice_cutoff: Distance cutoff for lattice bond formation. Only
+            used when network_type='lattice'.
+        lattice_dilution: Fraction of lattice bonds randomly removed before
+            cutting to n_nodes. Only used when network_type='lattice'.
 
     Returns:
         network: ElasticNetwork object (cleaned, square domain)
         boundary_dict: Dict with keys 'top', 'bottom', 'left', 'right'
     """
-    params = dict(PACKING_PARAMS)
-    if central_force is not None:
-        params['central'] = central_force
+    if network_type == 'jammed':
+        params = dict(PACKING_PARAMS)
+        if central_force is not None:
+            params['central'] = central_force
 
-    # Oversample so the inscribed square contains ~n_nodes nodes (pi/2 factor)
-    n_big = int(np.ceil(n_nodes * np.pi / 2))
-    packing = Packing(n=n_big, dim=2, seed=packing_seed, rfac=0.8, params=params)
-    packing.generate(duration=PACKING_DURATION, frames=PACKING_FRAMES)
+        # Oversample so the inscribed square contains ~n_nodes nodes (pi/2 factor)
+        n_big = int(np.ceil(n_nodes * np.pi / 2))
+        packing = Packing(n=n_big, dim=2, seed=packing_seed, rfac=0.8, params=params)
+        packing.generate(duration=PACKING_DURATION, frames=PACKING_FRAMES)
+        network = create_network_from_packing(packing, dim=2)
+    elif network_type == 'lattice':
+        # Oversample the lattice side length so the square cut below has
+        # n_nodes to choose from. Unit-spacing triangular lattice density
+        # is 2/sqrt(3) nodes per unit area.
+        density = 2.0 / np.sqrt(3.0)
+        l_target = np.sqrt(n_nodes / density)
+        l_big = int(np.ceil(l_target * 1.25)) + 2
+        network, _ = create_lattice_square_network(
+            l_big, lattice_jitter, lattice_cutoff,
+            seed=packing_seed, dilution=lattice_dilution
+        )
+    else:
+        raise ValueError(f"Unknown network_type: {network_type!r} (expected 'jammed' or 'lattice')")
 
-    # Extract full network, cut square, then clean topology
-    network = create_network_from_packing(packing, dim=2)
+    # Cut square region, then clean topology
     network = cut_square_from_packing(network, n_nodes)
     network = remove_degree_one_nodes(network)
 
-    # Identify boundary nodes
-    top, bottom, left, right = get_square_boundary_nodes(network.positions, boundary_margin)
+    # Identify boundary nodes via the convex hull
+    top, bottom, left, right = get_hull_boundary_nodes(network.positions, boundary_margin)
 
     if not check_disjoint_sets([top, bottom, left, right]):
         print("Warning: Boundary node sets are not disjoint!")

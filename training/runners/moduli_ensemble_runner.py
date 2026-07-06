@@ -37,7 +37,7 @@ for _p in [str(_ROOT), str(_SRC)]:
 from base.config import (
     N_NODES, FORCE_TYPE, BOUNDARY_MARGIN,
     LEARNING_RATE, FORCE_TOL, VMIN, VMAX,
-    PACKING_PARAMS,
+    PACKING_PARAMS, NETWORK_TYPE,
 )
 
 LEARNING_RATE = 1e-4
@@ -89,12 +89,16 @@ except ImportError as e:
 _reference_moduli = None
 
 
-def get_reference_moduli(verbose=False):
+def get_reference_moduli(verbose=False, network_type=NETWORK_TYPE):
     """
     Compute or return cached reference moduli for the uniform network.
 
     Creates the reference network (PACKING_SEED=42, uniform k=1),
     compresses to each required strain, and evaluates the elasticity tensor.
+
+    Args:
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network). Must
+            match the network_type used for training so moduli are comparable.
     """
     global _reference_moduli
     if _reference_moduli is not None:
@@ -110,6 +114,7 @@ def get_reference_moduli(verbose=False):
         force_type=FORCE_TYPE,
         boundary_margin=BOUNDARY_MARGIN,
         central_force=PACKING_PARAMS['central'],
+        network_type=network_type,
     )
     # Ensure uniform stiffnesses
     network.stiffnesses = np.ones(len(network.edges))
@@ -137,7 +142,7 @@ def get_reference_moduli(verbose=False):
 
 
 def run_single_training(task_id, realization_seed=0, verbose=False,
-                        use_checkpoint=True):
+                        use_checkpoint=True, network_type=NETWORK_TYPE):
     """
     Run a single moduli training job.
 
@@ -146,6 +151,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
         realization_seed: Realization index (default: 0)
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         success: Boolean indicating success
@@ -190,7 +196,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
         # 2. Compute reference moduli and resolve targets
         if verbose:
             print("Step 2: Computing reference moduli...")
-        ref_moduli = get_reference_moduli(verbose=verbose)
+        ref_moduli = get_reference_moduli(verbose=verbose, network_type=network_type)
         training_goals = resolve_training_goals(task_config, ref_moduli)
 
         print(f"  Resolved training goals:")
@@ -207,6 +213,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
             force_type=FORCE_TYPE,
             boundary_margin=BOUNDARY_MARGIN,
             central_force=PACKING_PARAMS['central'],
+            network_type=network_type,
         )
         print(f"  Network created: {len(network.positions)} nodes, "
               f"{len(network.edges)} edges")
@@ -333,6 +340,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
             history=history,
             network=trained_network,
             task_config=task_config,
+            boundary_dict=boundary_dict,
             results_dir=MODULI_RESULTS_DIR,
         )
 
@@ -343,6 +351,15 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
         elapsed = time.time() - start_time
         loss_list = history.get('loss', [])
         final_loss = loss_list[-1] if loss_list else float('nan')
+
+        if not np.isfinite(final_loss):
+            print(f"\n{'='*80}")
+            print(f"FAILURE: Moduli Task {task_id}, Realization {realization_seed}")
+            print(f"Time elapsed: {elapsed/60:.2f} minutes")
+            print(f"Final loss is not finite: {final_loss}")
+            print(f"Training steps completed: {len(loss_list)}")
+            print(f"{'='*80}\n")
+            return False
 
         print(f"\n{'='*80}")
         print(f"SUCCESS: Moduli Task {task_id}, Realization {realization_seed}")
@@ -370,13 +387,14 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
 # ============================================================================
 
 
-def run_all_moduli(resume=True, verbose=False):
+def run_all_moduli(resume=True, verbose=False, network_type=NETWORK_TYPE):
     """
     Run all moduli training jobs sequentially.
 
     Args:
         resume: Skip already completed jobs
         verbose: Print detailed progress
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     print(f"\n{'#'*80}")
     print(f"# MODULI ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -386,7 +404,7 @@ def run_all_moduli(resume=True, verbose=False):
     print(f"{'#'*80}\n")
 
     # Compute reference moduli once
-    ref_moduli = get_reference_moduli(verbose=True)
+    ref_moduli = get_reference_moduli(verbose=True, network_type=network_type)
     print_moduli_tasks_summary(reference_moduli=ref_moduli)
 
     if resume:
@@ -415,7 +433,8 @@ def run_all_moduli(resume=True, verbose=False):
 
     for idx, (task_id, realization_seed) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
-        success = run_single_training(task_id, realization_seed, verbose=verbose)
+        success = run_single_training(task_id, realization_seed, verbose=verbose,
+                                      network_type=network_type)
 
         if success:
             success_count += 1
@@ -558,6 +577,13 @@ Examples:
         action='store_true',
         help='Verbose output',
     )
+    parser.add_argument(
+        '--network-type',
+        choices=['jammed', 'lattice'],
+        default=NETWORK_TYPE,
+        help="Network generation method: 'jammed' (packing-derived, default) or "
+             "'lattice' (perturbed triangular lattice square)"
+    )
 
     args = parser.parse_args()
 
@@ -568,14 +594,14 @@ Examples:
             parser.error(f"--task must be between 0 and {N_TASKS-1}")
 
         # Compute reference moduli once
-        get_reference_moduli(verbose=args.verbose)
+        get_reference_moduli(verbose=args.verbose, network_type=args.network_type)
         print_moduli_tasks_summary()
         success = run_single_training(args.task, args.realization,
-                                      verbose=args.verbose)
+                                      verbose=args.verbose, network_type=args.network_type)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
-        run_all_moduli(resume=args.resume, verbose=args.verbose)
+        run_all_moduli(resume=args.resume, verbose=args.verbose, network_type=args.network_type)
 
     elif args.mode == 'status':
         print_moduli_tasks_summary()

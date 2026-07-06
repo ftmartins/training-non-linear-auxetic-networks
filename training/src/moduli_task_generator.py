@@ -28,7 +28,10 @@ then add targets at additional compression strains:
 import numpy as np
 from pathlib import Path
 
+import jax
 import jax.numpy as jnp
+
+jax.config.update("jax_enable_x64", True)
 
 from base.config import BASE_DIR
 from .task_generator import generate_realization_stiffnesses
@@ -318,9 +321,9 @@ def compute_reference_moduli(network, boundary_dict, compression_strains,
             'B': float, 'G': float, 'nu': float, 'C_voigt': (3, 3) array
         }
     """
-    from training_functions_with_toggle import make_compute_response_fire
-    from training_functions_with_toggle import compute_quasistatic_trajectory_auxetic_jax
-    from elasticity_tensor import (
+    from src.training_functions_with_toggle import make_compute_response_fire
+    from src.training_functions_with_toggle import compute_quasistatic_trajectory_auxetic_jax
+    from base.elasticity_tensor import (
         compute_elasticity_tensor_2d,
         extract_moduli_2d,
         precompute_dof_indices,
@@ -338,7 +341,7 @@ def compute_reference_moduli(network, boundary_dict, compression_strains,
     edges_jax = jnp.asarray(np.array(network.edges, dtype=np.int32))
     rest_lengths_jax = jnp.asarray(np.array(network.rest_lengths, dtype=np.float64))
     stiffnesses_jax = jnp.asarray(np.array(network.stiffnesses, dtype=np.float64))
-    positions_flat_jax = jnp.asarray(network.positions.flatten())
+    positions_flat_jax = jnp.asarray(network.positions.flatten(), dtype=jnp.float64)
     top_jax = jnp.asarray(boundary_dict['top'])
     bottom_jax = jnp.asarray(boundary_dict['bottom'])
 

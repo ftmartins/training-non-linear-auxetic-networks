@@ -54,10 +54,10 @@ def compute_hessian_jax(positions, edges, stiffnesses, rest_lengths,
     H : jax array (2N, 2N)
         Hessian matrix (differentiable w.r.t. stiffnesses and positions).
     """
-    positions = jnp.asarray(positions)
+    positions = jnp.asarray(positions, dtype=jnp.float64)
     edges = jnp.asarray(edges)
-    stiffnesses = jnp.asarray(stiffnesses)
-    rest_lengths = jnp.asarray(rest_lengths)
+    stiffnesses = jnp.asarray(stiffnesses, dtype=jnp.float64)
+    rest_lengths = jnp.asarray(rest_lengths, dtype=jnp.float64)
 
     N = positions.shape[0]
     E = edges.shape[0]
@@ -189,7 +189,7 @@ def compute_elasticity_tensor_2d(positions, edges, stiffnesses, rest_lengths,
         Voigt elasticity tensor.
         Rows/cols: [xx, yy, xy] (1-indexed: C_11, C_12, C_13, ...)
     """
-    positions = jnp.asarray(positions)
+    positions = jnp.asarray(positions, dtype=jnp.float64)
     boundary_dofs = jnp.asarray(boundary_dofs)
     interior_dofs = jnp.asarray(interior_dofs)
 

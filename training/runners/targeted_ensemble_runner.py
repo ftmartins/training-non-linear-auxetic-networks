@@ -34,7 +34,7 @@ for _p in [str(_ROOT), str(_SRC)]:
 # Import shared config (not validate_config)
 from base.config import (
     FORCE_TYPE, BOUNDARY_MARGIN,
-    FORCE_TOL, PACKING_PARAMS
+    FORCE_TOL, PACKING_PARAMS, NETWORK_TYPE
 )
 VMIN = 1e-2
 VMAX = 1e2
@@ -84,13 +84,14 @@ from training.src.training_functions import (
 TRAINING_FUNCTIONS_AVAILABLE = True
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
-                        gradient_method='newton'):
+                        gradient_method='newton', network_type=NETWORK_TYPE):
     """
     Run a single targeted training job with checkpoint support.
 
     Args:
         task_id: Task index (0 to 4)
         realization_seed: Realization index (default: 0)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing
         gradient_method: 'newton' (IFT, default), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
@@ -163,6 +164,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             force_type=FORCE_TYPE,
             boundary_margin=BOUNDARY_MARGIN,
             central_force=PACKING_PARAMS['central'],
+            network_type=network_type,
         )
         print(f"  Network created: {len(network.positions)} nodes, {len(network.edges)} edges")
 
@@ -303,6 +305,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             history=history,
             network=trained_network,
             task_config=task_config,
+            boundary_dict=boundary_dict,
             results_dir=TARGETED_RESULTS_DIR,
         )
 
@@ -313,6 +316,15 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         elapsed = time.time() - start_time
         loss_list = history.get('loss', [])
         final_loss = loss_list[-1] if loss_list else float('nan')
+
+        if not np.isfinite(final_loss):
+            print(f"\n{'='*80}")
+            print(f"FAILURE: Targeted Task {task_id}, Realization {realization_seed}")
+            print(f"Time elapsed: {elapsed/60:.2f} minutes")
+            print(f"Final loss is not finite: {final_loss}")
+            print(f"Training steps completed: {len(loss_list)}")
+            print(f"{'='*80}\n")
+            return False
 
         print(f"\n{'='*80}")
         print(f"SUCCESS: Targeted Task {task_id}, Realization {realization_seed}")
@@ -335,7 +347,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         return False
 
 
-def run_all_targeted(resume=True, verbose=False, gradient_method='newton'):
+def run_all_targeted(resume=True, verbose=False, gradient_method='newton', network_type=NETWORK_TYPE):
     """
     Run all 5 targeted training jobs sequentially.
 
@@ -343,6 +355,7 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton'):
         resume: Skip already completed jobs
         verbose: Print detailed progress
         gradient_method: 'newton' (IFT, default), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     print(f"\n{'#'*80}")
     print(f"# TARGETED ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -378,7 +391,7 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton'):
     for idx, (task_id, realization_seed) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
         success = run_single_training(task_id, realization_seed, verbose=verbose,
-                                      gradient_method=gradient_method)
+                                      gradient_method=gradient_method, network_type=network_type)
 
         if success:
             success_count += 1
@@ -501,6 +514,13 @@ Examples:
         default='newton',
         help='Gradient computation method: newton (IFT, default), jax (autodiff), fire/parallel (finite-difference)'
     )
+    parser.add_argument(
+        '--network-type',
+        choices=['jammed', 'lattice'],
+        default=NETWORK_TYPE,
+        help="Network generation method: 'jammed' (packing-derived, default) or "
+             "'lattice' (perturbed triangular lattice square)"
+    )
 
     args = parser.parse_args()
 
@@ -512,12 +532,14 @@ Examples:
 
         print_targeted_tasks_summary()
         success = run_single_training(args.task, args.realization, verbose=args.verbose,
-                                      gradient_method=args.gradient_method)
+                                      gradient_method=args.gradient_method,
+                                      network_type=args.network_type)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
         run_all_targeted(resume=args.resume, verbose=args.verbose,
-                         gradient_method=args.gradient_method)
+                         gradient_method=args.gradient_method,
+                         network_type=args.network_type)
 
     elif args.mode == 'status':
         print_targeted_tasks_summary()
