@@ -55,7 +55,6 @@ from training.src.targeted_task_generator import (
     TARGETED_RESULTS_DIR,
 )
 
-
 # Import shared utilities
 from training.src.task_generator import generate_realization_stiffnesses, compute_target_extensions
 from base.network_utils import create_auxetic_network
@@ -102,6 +101,10 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     print(f"\n{'='*80}")
     print(f"Starting Targeted Task {task_id}, Realization {realization_seed}")
     print(f"{'='*80}")
+    from training.src.targeted_task_generator import TARGETED_RESULTS_DIR
+
+    TARGETED_RESULTS_DIR_ = TARGETED_RESULTS_DIR / f'{gradient_method}'
+    TARGETED_RESULTS_DIR = TARGETED_RESULTS_DIR_
 
     # Check for NaN in previously saved results (takes priority over completion check)
     nan_detected = has_nan_in_results(task_id, realization_seed,
