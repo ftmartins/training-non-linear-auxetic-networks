@@ -58,6 +58,17 @@ python allosteric_trainer.py \
 
 EXIT_CODE=$?
 
+if [ ${EXIT_CODE} -eq 0 ]; then
+    echo ""
+    echo "Running post-training timestep-sweep analysis..."
+    python post_training_sweep.py --task-type allosteric \
+        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID} \
+        --targeted-ensemble
+    python verify_and_plot_loss.py --task-type allosteric \
+        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID} \
+        --targeted-ensemble
+fi
+
 echo ""
 echo "=========================================="
 echo "Finished with exit code: ${EXIT_CODE}"

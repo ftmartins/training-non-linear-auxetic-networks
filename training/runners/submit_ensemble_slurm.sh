@@ -55,10 +55,15 @@ echo "Conda env: ${CONDA_DEFAULT_ENV}"
 TASK_SEED=$((SLURM_ARRAY_TASK_ID / 20))
 REALIZATION_SEED=$((SLURM_ARRAY_TASK_ID % 20))
 
+# Network generation method: 'jammed' (default) or 'lattice'.
+# Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_ensemble_slurm.sh
+NETWORK_TYPE="${NETWORK_TYPE:-jammed}"
+
 echo ""
 echo "Running training:"
 echo "  Task seed: ${TASK_SEED}"
 echo "  Realization seed: ${REALIZATION_SEED}"
+echo "  Network type: ${NETWORK_TYPE}"
 echo ""
 
 # Run training with checkpoint support
@@ -66,10 +71,18 @@ python ensemble_runner.py \
     --mode single \
     --task ${TASK_SEED} \
     --realization ${REALIZATION_SEED} \
+    --network-type ${NETWORK_TYPE} \
     --verbose
 
 # Capture exit code
 EXIT_CODE=$?
+
+if [ ${EXIT_CODE} -eq 0 ]; then
+    echo ""
+    echo "Running post-training timestep-sweep analysis..."
+    python post_training_sweep.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED}
+    python verify_and_plot_loss.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED}
+fi
 
 echo ""
 echo "=========================================="

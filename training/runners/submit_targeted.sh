@@ -42,19 +42,32 @@ echo "Conda env: ${CONDA_DEFAULT_ENV}"
 TASK_ID=$((SLURM_ARRAY_TASK_ID / 10))
 REALIZATION=$((SLURM_ARRAY_TASK_ID % 10))
 
+# Network generation method: 'jammed' (default) or 'lattice'.
+# Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_targeted.sh
+NETWORK_TYPE="${NETWORK_TYPE:-jammed}"
+
 echo ""
 echo "Running targeted training:"
 echo "  Task ID:     ${TASK_ID}"
 echo "  Realization: ${REALIZATION}"
+echo "  Network type: ${NETWORK_TYPE}"
 echo ""
 
 python targeted_ensemble_runner.py \
     --mode single \
     --task ${TASK_ID} \
     --realization ${REALIZATION} \
+    --network-type ${NETWORK_TYPE} \
     --verbose
 
 EXIT_CODE=$?
+
+if [ ${EXIT_CODE} -eq 0 ]; then
+    echo ""
+    echo "Running post-training timestep-sweep analysis..."
+    python post_training_sweep.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION}
+    python verify_and_plot_loss.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION}
+fi
 
 echo ""
 echo "=========================================="
