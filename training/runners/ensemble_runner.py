@@ -85,7 +85,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
     print(f"{'='*80}")
 
     # Check if already complete
-    if is_training_complete(task_seed, realization_seed):
+    if is_training_complete(task_seed, realization_seed, network_type=network_type):
         print(f"Job already completed! Skipping...")
         print(f"{'='*80}\n")
         return True
@@ -100,7 +100,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         # Try to load checkpoint
         checkpoint = None
         if use_checkpoint:
-            checkpoint = load_checkpoint(task_seed, realization_seed)
+            checkpoint = load_checkpoint(task_seed, realization_seed, network_type=network_type)
             if checkpoint is not None:
                 print(f"Found checkpoint at step {checkpoint['current_step']}")
                 print(f"Resuming from checkpoint...")
@@ -226,6 +226,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 task_seed=task_seed,
                 realization_seed=realization_seed,
                 save_interval=500,
+                network_type=network_type,
             )
         else:
             trained_network = network
@@ -241,11 +242,12 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
             network=trained_network,
             task_config=generate_task_config(task_seed),
             boundary_dict=boundary_dict,
+            network_type=network_type,
         )
 
         # Remove checkpoint file after successful completion
         if use_checkpoint:
-            remove_checkpoint(task_seed, realization_seed)
+            remove_checkpoint(task_seed, realization_seed, network_type=network_type)
 
         elapsed = time.time() - start_time
         final_loss = history['loss'][-1] if 'loss' in history and history['loss'] else float('nan')
@@ -298,7 +300,7 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     print(f"{'#'*80}\n")
 
     if resume:
-        jobs = get_incomplete_jobs()
+        jobs = get_incomplete_jobs(network_type=network_type)
         print(f"Found {len(jobs)} incomplete jobs (out of {N_TASKS * N_REALIZATIONS} total)")
     else:
         jobs = [
@@ -350,7 +352,7 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     print(f"{'#'*80}\n")
 
     # Print final progress summary
-    print_progress_summary()
+    print_progress_summary(network_type=network_type)
 
 
 def main():
@@ -445,7 +447,7 @@ Examples:
                                 network_type=args.network_type)
 
     elif args.mode == 'status':
-        print_progress_summary()
+        print_progress_summary(network_type=args.network_type)
 
 
 if __name__ == '__main__':

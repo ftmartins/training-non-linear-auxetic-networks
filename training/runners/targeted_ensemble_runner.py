@@ -111,13 +111,13 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
     # Check for NaN in previously saved results (takes priority over completion check)
     nan_detected = has_nan_in_results(task_id, realization_seed,
-                                      results_dir=TARGETED_RESULTS_DIR)
+                                      results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
     recovery_mode = None   # None | 'from_last_good' | 'from_scratch'
     recovery_lr_scale = 1.0
 
     if nan_detected:
         last_good = get_last_good_step(task_id, realization_seed,
-                                       results_dir=TARGETED_RESULTS_DIR)
+                                       results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
         if last_good >= 0:
             recovery_mode = 'from_last_good'
         else:
@@ -125,7 +125,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         recovery_lr_scale = LR_NAN_REDUCTION
         print(f"NaN detected in saved results — recovery_mode={recovery_mode}, "
               f"LR scale={recovery_lr_scale}")
-    elif is_training_complete(task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR):
+    elif is_training_complete(task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR,
+                              network_type=network_type):
         print(f"Job already completed! Skipping...")
         print(f"{'='*80}\n")
         return True
@@ -140,7 +141,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         checkpoint = None
         if use_checkpoint:
             checkpoint = load_checkpoint(task_id, realization_seed,
-                                         results_dir=TARGETED_RESULTS_DIR)
+                                         results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
             if checkpoint is not None:
                 print(f"Found checkpoint at step {checkpoint['current_step']}")
                 print(f"Resuming from checkpoint...")
@@ -176,9 +177,9 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         if recovery_mode == 'from_last_good':
             last_good = get_last_good_step(task_id, realization_seed,
-                                           results_dir=TARGETED_RESULTS_DIR)
+                                           results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
             result_path = get_training_result_path(task_id, realization_seed,
-                                                   results_dir=TARGETED_RESULTS_DIR)
+                                                   results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
             with open(result_path / "history.pkl", 'rb') as f:
                 saved_history = pickle.load(f)
             n_trim = last_good + 1
@@ -205,7 +206,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             checkpoint = None
             if use_checkpoint:
                 checkpoint = load_checkpoint(task_id, realization_seed,
-                                             results_dir=TARGETED_RESULTS_DIR)
+                                             results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
                 if checkpoint is not None:
                     print(f"Found checkpoint at step {checkpoint['current_step']}")
                     network.positions = checkpoint['network']['positions']
@@ -274,6 +275,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 save_interval=5,
                 task_config=task_config,
                 TARGETED_RESULTS_DIR=TARGETED_RESULTS_DIR,
+                network_type=network_type,
                 **method_kwarg,
             )
 
@@ -285,7 +287,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         # 5b. Second NaN recovery
         if recovery_mode is not None and has_nan_in_results(
-                task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR):
+                task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR, network_type=network_type):
             print(f"\n{'!'*60}")
             print(f"NaN persists after {recovery_mode} recovery.")
             print(f"Restarting from scratch with LR scale={LR_NAN_REDUCTION}.")
@@ -309,11 +311,13 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             task_config=task_config,
             boundary_dict=boundary_dict,
             results_dir=TARGETED_RESULTS_DIR,
+            network_type=network_type,
         )
 
         # Remove checkpoint after success
         if use_checkpoint:
-            remove_checkpoint(task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR)
+            remove_checkpoint(task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR,
+                              network_type=network_type)
 
         elapsed = time.time() - start_time
         loss_list = history.get('loss', [])
@@ -372,6 +376,7 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
             n_tasks=N_TASKS,
             n_realizations=N_REALIZATIONS,
             results_dir=TARGETED_RESULTS_DIR,
+            network_type=network_type,
         )
         print(f"Found {len(jobs)} incomplete jobs (out of {N_TASKS * N_REALIZATIONS} total)")
     else:
@@ -420,20 +425,22 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
     print(f"# Total time: {total_elapsed/60:.2f} minutes")
     print(f"{'#'*80}\n")
 
-    print_targeted_progress()
+    print_targeted_progress(network_type=network_type)
 
 
-def print_targeted_progress():
+def print_targeted_progress(network_type=NETWORK_TYPE):
     """Print progress summary for targeted tasks."""
     complete = get_complete_jobs(
         n_tasks=N_TASKS,
         n_realizations=N_REALIZATIONS,
         results_dir=TARGETED_RESULTS_DIR,
+        network_type=network_type,
     )
     incomplete = get_incomplete_jobs(
         n_tasks=N_TASKS,
         n_realizations=N_REALIZATIONS,
         results_dir=TARGETED_RESULTS_DIR,
+        network_type=network_type,
     )
     total = N_TASKS * N_REALIZATIONS
 
@@ -545,7 +552,7 @@ Examples:
 
     elif args.mode == 'status':
         print_targeted_tasks_summary()
-        print_targeted_progress()
+        print_targeted_progress(network_type=args.network_type)
 
 
 if __name__ == '__main__':

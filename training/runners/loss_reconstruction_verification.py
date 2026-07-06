@@ -60,7 +60,7 @@ from training.src.training_functions import (
     finish_training_GD_auxetic_batch,
     poisson_loss_batch_parallel,
 )
-from training.src.checkpoint_manager import save_training_results
+from training.src.checkpoint_manager import save_training_results, get_training_result_path, _nt_filename
 from tqdm import tqdm
 
 def env_info():
@@ -132,6 +132,7 @@ def train_and_save(results_dir, packing_seed, n_nodes, compression_strains, targ
             history=history_newton, network=trained_newton,
             task_config={**task_config_base, 'method': 'newton'},
             results_dir=Path(results_dir) / 'newton',
+            network_type=network_type,
         )
 
     if 'fire' in methods:
@@ -155,6 +156,7 @@ def train_and_save(results_dir, packing_seed, n_nodes, compression_strains, targ
             history=history_fire, network=trained_fire,
             task_config={**task_config_base, 'method': 'fire'},
             results_dir=Path(results_dir) / 'fire',
+            network_type=network_type,
         )
 
     # Boundary indices + env fingerprint needed by `verify` (possibly on another machine)
@@ -162,6 +164,7 @@ def train_and_save(results_dir, packing_seed, n_nodes, compression_strains, targ
         'boundary': {k: np.asarray(v).tolist() for k, v in boundary_dict.items()},
         'methods': list(methods),
         'env_info_train': env_info(),
+        'network_type': network_type,
     }
     meta_path = Path(results_dir) / 'verification_meta.json'
     with open(meta_path, 'w') as f:
@@ -169,15 +172,15 @@ def train_and_save(results_dir, packing_seed, n_nodes, compression_strains, targ
     print(f'\nSaved verification metadata -> {meta_path}')
 
 
-def load_result(result_path):
-    with open(result_path / 'history.pkl', 'rb') as f:
+def load_result(result_path, network_type='jammed'):
+    with open(result_path / _nt_filename('history.pkl', network_type), 'rb') as f:
         history = pickle.load(f)
-    with open(result_path / 'final_network.pkl', 'rb') as f:
+    with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as f:
         net_dict = pickle.load(f)
-    with open(result_path / 'task_config.json', 'r') as f:
+    with open(result_path / _nt_filename('task_config.json', network_type), 'r') as f:
         cfg = json.load(f)
-    stiff_traj = np.load(result_path / 'stiffness_trajectory.npy')
-    loss_traj = np.load(result_path / 'loss_trajectory.npy')
+    stiff_traj = np.load(result_path / _nt_filename('stiffness_trajectory.npy', network_type))
+    loss_traj = np.load(result_path / _nt_filename('loss_trajectory.npy', network_type))
     return history, net_dict, cfg, stiff_traj, loss_traj
 
 
@@ -231,6 +234,7 @@ def verify(results_dir, make_plot=True):
         meta = json.load(f)
     boundary = {k: np.array(v) for k, v in meta['boundary'].items()}
     methods = meta['methods']
+    network_type = meta.get('network_type', 'jammed')
 
     summary = {
         'env_info_verify': env_info(),
@@ -242,7 +246,8 @@ def verify(results_dir, make_plot=True):
     for method in methods:
         print(f'\n--- Verifying: {method} ---')
         history, net_dict, cfg, stiff_npy, loss_traj = load_result(
-            results_dir / method / 'task_00' / 'realization_00'
+            get_training_result_path(0, 0, results_dir=results_dir / method),
+            network_type=network_type,
         )
         recon_fn = RECONSTRUCTORS[method]
 

@@ -22,7 +22,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from base.config import FORCE_TOL
+from base.config import FORCE_TOL, NETWORK_TYPE
 from base.simulate import (
     elastic_energy,
     fire_minimize_network,
@@ -194,7 +194,7 @@ def finish_training_GD_auxetic_batch(
     verbose=False, stiffnesses_filename=None, force_tol=1e-6,
     vmin=1e-3, vmax=1e3,
     task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol=1e-5,
-    method='newton',
+    method='newton', network_type=NETWORK_TYPE,
 ):
     """
     Train the network for auxetic response using gradient descent.
@@ -333,6 +333,7 @@ def finish_training_GD_auxetic_batch(
                     network=network,
                     task_config=task_config,
                     results_dir=TARGETED_RESULTS_DIR,
+                    network_type=network_type,
                 )
             break
 
@@ -386,6 +387,7 @@ def finish_training_GD_auxetic_batch(
                     network=network,
                     task_config=task_config,
                     results_dir=TARGETED_RESULTS_DIR,
+                    network_type=network_type,
                 )
             break
 
@@ -425,6 +427,7 @@ def finish_training_GD_auxetic_batch(
                 network=network,
                 task_config=task_config,
                 results_dir=TARGETED_RESULTS_DIR,
+                network_type=network_type,
             )
 
             save_checkpoint(
@@ -435,6 +438,7 @@ def finish_training_GD_auxetic_batch(
                 task_config=task_config,
                 current_step=step,
                 results_dir=TARGETED_RESULTS_DIR,
+                network_type=network_type,
             )
 
         if loss < loss_tol:
@@ -483,7 +487,7 @@ def finish_training_GD_auxetic_batch_jax(
     vmin=1e-6, vmax=1e3,
     task_seed=None, realization_seed=None, save_interval=10,
     task_config=None, TARGETED_RESULTS_DIR=None,
-    fire_max_steps=100_000, fire_tol=FORCE_TOL
+    fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE,
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
@@ -607,6 +611,7 @@ def finish_training_GD_auxetic_batch_jax(
                     task_seed=task_seed, realization_seed=realization_seed,
                     history=history, network=network,
                     task_config=task_config, results_dir=TARGETED_RESULTS_DIR,
+                    network_type=network_type,
                 )
             break
 
@@ -626,12 +631,14 @@ def finish_training_GD_auxetic_batch_jax(
                 task_seed=task_seed, realization_seed=realization_seed,
                 history=history, network=network,
                 task_config=task_config, results_dir=TARGETED_RESULTS_DIR,
+                network_type=network_type,
             )
             save_checkpoint(
                 task_seed=task_seed, realization_seed=realization_seed,
                 history=history, network=network,
                 task_config=task_config, current_step=step,
                 results_dir=TARGETED_RESULTS_DIR,
+                network_type=network_type,
             )
 
     # Final summary
