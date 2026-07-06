@@ -30,6 +30,7 @@ from base.elasticity_tensor import (
     precompute_dof_indices,
 )
 from .checkpoint_manager import save_training_results
+from base.config import NETWORK_TYPE
 
 
 def _parse_voigt_key(key):
@@ -174,7 +175,7 @@ def finish_training_GD_general_jax(
     force_type='quadratic', force_tol=1e-6,
     vmin=1e-6, vmax=1e3,
     task_seed=None, realization_seed=None, save_interval=10,
-    task_config=None, TARGETED_RESULTS_DIR=None,
+    task_config=None, TARGETED_RESULTS_DIR=None, network_type=NETWORK_TYPE,
 ):
     """
     General-purpose JAX gradient descent training loop.
@@ -290,6 +291,7 @@ def finish_training_GD_general_jax(
                     task_seed=task_seed, realization_seed=realization_seed,
                     history=history, network=network,
                     task_config=task_config, results_dir=TARGETED_RESULTS_DIR,
+                    network_type=network_type,
                 )
             break
 
@@ -306,6 +308,7 @@ def finish_training_GD_general_jax(
                 task_seed=task_seed, realization_seed=realization_seed,
                 history=history, network=network,
                 task_config=task_config, results_dir=TARGETED_RESULTS_DIR,
+                network_type=network_type,
             )
 
     # Final summary

@@ -16,12 +16,16 @@ import json
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from base.config import RESULTS_DIR, N_TASKS, N_REALIZATIONS
+from base.config import RESULTS_DIR, N_TASKS, N_REALIZATIONS, NETWORK_TYPE
 
 
 def get_training_result_path(task_seed, realization_seed, results_dir=None):
     """
     Get the directory path for a specific training result.
+
+    Directory depth/layout is the same regardless of network_type — see
+    `_nt_filename` for how network_type is instead encoded into individual
+    filenames within this directory.
 
     Args:
         task_seed: Task index
@@ -33,12 +37,29 @@ def get_training_result_path(task_seed, realization_seed, results_dir=None):
     """
     if results_dir is None:
         results_dir = RESULTS_DIR
-    
+
     task_dir = Path(results_dir) / f"task_{task_seed:02d}"
     return task_dir / f"realization_{realization_seed:02d}"
 
 
-def mark_training_complete_small_loss(task_seed, realization_seed, reduction_ratio=None, results_dir=None):
+def _nt_filename(filename, network_type):
+    """
+    Insert `network_type` into a filename unless it is 'jammed' (the
+    original/default network type), so that pre-existing 'jammed' files keep
+    their original names (backward compatible) while other network types
+    (e.g. 'lattice') get distinct filenames within the same directory and
+    never overwrite/collide with a 'jammed' run of the same task/realization.
+
+    Example: _nt_filename('history.pkl', 'lattice') -> 'history_lattice.pkl'
+    """
+    if network_type == 'jammed':
+        return filename
+    stem, dot, ext = filename.partition('.')
+    return f"{stem}_{network_type}{dot}{ext}"
+
+
+def mark_training_complete_small_loss(task_seed, realization_seed, reduction_ratio=None, results_dir=None,
+                                       network_type=NETWORK_TYPE):
     """
     Mark a training job as complete based on loss reduction criterion.
 
@@ -50,10 +71,11 @@ def mark_training_complete_small_loss(task_seed, realization_seed, reduction_rat
         realization_seed: Realization index
         reduction_ratio: The actual loss reduction ratio achieved (optional)
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
     result_path.mkdir(parents=True, exist_ok=True)
-    completion_marker = result_path / "training_complete_small_loss.txt"
+    completion_marker = result_path / _nt_filename("training_complete_small_loss.txt", network_type)
 
     with open(completion_marker, 'w') as f:
         f.write(f"Completed (loss reduction criterion) at {datetime.now().isoformat()}\n")
@@ -62,7 +84,7 @@ def mark_training_complete_small_loss(task_seed, realization_seed, reduction_rat
             f.write(f"Orders of magnitude: {np.log10(reduction_ratio):.2f}\n")
 
 
-def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None):
+def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Check if training achieved 3+ orders of magnitude loss reduction.
 
@@ -73,12 +95,13 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         criterion_met: Boolean indicating if loss reduction criterion is satisfied
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-    loss_file = result_path / "loss_trajectory.npy"
+    loss_file = result_path / _nt_filename("loss_trajectory.npy", network_type)
 
     # Check if loss file exists
     if not loss_file.exists():
@@ -108,7 +131,8 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
             mark_training_complete_small_loss(
                 task_seed, realization_seed,
                 reduction_ratio=reduction_ratio,
-                results_dir=results_dir
+                results_dir=results_dir,
+                network_type=network_type,
             )
             return True
 
@@ -121,7 +145,7 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         return False
 
 
-def has_nan_in_results(task_seed, realization_seed, results_dir=None):
+def has_nan_in_results(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Check if previously saved training results contain NaN values.
 
@@ -133,14 +157,15 @@ def has_nan_in_results(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         has_nan: True if NaN detected in saved stiffnesses or losses.
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
 
-    stiffness_file = result_path / "stiffness_trajectory.npy"
-    loss_file = result_path / "loss_trajectory.npy"
+    stiffness_file = result_path / _nt_filename("stiffness_trajectory.npy", network_type)
+    loss_file = result_path / _nt_filename("loss_trajectory.npy", network_type)
 
     try:
         if stiffness_file.exists():
@@ -158,7 +183,7 @@ def has_nan_in_results(task_seed, realization_seed, results_dir=None):
     return False
 
 
-def get_last_good_step(task_seed, realization_seed, results_dir=None):
+def get_last_good_step(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Return the index of the last training step that contains no NaN in either
     stiffnesses or loss.
@@ -171,6 +196,7 @@ def get_last_good_step(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         last_good: Index of last clean step, or -1 if no clean step exists
@@ -178,8 +204,8 @@ def get_last_good_step(task_seed, realization_seed, results_dir=None):
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
 
-    stiffness_file = result_path / "stiffness_trajectory.npy"
-    loss_file = result_path / "loss_trajectory.npy"
+    stiffness_file = result_path / _nt_filename("stiffness_trajectory.npy", network_type)
+    loss_file = result_path / _nt_filename("loss_trajectory.npy", network_type)
 
     if not stiffness_file.exists() or not loss_file.exists():
         return -1
@@ -211,7 +237,7 @@ def get_last_good_step(task_seed, realization_seed, results_dir=None):
         return -1
 
 
-def is_training_complete(task_seed, realization_seed, results_dir=None):
+def is_training_complete(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Check if a training job is marked as complete.
 
@@ -224,6 +250,7 @@ def is_training_complete(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         is_complete: Boolean indicating if job is complete by either criterion
@@ -235,14 +262,14 @@ def is_training_complete(task_seed, realization_seed, results_dir=None):
     #    return True
 
     # Fast path 2: Check alternative completion marker
-    if (result_path / "training_complete_small_loss.txt").exists():
+    if (result_path / _nt_filename("training_complete_small_loss.txt", network_type)).exists():
         return True
 
     # Slow path: Evaluate loss reduction criterion
-    return check_loss_reduction_criterion(task_seed, realization_seed, results_dir)
+    return check_loss_reduction_criterion(task_seed, realization_seed, results_dir, network_type)
 
 
-def mark_training_complete(task_seed, realization_seed, results_dir=None):
+def mark_training_complete(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Mark a training job as complete by creating a marker file.
 
@@ -250,16 +277,17 @@ def mark_training_complete(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
     result_path.mkdir(parents=True, exist_ok=True)
-    completion_marker = result_path / "training_complete.txt"
+    completion_marker = result_path / _nt_filename("training_complete.txt", network_type)
     with open(completion_marker, 'w') as f:
         f.write(f"Completed at {datetime.now().isoformat()}\n")
 
 
 def save_training_results(task_seed, realization_seed, history, network, task_config,
-                           boundary_dict=None, results_dir=None):
+                           boundary_dict=None, results_dir=None, network_type=NETWORK_TYPE):
     """
     Save all training results to organized directory structure.
 
@@ -301,6 +329,7 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
             'right') used to set up the training task. Saved to history.pkl and to
             a separate boundary_nodes.json file. Optional for backward compatibility.
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
     result_path.mkdir(parents=True, exist_ok=True)
@@ -322,18 +351,18 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
         'boundary': boundary_to_save,
     }
 
-    with open(result_path / "history.pkl", "wb") as f:
+    with open(result_path / _nt_filename("history.pkl", network_type), "wb") as f:
         pickle.dump(history_to_save, f)
 
     # Save boundary nodes separately for quick access
     if boundary_to_save is not None:
-        with open(result_path / "boundary_nodes.json", "w") as f:
+        with open(result_path / _nt_filename("boundary_nodes.json", network_type), "w") as f:
             json.dump(boundary_to_save, f, indent=2)
 
     # Save loss and stiffness trajectories as separate numpy files
-    np.save(result_path / "loss_trajectory.npy", loss_array)
-    np.save(result_path / "stiffness_trajectory.npy", stiffness_array)
-    np.save(result_path / "edges.npy", np.array(network.edges))
+    np.save(result_path / _nt_filename("loss_trajectory.npy", network_type), loss_array)
+    np.save(result_path / _nt_filename("stiffness_trajectory.npy", network_type), stiffness_array)
+    np.save(result_path / _nt_filename("edges.npy", network_type), np.array(network.edges))
 
     # Save final network state
     network_dict = {
@@ -342,19 +371,19 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
         'stiffnesses': network.stiffnesses,
         'rest_lengths': network.rest_lengths
     }
-    with open(result_path / "final_network.pkl", "wb") as f:
+    with open(result_path / _nt_filename("final_network.pkl", network_type), "wb") as f:
         pickle.dump(network_dict, f)
 
     # Save task configuration
-    with open(result_path / "task_config.json", "w") as f:
+    with open(result_path / _nt_filename("task_config.json", network_type), "w") as f:
         json.dump(task_config, f, indent=2)
 
     # Mark complete
-    mark_training_complete(task_seed, realization_seed, results_dir)
+    mark_training_complete(task_seed, realization_seed, results_dir, network_type)
 
 
 def save_checkpoint(task_seed, realization_seed, history, network, task_config,
-                   current_step, results_dir=None):
+                   current_step, results_dir=None, network_type=NETWORK_TYPE):
     """
     Save a training checkpoint (intermediate state).
 
@@ -366,6 +395,7 @@ def save_checkpoint(task_seed, realization_seed, history, network, task_config,
         task_config: Task configuration dictionary
         current_step: Current training step number
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
     result_path.mkdir(parents=True, exist_ok=True)
@@ -385,16 +415,16 @@ def save_checkpoint(task_seed, realization_seed, history, network, task_config,
     }
 
     # Save checkpoint
-    checkpoint_file = result_path / "checkpoint.pkl"
+    checkpoint_file = result_path / _nt_filename("checkpoint.pkl", network_type)
     with open(checkpoint_file, "wb") as f:
         pickle.dump(checkpoint_data, f)
 
     # Also save task config separately for easy access
-    with open(result_path / "task_config.json", "w") as f:
+    with open(result_path / _nt_filename("task_config.json", network_type), "w") as f:
         json.dump(task_config, f, indent=2)
 
 
-def load_checkpoint(task_seed, realization_seed, results_dir=None):
+def load_checkpoint(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Load a training checkpoint if it exists.
 
@@ -402,13 +432,14 @@ def load_checkpoint(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         checkpoint_data: Dictionary with checkpoint data, or None if no checkpoint exists
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-    checkpoint_file = result_path / "checkpoint.pkl"
- 
+    checkpoint_file = result_path / _nt_filename("checkpoint.pkl", network_type)
+
     print(checkpoint_file, checkpoint_file.exists())
  
     if not checkpoint_file.exists():
@@ -423,7 +454,7 @@ def load_checkpoint(task_seed, realization_seed, results_dir=None):
         return None
 
 
-def has_checkpoint(task_seed, realization_seed, results_dir=None):
+def has_checkpoint(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Check if a checkpoint exists for this training job.
 
@@ -431,16 +462,17 @@ def has_checkpoint(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         has_ckpt: Boolean indicating if checkpoint exists
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-    checkpoint_file = result_path / "checkpoint.pkl"
+    checkpoint_file = result_path / _nt_filename("checkpoint.pkl", network_type)
     return checkpoint_file.exists()
 
 
-def remove_checkpoint(task_seed, realization_seed, results_dir=None):
+def remove_checkpoint(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Remove checkpoint file after successful completion.
 
@@ -448,15 +480,16 @@ def remove_checkpoint(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-    checkpoint_file = result_path / "checkpoint.pkl"
+    checkpoint_file = result_path / _nt_filename("checkpoint.pkl", network_type)
 
     if checkpoint_file.exists():
         checkpoint_file.unlink()
 
 
-def get_incomplete_jobs(n_tasks=None, n_realizations=None, results_dir=None):
+def get_incomplete_jobs(n_tasks=None, n_realizations=None, results_dir=None, network_type=NETWORK_TYPE):
     """
     Get list of incomplete jobs (not marked as complete).
 
@@ -464,6 +497,7 @@ def get_incomplete_jobs(n_tasks=None, n_realizations=None, results_dir=None):
         n_tasks: Number of tasks (default: from config)
         n_realizations: Number of realizations per task (default: from config)
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         incomplete_jobs: List of (task_seed, realization_seed) tuples
@@ -476,13 +510,13 @@ def get_incomplete_jobs(n_tasks=None, n_realizations=None, results_dir=None):
     incomplete = []
     for task_seed in range(n_tasks):
         for realization_seed in range(n_realizations):
-            if not is_training_complete(task_seed, realization_seed, results_dir):
+            if not is_training_complete(task_seed, realization_seed, results_dir, network_type):
                 incomplete.append((task_seed, realization_seed))
 
     return incomplete
 
 
-def get_complete_jobs(n_tasks=None, n_realizations=None, results_dir=None):
+def get_complete_jobs(n_tasks=None, n_realizations=None, results_dir=None, network_type=NETWORK_TYPE):
     """
     Get list of complete jobs.
 
@@ -490,6 +524,7 @@ def get_complete_jobs(n_tasks=None, n_realizations=None, results_dir=None):
         n_tasks: Number of tasks (default: from config)
         n_realizations: Number of realizations per task (default: from config)
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         complete_jobs: List of (task_seed, realization_seed) tuples
@@ -502,22 +537,23 @@ def get_complete_jobs(n_tasks=None, n_realizations=None, results_dir=None):
     complete = []
     for task_seed in range(n_tasks):
         for realization_seed in range(n_realizations):
-            if is_training_complete(task_seed, realization_seed, results_dir):
+            if is_training_complete(task_seed, realization_seed, results_dir, network_type):
                 complete.append((task_seed, realization_seed))
 
     return complete
 
 
-def print_progress_summary(results_dir=None):
+def print_progress_summary(results_dir=None, network_type=NETWORK_TYPE):
     """
     Print a summary of ensemble training progress.
 
     Args:
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     total_jobs = N_TASKS * N_REALIZATIONS
-    complete_jobs = get_complete_jobs(results_dir=results_dir)
-    incomplete_jobs = get_incomplete_jobs(results_dir=results_dir)
+    complete_jobs = get_complete_jobs(results_dir=results_dir, network_type=network_type)
+    incomplete_jobs = get_incomplete_jobs(results_dir=results_dir, network_type=network_type)
 
     print(f"\n{'='*80}")
     print(f"ENSEMBLE TRAINING PROGRESS")
