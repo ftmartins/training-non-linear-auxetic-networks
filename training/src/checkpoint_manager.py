@@ -258,7 +258,8 @@ def mark_training_complete(task_seed, realization_seed, results_dir=None):
         f.write(f"Completed at {datetime.now().isoformat()}\n")
 
 
-def save_training_results(task_seed, realization_seed, history, network, task_config, results_dir=None):
+def save_training_results(task_seed, realization_seed, history, network, task_config,
+                           boundary_dict=None, results_dir=None):
     """
     Save all training results to organized directory structure.
 
@@ -271,6 +272,7 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
                     stiffness_trajectory.npy  # Stiffnesses (n_steps, n_edges)
                     final_network.pkl     # Final network state
                     task_config.json      # Task configuration
+                    boundary_nodes.json   # Boundary node indices used in training
                     training_complete.txt # Standard completion marker
                     training_complete_small_loss.txt  # Alternative marker (loss-based)
 
@@ -279,6 +281,7 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
         - 'loss': Array of loss values at each step (n_steps,)
         - 'positions': List of position arrays at each step (n_steps, n_nodes, 2)
         - 'freetraj': (optional) Free trajectory data
+        - 'boundary': (optional) dict with 'top'/'bottom'/'left'/'right' node index lists
 
     Separate numpy files are also saved for quick access:
         - loss_trajectory.npy: Loss values at each step
@@ -294,6 +297,9 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
         history: Training history dictionary with full trajectory
         network: Final network object (ElasticNetwork)
         task_config: Task configuration dictionary
+        boundary_dict: Dict of boundary node indices (keys 'top', 'bottom', 'left',
+            'right') used to set up the training task. Saved to history.pkl and to
+            a separate boundary_nodes.json file. Optional for backward compatibility.
         results_dir: Results directory (default: from config)
     """
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
@@ -303,16 +309,26 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
     stiffness_array = np.array(history.get('stiffnesses', []))  # (n_steps, n_edges)
     loss_array = np.array(history.get('loss', []))               # (n_steps,)
 
+    boundary_to_save = None
+    if boundary_dict is not None:
+        boundary_to_save = {k: np.asarray(v).tolist() for k, v in boundary_dict.items()}
+
     # Save history (includes full training trajectory)
     history_to_save = {
         'stiffnesses': stiffness_array,
         'loss': loss_array,
         'positions': history.get('positions', []),  # List of arrays
-        'freetraj': history.get('freetraj', [])     # Optional
+        'freetraj': history.get('freetraj', []),    # Optional
+        'boundary': boundary_to_save,
     }
 
     with open(result_path / "history.pkl", "wb") as f:
         pickle.dump(history_to_save, f)
+
+    # Save boundary nodes separately for quick access
+    if boundary_to_save is not None:
+        with open(result_path / "boundary_nodes.json", "w") as f:
+            json.dump(boundary_to_save, f, indent=2)
 
     # Save loss and stiffness trajectories as separate numpy files
     np.save(result_path / "loss_trajectory.npy", loss_array)

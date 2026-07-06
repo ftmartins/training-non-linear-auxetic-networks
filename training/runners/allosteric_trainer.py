@@ -39,6 +39,13 @@ ETA      = 1.0
 K_OUTPUT = 1e3
 LR_TARGET_LOG = -3.5   # target mean(log10|delta_K|)
 
+# Fixed input-actuation schedule, shared by training and by post-training
+# analysis (analysis/timestep_sweep.py) so both use identical LAMMPS calls.
+STRAIN_INPUT   = 1.0
+STRAIN_INPUT2  = 0.5
+NSTEPS_TASK1   = 100
+NSTEPS_TASK2   = 50
+
 N_GEOMETRIES   = 5
 N_TASKS        = 5
 N_REALIZATIONS = 10 # 5
@@ -146,7 +153,10 @@ def create_network(L, p, R):
         return (np.sin(theta) * (nodes[in_node_2] - nodes[in_node_1])[0]
                 + np.cos(theta) * (nodes[in_node_2] - nodes[in_node_1])[1])
 
-    theta = fsolve(_f, 0)[0]
+    theta_sol, _, ier, msg = fsolve(_f, 0, full_output=True)
+    if ier != 1:
+        raise RuntimeError(f"fsolve failed to find rotation angle: {msg}")
+    theta = theta_sol[0]
     for i in range(len(nodes)):
         nodes[i] = Rot(theta) @ (nodes[i] - nodes[in_node_1]) + nodes[in_node_1]
 
@@ -256,6 +266,37 @@ def load_resume_state(output_path):
     return None
 
 
+# ── Actuation evaluation (free + clamped LAMMPS pair at fixed stiffnesses) ────
+
+def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA):
+    """
+    Run one free+clamped LAMMPS actuation pair at fixed stiffnesses.
+
+    This is the read-only half of the training step (no stiffness update) —
+    used both by the training loop and by post-training analysis
+    (analysis/timestep_sweep.py) so recomputed loss uses the exact same
+    physics calls as training.
+
+    Returns
+    -------
+    mse : float                    (||nodes_free[2]-nodes_free[3]|| - tod)^2
+    nodes_free : (N, 2) array      equilibrium positions, free (uncalibrated) run
+    nodes_clamped : (N, 2) array   equilibrium positions, clamped (output-spring) run
+    """
+    f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses)
+    nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
+                                  dx=dx, nsteps=nsteps)[nsteps - 1]
+    cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
+    f.write_lammps_data("data_clamped.network", nodes, incidence_matrix, stiffnesses,
+                        id_outA=2, id_outB=3,
+                        target_output_distance=eta * tod + (1 - eta) * cod,
+                        k_output=K_OUTPUT)
+    nodes_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
+                                     dx=dx, nsteps=nsteps)[nsteps - 1]
+    mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
+    return mse, nodes_free, nodes_clamped
+
+
 # ── Learning rule ─────────────────────────────────────────────────────────────
 
 def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
@@ -274,17 +315,8 @@ def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
 def calibrate_learning_rate(nodes, incidence_matrix, eq_lengths, stiffnesses,
                              eta, tod, dx, nsteps):
     """One LAMMPS step at lr=1; scale so mean(log10|delta_K|) = LR_TARGET_LOG."""
-    f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses)
-    nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
-                                  dx=dx, nsteps=nsteps)[nsteps - 1]
-    cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
-
-    f.write_lammps_data("data_clamped.network", nodes, incidence_matrix, stiffnesses,
-                        id_outA=2, id_outB=3,
-                        target_output_distance=eta * tod + (1 - eta) * cod,
-                        k_output=K_OUTPUT)
-    nodes_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
-                                     dx=dx, nsteps=nsteps)[nsteps - 1]
+    _, nodes_free, nodes_clamped = evaluate_actuation(
+        nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=eta)
 
     dVfree    = np.linalg.norm(incidence_matrix @ nodes_free,    axis=1) - eq_lengths
     dVclamped = np.linalg.norm(incidence_matrix @ nodes_clamped, axis=1) - eq_lengths
@@ -320,31 +352,15 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
 
     for j in range(n_steps):
         # Task 1
-        f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses)
-        nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
-                                      dx=dx, nsteps=nsteps)[nsteps - 1]
-        cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
-        f.write_lammps_data("data_clamped.network", nodes, incidence_matrix, stiffnesses,
-                            id_outA=2, id_outB=3,
-                            target_output_distance=ETA * tod + (1 - ETA) * cod,
-                            k_output=K_OUTPUT)
-        nodes_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
-                                         dx=dx, nsteps=nsteps)[nsteps - 1]
+        _, nodes_free, nodes_clamped = evaluate_actuation(
+            nodes, incidence_matrix, stiffnesses, tod, dx, nsteps)
         stiffnesses, mse, _ = learning_update(
             nodes_free, nodes_clamped, tod, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
 
         # Task 2
-        f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses)
-        nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
-                                      dx=dx2, nsteps=nsteps2)[nsteps2 - 1]
-        cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
-        f.write_lammps_data("data_clamped.network", nodes, incidence_matrix, stiffnesses,
-                            id_outA=2, id_outB=3,
-                            target_output_distance=ETA * tod2 + (1 - ETA) * cod,
-                            k_output=K_OUTPUT)
-        nodes_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
-                                         dx=dx2, nsteps=nsteps2)[nsteps2 - 1]
+        _, nodes_free, nodes_clamped = evaluate_actuation(
+            nodes, incidence_matrix, stiffnesses, tod2, dx2, nsteps2)
         stiffnesses, mse2, _ = learning_update(
             nodes_free, nodes_clamped, tod2, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
@@ -500,8 +516,8 @@ def main():
         nodes, incidence_matrix, eq_lengths = load_or_create_geometry(output_path, gseed)
 
         # ── Resolve task strains ──────────────────────────────────────────────
-        strain_input  = 1.0
-        strain_input2 = 0.5
+        strain_input  = STRAIN_INPUT
+        strain_input2 = STRAIN_INPUT2
         if targeted:
             if tid >= len(TARGETED_ENSEMBLE):
                 raise ValueError(f'--task-id {tid} out of range for TARGETED_ENSEMBLE '
@@ -530,8 +546,8 @@ def main():
         dinputdistance  = strain_input  * np.linalg.norm(nodes[0] - nodes[1])
         dinputdistance2 = strain_input2 * np.linalg.norm(nodes[0] - nodes[1])
 
-        nsteps  = 100
-        nsteps2 = 50
+        nsteps  = NSTEPS_TASK1
+        nsteps2 = NSTEPS_TASK2
         dx  = dinputdistance  / nsteps
         dx2 = dinputdistance2 / nsteps2
 

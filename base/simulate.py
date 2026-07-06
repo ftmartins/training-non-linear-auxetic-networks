@@ -87,6 +87,13 @@ def fire_minimize_network(network, constrained_dof_idx=None, force_type='quadrat
             deltaT, retry_steps_2, tol, constrained_dof_idx, force_type_int,
         )
 
+    if force_norm is None or force_norm >= tol:
+        warnings.warn(
+            f"fire_minimize_network did not converge: force_norm={force_norm} >= tol={tol} "
+            f"after {max_steps + retry_steps_1 + retry_steps_2} total steps",
+            RuntimeWarning,
+        )
+
     return min_pos, force_norm
 
 
@@ -161,15 +168,21 @@ def _grad_k_from_adjoint(pos_final, edges, rest_lengths, w_full):
 
 
 @functools.lru_cache(maxsize=8)
-def _make_jax_newton_solver(n_dof, n_free, free_idx_tuple, max_newton):
+def _make_jax_newton_solver(n_dof, n_free, free_idx_tuple, max_newton, newton_reg=1e-8):
     """
     Return a JIT-compiled Newton equilibrium solver for a fixed DOF layout.
 
-    Cached by (n_dof, n_free, free_idx, max_newton) so compilation happens once
-    per network topology and is reused across all training steps and strain steps.
+    Cached by (n_dof, n_free, free_idx, max_newton, newton_reg) so compilation happens
+    once per network topology and is reused across all training steps and strain steps.
+
+    newton_reg : Tikhonov regularization added to the free-DOF tangent stiffness
+        before each linear solve (K_ff + newton_reg * I). Guards against stalling
+        when K_ff is near-singular (e.g. near-mechanism configurations in trained
+        auxetic networks at large compression) — mirrors the regularization used
+        in the IFT adjoint solve (crf_bwd).
 
     The returned function signature:
-        solve(pos_flat, edges, rest_lengths, k, tol) -> pos_flat_equilibrated
+        solve(pos_flat, edges, rest_lengths, k, tol) -> (pos_flat_equilibrated, res_norm)
     All arguments are JAX arrays; constrained DOFs must already be set in pos_flat.
     """
     free_idx_j = jnp.array(list(free_idx_tuple), dtype=jnp.int32)
@@ -218,15 +231,17 @@ def _make_jax_newton_solver(n_dof, n_free, free_idx_tuple, max_newton):
         def _body(carry):
             pf, F_free, count = carry
             K_ff = _stiffness_free(pf)
-            dx = jnp.linalg.solve(K_ff, F_free)
+            K_ff_reg = K_ff + newton_reg * jnp.eye(n_free, dtype=K_ff.dtype)
+            dx = jnp.linalg.solve(K_ff_reg, F_free)
             pf_new = pf.at[free_idx_j].add(dx)
             return pf_new, _forces_free(pf_new), count + 1
 
         F0 = _forces_free(pos_flat)
-        pf_out, _, _ = jax.lax.while_loop(
+        pf_out, F_free_out, _ = jax.lax.while_loop(
             _cond, _body, (pos_flat, F0, jnp.int32(0))
         )
-        return pf_out
+        res_norm = jnp.linalg.norm(F_free_out) / n_free
+        return pf_out, res_norm
 
     return _solve
 
@@ -341,8 +356,22 @@ def _quasistatic_newton(network, compression_strain, top_nodes, bottom_nodes,
         pos[top_nodes, 0] = x_top_init
         pos[bottom_nodes, 0] = x_bot_init
 
-        pf = jax_solver(jnp.array(pos.flatten()), edges_j, rest_j, k_j, tol_j)
+        pf, res_norm = jax_solver(jnp.array(pos.flatten()), edges_j, rest_j, k_j, tol_j)
         pos = np.array(pf).reshape(-1, 2)
+
+        if float(res_norm/n_dof) >= tol:
+            # Regularized Newton stalled (likely a near-mechanism / near-singular K_ff
+            # configuration) — fall back to Cython FIRE, which is more robust to soft
+            # modes, starting from Newton's last iterate.
+            pos, force_norm_fb, _ = fire_minimize_dof(
+                pos, edges, rest_lengths, k,
+                1e-2, 1_000_000, tol, bdry_dofs, 0,
+            )
+            assert force_norm_fb < tol, (
+                f"Newton+FIRE fallback did not converge at step {step}: "
+                f"force_norm={force_norm_fb:.3e} >= tol={tol:.3e}"
+            )
+
         traj.append(pos.copy())
 
     return traj
@@ -389,7 +418,7 @@ def compute_ift_gradient(network, compression_strains, target_poissons,
     n_free = len(free_idx)
     coo_rows, coo_cols = _precompute_stiffness_coo_indices(edges, n_nodes)
 
-    jax_solver = _make_jax_newton_solver(n_dof, n_free, tuple(free_idx), 100)
+    jax_solver = _make_jax_newton_solver(n_dof, n_free, tuple(free_idx), 100_000)
     edges_j = jnp.array(edges)
     rest_j  = jnp.array(rest_lengths)
     k_j     = jnp.array(k)
@@ -419,8 +448,21 @@ def compute_ift_gradient(network, compression_strains, target_poissons,
             pos_cur[top_nodes, 0] = x_top_init
             pos_cur[bottom_nodes, 0] = x_bot_init
 
-            pf = jax_solver(jnp.array(pos_cur.flatten()), edges_j, rest_j, k_j, tol_j)
+            pf, res_norm = jax_solver(jnp.array(pos_cur.flatten()), edges_j, rest_j, k_j, tol_j)
             pos_cur = np.array(pf).reshape(-1, 2)
+
+            if float(res_norm/n_dof) >= tol:
+                # Regularized Newton stalled (likely a near-mechanism / near-singular
+                # K_ff configuration) — fall back to Cython FIRE, more robust to soft
+                # modes, starting from Newton's last iterate.
+                pos_cur, force_norm_fb, _ = fire_minimize_dof(
+                    pos_cur, edges, rest_lengths, k,
+                    1e-2, 1_000_000, tol, bdry_dofs, 0,
+                )
+                assert force_norm_fb < tol, (
+                    f"Newton+FIRE fallback did not converge at step {step} (strain={cs}): "
+                    f"force_norm={force_norm_fb:.3e} >= tol={tol:.3e}"
+                )
 
             if step == n_strain_steps - 1:
                 # K_ff at the fully-converged final position for the IFT adjoint solve
@@ -489,10 +531,13 @@ def compute_quasistatic_trajectory_full_cycle(network, amp, top_nodes, bottom_no
         pos_step = np.copy(positions)
         pos_step[top_nodes, 1] = y_top_new + (positions[top_nodes, 1] - positions[top_nodes, 1].mean())
         pos_step[bottom_nodes, 1] = y_bottom
-        min_pos, _, _ = fire_minimize_dof(
+        min_pos, force_norm, _ = fire_minimize_dof(
             pos_step, edges_i32, rest_i64,
             np.array(network.stiffnesses, dtype=np.float64),
             dt, max_s, tol, constrained_idx_dof, ft_int,
+        )
+        assert force_norm <= tol, (
+            f"FIRE did not converge: force_norm={force_norm:.3e} > tol={tol:.3e}"
         )
         positions = min_pos
         traj.append(np.copy(min_pos))

@@ -52,7 +52,7 @@ _ROOT = Path(__file__).parent.parent.parent  # project root
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from base.config import FORCE_TOL, FORCE_TYPE, VMIN, VMAX
+from base.config import FORCE_TOL, FORCE_TYPE, VMIN, VMAX, NETWORK_TYPE
 from base.elastic_network import ElasticNetwork
 from base.network_utils import create_auxetic_network
 from base.simulate import compute_ift_gradient
@@ -61,7 +61,7 @@ from training.src.training_functions import (
     poisson_loss_batch_parallel,
 )
 from training.src.checkpoint_manager import save_training_results
-
+from tqdm import tqdm
 
 def env_info():
     """Environment fingerprint — the first thing to diff when cluster and
@@ -89,13 +89,15 @@ def env_info():
 
 def train_and_save(results_dir, packing_seed, n_nodes, compression_strains, target_poisson,
                     n_strain_steps, n_train_steps_newton, n_train_steps_fire,
-                    boundary_margin=0.02, central_force=0.00005, methods=('newton', 'fire')):
+                    boundary_margin=0.02, central_force=0.00005, methods=('newton', 'fire'),
+                    network_type=NETWORK_TYPE):
     target_extensions = [-(nu * cs) for nu, cs in zip(target_poisson, compression_strains)]
 
-    print(f'Creating network: packing_seed={packing_seed}, n_nodes={n_nodes}')
+    print(f'Creating network: packing_seed={packing_seed}, n_nodes={n_nodes}, network_type={network_type}')
     network_base, boundary_dict = create_auxetic_network(
         n_nodes=n_nodes, packing_seed=packing_seed, force_type=FORCE_TYPE,
         boundary_margin=boundary_margin, central_force=central_force,
+        network_type=network_type,
     )
     top, bottom = boundary_dict['top'], boundary_dict['bottom']
     left, right = boundary_dict['left'], boundary_dict['right']
@@ -183,7 +185,7 @@ def reconstruct_newton(stiffnesses_per_step, positions_per_step, net_dict, cfg, 
     top, bottom = boundary['top'], boundary['bottom']
     left, right = boundary['left'], boundary['right']
     losses = []
-    for i in range(len(stiffnesses_per_step)):
+    for i in tqdm(range(len(stiffnesses_per_step)), desc="Reconstructing Newton trajectory"):
         net_i = ElasticNetwork(
             positions=positions_per_step[i], edges=net_dict['edges'],
             rest_lengths=net_dict['rest_lengths'], stiffnesses=stiffnesses_per_step[i],
@@ -203,7 +205,7 @@ def reconstruct_fire(stiffnesses_per_step, positions_per_step, net_dict, cfg, bo
     top, bottom = boundary['top'], boundary['bottom']
     left, right = boundary['left'], boundary['right']
     losses = []
-    for i in range(len(stiffnesses_per_step)):
+    for i in tqdm(range(len(stiffnesses_per_step)), desc="Reconstructing FIRE trajectory"):
         net_i = ElasticNetwork(
             positions=positions_per_step[i], edges=net_dict['edges'],
             rest_lengths=net_dict['rest_lengths'], stiffnesses=stiffnesses_per_step[i],
@@ -244,31 +246,34 @@ def verify(results_dir, make_plot=True):
         )
         recon_fn = RECONSTRUCTORS[method]
 
-        recon_pkl = recon_fn(history['stiffnesses'], history['positions'], net_dict, cfg, boundary)
-        recon_npy = recon_fn(stiff_npy, history['positions'], net_dict, cfg, boundary)
+        # recon_pkl = recon_fn(history['stiffnesses'], history['positions'], net_dict, cfg, boundary)
+        # recon_npy = recon_fn(stiff_npy, history['positions'], net_dict, cfg, boundary)
 
         stored = np.asarray(history['loss'])
-        err_pkl = np.abs(stored - recon_pkl)
-        err_npy = np.abs(stored - recon_npy)
+        print(stored.min(), stored.max())
+        # err_pkl = np.abs(stored - recon_pkl)
+        # err_npy = np.abs(stored - recon_npy)
         stiff_hist = np.asarray(history['stiffnesses'])
         stiff_equal = bool(np.array_equal(stiff_hist, stiff_npy))
         stiff_maxdiff = float(np.max(np.abs(stiff_hist - stiff_npy)))
 
         print(f'  steps: {len(stored)}')
         print(f'  stiffness pkl==npy: {stiff_equal}  (max|diff|={stiff_maxdiff:.2e})')
-        print(f'  max|stored-recon(pkl)| = {err_pkl.max():.4e}')
-        print(f'  max|stored-recon(npy)| = {err_npy.max():.4e}')
+        # print(f'  max|stored-recon(pkl)| = {err_pkl.max():.4e}')
+        # print(f'  max|stored-recon(npy)| = {err_npy.max():.4e}')  
+        
+        assert 1==2
 
         summary['results'][method] = {
             'n_steps': int(len(stored)),
             'stiffness_pkl_eq_npy': stiff_equal,
             'stiffness_max_abs_diff': stiff_maxdiff,
-            'max_abs_err_pkl': float(err_pkl.max()),
-            'max_abs_err_npy': float(err_npy.max()),
-            'mean_abs_err_pkl': float(err_pkl.mean()),
-            'mean_abs_err_npy': float(err_npy.mean()),
+            # 'max_abs_err_pkl': float(err_pkl.max()),
+            # 'max_abs_err_npy': float(err_npy.max()),
+            # 'mean_abs_err_pkl': float(err_pkl.mean()),
+            # 'mean_abs_err_npy': float(err_npy.mean()),
         }
-        plot_data[method] = dict(stored=stored, recon_pkl=recon_pkl, recon_npy=recon_npy)
+        # plot_data[method] = dict(stored=stored, recon_pkl=recon_pkl, recon_npy=recon_npy)
 
     summary_path = results_dir / 'reconstruction_summary.json'
     with open(summary_path, 'w') as f:
@@ -321,6 +326,7 @@ def main():
     parser.add_argument('--methods', nargs='+', choices=['newton', 'fire'], default=['newton', 'fire'])
     parser.add_argument('--packing-seed', type=int, default=7)
     parser.add_argument('--n-nodes', type=int, default=100)
+    parser.add_argument('--network-type', choices=['jammed', 'lattice'], default=NETWORK_TYPE)
     parser.add_argument('--n-strain-steps', type=int, default=100)
     parser.add_argument('--n-train-steps-newton', type=int, default=1000)
     parser.add_argument('--n-train-steps-fire', type=int, default=10)
@@ -345,6 +351,7 @@ def main():
             n_train_steps_newton=args.n_train_steps_newton,
             n_train_steps_fire=args.n_train_steps_fire,
             methods=args.methods,
+            network_type=args.network_type,
         )
 
     if args.mode in ('verify', 'all'):

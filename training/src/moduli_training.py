@@ -258,7 +258,7 @@ def finish_training_GD_general_jax(
         stiffnesses_jax = jnp.asarray(
             np.array(network.stiffnesses, dtype=np.float64)
         )
-        positions_flat_jax = jnp.asarray(min_pos.flatten())
+        positions_flat_jax = jnp.asarray(min_pos.flatten(), dtype=jnp.float64)
 
         loss_val, grad = loss_and_grad_fn(stiffnesses_jax, positions_flat_jax)
         loss = float(loss_val)

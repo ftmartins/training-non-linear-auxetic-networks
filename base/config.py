@@ -164,6 +164,13 @@ PACKING_PARAMS = {
 PACKING_DURATION = 1000.0
 PACKING_FRAMES = 200
 
+# Network generation method: 'jammed' (packing-derived) or 'lattice'
+# (perturbed triangular lattice square). See create_auxetic_network().
+NETWORK_TYPE = 'jammed'
+LATTICE_JITTER = 0.15    # Jitter amplitude for lattice node positions
+LATTICE_CUTOFF = 1.6     # Distance cutoff for lattice bond formation
+LATTICE_DILUTION = 0.05  # Fraction of lattice bonds randomly removed
+
 # ============================================================================
 # Save/Checkpoint Parameters
 # ============================================================================

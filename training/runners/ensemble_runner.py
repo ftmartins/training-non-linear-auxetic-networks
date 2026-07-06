@@ -65,7 +65,7 @@ except ImportError as e:
 
 
 def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoint=True,
-                        gradient_method='parallel'):
+                        gradient_method='parallel', network_type=NETWORK_TYPE):
     """
     Run a single training job with checkpoint support.
 
@@ -75,6 +75,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing (default: True)
         gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         success: Boolean indicating success
@@ -110,9 +111,9 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
             try:
                 task_config = checkpoint['task_config']
                 assert task_config is not None
-            except:
+            except (KeyError, AssertionError) as e:
                 task_config = generate_task_config(task_seed)
-                print('Regenerated task config due to checkpoint not having task config')
+                print(f'Regenerated task config due to checkpoint not having task config ({e!r})')
             if verbose:
                 print("Step 1: Loaded task configuration from checkpoint...")
         else:
@@ -133,7 +134,8 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 packing_seed=task_config['packing_seed'],
                 force_type=FORCE_TYPE,
                 boundary_margin=BOUNDARY_MARGIN,
-                central_force=PACKING_PARAMS['central']
+                central_force=PACKING_PARAMS['central'],
+                network_type=network_type,
             )
             # Restore network state from checkpoint
             network.positions = checkpoint['network']['positions']
@@ -149,7 +151,8 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 packing_seed=task_config['packing_seed'],
                 force_type=FORCE_TYPE,
                 boundary_margin=BOUNDARY_MARGIN,
-                central_force=PACKING_PARAMS['central']
+                central_force=PACKING_PARAMS['central'],
+                network_type=network_type,
             )
             print(f"  Network created: {len(network.positions)} nodes, {len(network.edges)} edges")
 
@@ -236,7 +239,8 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
             realization_seed=realization_seed,
             history=history,
             network=trained_network,
-            task_config=generate_task_config(task_seed)
+            task_config=generate_task_config(task_seed),
+            boundary_dict=boundary_dict,
         )
 
         # Remove checkpoint file after successful completion
@@ -245,6 +249,15 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
 
         elapsed = time.time() - start_time
         final_loss = history['loss'][-1] if 'loss' in history and history['loss'] else float('nan')
+
+        if not np.isfinite(final_loss):
+            print(f"\n{'='*80}")
+            print(f"FAILURE: Task {task_seed}, Realization {realization_seed}")
+            print(f"Time elapsed: {elapsed/60:.2f} minutes")
+            print(f"Final loss is not finite: {final_loss}")
+            print(f"Training steps completed: {len(history.get('loss', []))}")
+            print(f"{'='*80}\n")
+            return False
 
         print(f"\n{'='*80}")
         print(f"SUCCESS: Task {task_seed}, Realization {realization_seed}")
@@ -267,7 +280,8 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         return False
 
 
-def run_ensemble_sequential(resume=True, verbose=False, gradient_method='parallel'):
+def run_ensemble_sequential(resume=True, verbose=False, gradient_method='parallel',
+                            network_type=NETWORK_TYPE):
     """
     Run all ensemble jobs sequentially.
 
@@ -275,6 +289,7 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
         resume: Skip already completed jobs
         verbose: Print detailed progress
         gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     print(f"\n{'#'*80}")
     print(f"# ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -304,7 +319,7 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     for idx, (task_seed, realization_seed) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
         success = run_single_training(task_seed, realization_seed, verbose=verbose,
-                                      gradient_method=gradient_method)
+                                      gradient_method=gradient_method, network_type=network_type)
 
         if success:
             success_count += 1
@@ -398,6 +413,13 @@ Examples:
         default='jax',
         help='Gradient computation method: parallel (finite-difference, default) or jax (autodiff)'
     )
+    parser.add_argument(
+        '--network-type',
+        choices=['jammed', 'lattice'],
+        default=NETWORK_TYPE,
+        help="Network generation method: 'jammed' (packing-derived, default) or "
+             "'lattice' (perturbed triangular lattice square)"
+    )
 
     args = parser.parse_args()
 
@@ -413,12 +435,14 @@ Examples:
             parser.error(f"--realization must be between 0 and {N_REALIZATIONS-1}")
 
         success = run_single_training(args.task, args.realization, verbose=args.verbose,
-                                      gradient_method=args.gradient_method)
+                                      gradient_method=args.gradient_method,
+                                      network_type=args.network_type)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
         run_ensemble_sequential(resume=args.resume, verbose=args.verbose,
-                                gradient_method=args.gradient_method)
+                                gradient_method=args.gradient_method,
+                                network_type=args.network_type)
 
     elif args.mode == 'status':
         print_progress_summary()
