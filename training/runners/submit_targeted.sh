@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=20gb
-#SBATCH --array=0-24%50
+#SBATCH --array=0%50
 #SBATCH --begin=now
 #SBATCH --job-name=targeted_auxetic
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/targeted_%A_%a.out
@@ -45,6 +45,8 @@ REALIZATION=$((SLURM_ARRAY_TASK_ID % 1))
 # Network generation method: 'jammed' (default) or 'lattice'.
 # Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_targeted.sh
 
+NETWORK_TYPE=lattice
+
 echo ""
 echo "Running targeted training:"
 echo "  Task ID:     ${TASK_ID}"
@@ -58,17 +60,15 @@ python targeted_ensemble_runner.py \
     --realization ${REALIZATION} \
     --verbose \
     --gradient-method newton \
-    --network-type lattice \
+    --network-type $NETWORK_TYPE \
 
 EXIT_CODE=$?
 
 if [ ${EXIT_CODE} -eq 0 ]; then
     echo ""
     echo "Running post-training timestep-sweep analysis..."
-    python post_training_sweep.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION} \
-        --network-type ${NETWORK_TYPE}
-    python verify_and_plot_loss.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION} \
-        --network-type ${NETWORK_TYPE}
+    python post_training_sweep.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION}  --network-type ${NETWORK_TYPE}
+    python verify_and_plot_loss.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION} --network-type ${NETWORK_TYPE}
 fi
 
 echo ""

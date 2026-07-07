@@ -36,7 +36,7 @@ from base.config import (
     FORCE_TYPE, BOUNDARY_MARGIN,
     FORCE_TOL, PACKING_PARAMS, NETWORK_TYPE
 )
-VMIN = 1e-2
+VMIN = 1e-4
 VMAX = 1e2
 
 
@@ -44,7 +44,7 @@ def _uniform_stiffnesses(realization_seed, n_edges):
     rng = np.random.RandomState(realization_seed)
     return rng.uniform(VMIN, VMAX, size=n_edges)
 
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-3
 
 # Import targeted config and task definitions
 from training.src.targeted_task_generator import (

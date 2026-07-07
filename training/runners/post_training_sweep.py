@@ -146,21 +146,21 @@ def main():
         from base.config import NETWORK_TYPE
         args.network_type = NETWORK_TYPE
 
-    try:
-        if args.task_type in ('targeted', 'ensemble'):
-            result_path, results = _run_auxetic(
+    #try:
+    if args.task_type in ('targeted', 'ensemble'):
+        result_path, results = _run_auxetic(
                 args.task_type, args.task, args.realization, args.results_dir,
                 args.n_thresh_steps, args.eps_min, args.n_traj_steps, args.k_eigs,
                 args.force_type, args.network_type,
             )
-        else:
-            result_path, results = _run_allosteric(
+    else:
+        result_path, results = _run_allosteric(
                 args.task, args.realization, args.geometry, args.targeted_ensemble,
                 args.output_dir, args.n_thresh_steps, args.eps_min, args.k_eigs,
             )
-    except Exception as e:
-        print(f"post_training_sweep FAILED: {e!r}", file=sys.stderr)
-        return 1
+    #except Exception as e:
+    #    print(f"post_training_sweep FAILED: {e!r}", file=sys.stderr)
+    #    return 1
 
     if args.task_type in ('targeted', 'ensemble'):
         from training.src.checkpoint_manager import _nt_filename
