@@ -4,7 +4,9 @@ Post-training timestep-sweep analysis.
 Pipeline (per selected training step):
   select_loss_threshold_steps -> recompute stiffness-based loss (training's own
   evaluation path) -> recompute trajectory + loss_from_trajectory -> reduced
-  elastic Hessian eigenpairs at the recomputed equilibrium.
+  elastic Hessian eigenpairs at `n_hessian_traj_steps` linearly-spaced points
+  along that trajectory (0 -> full compression_strain / actuation displacement),
+  not just the endpoint. Applies to both `sweep_auxetic` and `sweep_allosteric`.
 
 Cost Hessian (eigenpairs of the loss w.r.t. stiffnesses) is only evaluated at
 the first and last selected step (before/after training), since it is much
@@ -32,7 +34,7 @@ from .hessian import compute_hessian_spectrum
 # Timestep selection (ported from analysis/notebooks/figures/NewFiguresJune.ipynb)
 # ---------------------------------------------------------------------------
 
-def select_loss_threshold_steps(loss, n_steps=50, eps_min=1e-3):
+def select_loss_threshold_steps(loss, n_steps=50, eps_min=1e-8):
     """Return training step indices at log-spaced loss thresholds, guaranteed monotone.
 
     Works on the running-minimum subsequence (times when loss sets a new record low)
@@ -89,7 +91,8 @@ LOCAL_CONSTRAINED_NODES = np.array([0, 1, 2, 3])
 # ---------------------------------------------------------------------------
 
 def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
-                  n_thresh_steps=50, eps_min=1e-3, n_traj_steps=100, k_eigs=20,
+                  n_thresh_steps=50, eps_min=1e-8, n_traj_steps=100, k_eigs=10,
+                  n_hessian_traj_steps=20,
                   force_type='quadratic', n_strain_steps=100, tol=1e-10,
                   verbose=True):
     """
@@ -105,6 +108,17 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
     stiffness_traj : (T, E) array   full per-step stiffness trajectory.
     loss_traj : (T,) array          full per-step stored loss (same array used
                                      to select timesteps).
+    n_hessian_traj_steps : int      number of linearly-spaced points along each
+                                     recomputed compression trajectory (0 -> full
+                                     compression_strain) at which the elastic
+                                     Hessian spectrum is evaluated.
+    k_eigs : int                    number of top (largest positive / algebraic)
+                                     cost-Hessian eigenpairs to compute. Does NOT
+                                     affect the elastic Hessian, which always
+                                     returns its full spectrum (all modes) — the
+                                     elastic Hessian is dense-solved via
+                                     np.linalg.eigh regardless of truncation, so
+                                     truncating it saves no compute, only storage.
 
     Returns
     -------
@@ -122,12 +136,19 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
     n_t = len(t_indices)
     stored_loss = np.asarray(loss_traj)[t_indices]
 
+    # Linearly-spaced trajectory indices (0 -> n_traj_steps-1) at which the
+    # elastic Hessian is evaluated; same for every selected timestep/subtask
+    # since n_traj_steps is fixed for the whole sweep.
+    traj_hess_idx = np.unique(np.round(
+        np.linspace(0, n_traj_steps - 1, n_hessian_traj_steps)
+    ).astype(int))
+
     recomputed_stiffness_loss  = np.full(n_t, np.nan)
     recomputed_trajectory_loss = np.full(n_t, np.nan)
     subtask_trajectory_loss    = np.full((n_t, n_sub), np.nan)
 
-    elastic_eigvals_list = []   # (n_sub,) list of (n_modes,) arrays, per t
-    elastic_eigvecs_list = []   # (n_sub,) list of (n_free_dofs, n_modes) arrays, per t
+    elastic_eigvals_list = []   # (n_sub,) list of (n_hess_steps, n_free_dofs) arrays, per t — full spectrum
+    elastic_eigvecs_list = []   # (n_sub,) list of (n_hess_steps, n_free_dofs, n_free_dofs) arrays, per t
 
     net = copy.deepcopy(network)
 
@@ -146,7 +167,7 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
         )
         recomputed_stiffness_loss[i] = float(mse)
 
-        # (b) trajectory-based loss + (c) elastic Hessian, per subtask
+        # (b) trajectory-based loss + (c) elastic Hessian along the trajectory, per subtask
         eigvals_this_t = []
         eigvecs_this_t = []
         sub_losses = np.full(n_sub, np.nan)
@@ -155,19 +176,26 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
                                       force_type=force_type, tol=tol)
             sub_losses[s] = loss_from_trajectory(traj, cs, tp, boundary)
 
-            vals, vecs, _ = compute_hessian_spectrum(
-                traj[-1], net.edges, k_t, net.rest_lengths,
-                constrained_nodes=constrained_nodes, n_modes=k_eigs)
-            eigvals_this_t.append(vals)
-            eigvecs_this_t.append(vecs)
+            vals_along_traj = []
+            vecs_along_traj = []
+            for j in traj_hess_idx:
+                # n_modes=None -> full spectrum; the dense eigh solve below is
+                # unconditional, so truncating here would save no compute.
+                vals, vecs, _ = compute_hessian_spectrum(
+                    traj[j], net.edges, k_t, net.rest_lengths,
+                    constrained_nodes=constrained_nodes, n_modes=None)
+                vals_along_traj.append(vals)
+                vecs_along_traj.append(vecs)
+            eigvals_this_t.append(np.stack(vals_along_traj))   # (n_hess_steps, n_free_modes)
+            eigvecs_this_t.append(np.stack(vecs_along_traj))   # (n_hess_steps, n_free_dofs, n_free_modes)
 
         subtask_trajectory_loss[i]    = sub_losses
         recomputed_trajectory_loss[i] = float(np.mean(sub_losses))
         elastic_eigvals_list.append(np.stack(eigvals_this_t))
         elastic_eigvecs_list.append(np.stack(eigvecs_this_t))
 
-    elastic_hessian_eigvals = np.stack(elastic_eigvals_list)   # (n_t, n_sub, n_modes)
-    elastic_hessian_eigvecs = np.stack(elastic_eigvecs_list)   # (n_t, n_sub, n_free_dofs, n_modes)
+    elastic_hessian_eigvals = np.stack(elastic_eigvals_list)   # (n_t, n_sub, n_hess_steps, n_free_dofs) — full spectrum
+    elastic_hessian_eigvecs = np.stack(elastic_eigvecs_list)   # (n_t, n_sub, n_hess_steps, n_free_dofs, n_free_dofs)
 
     # Cost Hessian only before (first selected step) and after (last selected step)
     cost_before_vals, cost_before_vecs = [], []
@@ -195,6 +223,10 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
         'subtask_trajectory_loss': subtask_trajectory_loss,
         'elastic_hessian_eigvals': elastic_hessian_eigvals,
         'elastic_hessian_eigvecs': elastic_hessian_eigvecs,
+        'elastic_hessian_traj_indices': traj_hess_idx,
+        'elastic_hessian_traj_strain_frac': traj_hess_idx / (n_traj_steps - 1),
+        'elastic_hessian_traj_strain': np.outer(
+            compression_strains, traj_hess_idx / (n_traj_steps - 1)),  # (n_sub, n_hess_steps)
         'cost_hessian_before_eigvals': np.stack(cost_before_vals),
         'cost_hessian_before_eigvecs': np.stack(cost_before_vecs),
         'cost_hessian_after_eigvals': np.stack(cost_after_vals),
@@ -225,7 +257,8 @@ def _select_local_threshold_indices(steps, mse1, mse2, n_thresh_steps, eps_min):
 
 def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                      stiffness_traj, steps, mse1, mse2,
-                     n_thresh_steps=50, eps_min=1e-3, k_eigs=20, verbose=True):
+                     n_thresh_steps=50, eps_min=1e-8, k_eigs=10,
+                     n_hessian_traj_steps=20, verbose=True):
     """
     Run the full timestep-sweep analysis for one allosteric training result.
 
@@ -237,6 +270,21 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
     stiffness_traj : (T_ckpt, E) array   checkpointed stiffnesses (every 500 steps).
     steps : (T_ckpt,) array              1-indexed global step number per checkpoint.
     mse1, mse2 : (T_full,) arrays        full-resolution per-step stored losses.
+    n_hessian_traj_steps : int      number of linearly-spaced points along each
+                                     task's actuation trajectory (input node pulled
+                                     from 0 -> full displacement) at which the
+                                     elastic Hessian spectrum is evaluated. task1
+                                     and task2 have different `nsteps`, so this is
+                                     clamped to min(n_hessian_traj_steps, nsteps,
+                                     nsteps2) to keep both tasks' arrays the same
+                                     length.
+    k_eigs : int                    number of top (largest positive / algebraic)
+                                     cost-Hessian eigenpairs to compute. Does NOT
+                                     affect the elastic Hessian, which always
+                                     returns its full spectrum (all modes) — the
+                                     elastic Hessian is dense-solved via
+                                     np.linalg.eigh regardless of truncation, so
+                                     truncating it saves no compute, only storage.
 
     Returns
     -------
@@ -256,10 +304,19 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
     n_t = len(t_indices)
     stored_loss = loss_ckpt[t_indices]
 
+    # Frame indices along each task's own actuation trajectory (0 -> nsteps-1)
+    # at which the elastic Hessian is evaluated. nsteps differs between task1
+    # and task2, so indices are computed per-task, but the *count* is shared
+    # (clamped to the smaller of the two) so both tasks' arrays stack cleanly.
+    n_hess = min(n_hessian_traj_steps, nsteps, nsteps2)
+    traj_hess_idx_1 = np.round(np.linspace(0, nsteps  - 1, n_hess)).astype(int)
+    traj_hess_idx_2 = np.round(np.linspace(0, nsteps2 - 1, n_hess)).astype(int)
+    traj_hess_idx_per_task = [traj_hess_idx_1, traj_hess_idx_2]
+
     recomputed_stiffness_loss  = np.full((n_t, 2), np.nan)   # [:, 0]=task1, [:, 1]=task2
     recomputed_trajectory_loss = np.full((n_t, 2), np.nan)
-    elastic_eigvals_list = []   # per t: (2, n_modes)
-    elastic_eigvecs_list = []   # per t: (2, n_free_dofs, n_modes)
+    elastic_eigvals_list = []   # per t: (2, n_hess, n_free_dofs) — full spectrum
+    elastic_eigvecs_list = []   # per t: (2, n_hess, n_free_dofs, n_free_dofs)
 
     for i, t in enumerate(t_indices):
         k_t = np.asarray(stiffness_traj[t], dtype=float)
@@ -270,8 +327,8 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
         eigvecs_this_t = []
         for task_idx, (tgt, dxi, nsi) in enumerate(
                 ((tod, dx, nsteps), (tod2, dx2, nsteps2))):
-            mse, nodes_free, nodes_clamped = evaluate_actuation(
-                nodes, incidence_matrix, k_t, tgt, dxi, nsi)
+            mse, nodes_free, nodes_clamped, frames_clamped = evaluate_actuation(
+                nodes, incidence_matrix, k_t, tgt, dxi, nsi, return_trajectory=True)
             recomputed_stiffness_loss[i, task_idx]  = mse
             # "loss from trajectory" here is the same quantity (mse is already
             # evaluated at the recomputed equilibrium, i.e. end of the LAMMPS
@@ -279,17 +336,37 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
             # with the auxetic pipeline's independent stiffness-vs-trajectory check.
             recomputed_trajectory_loss[i, task_idx] = mse
 
-            vals, vecs, _ = compute_hessian_spectrum(
-                nodes_clamped, edges, k_t, eq_lengths,
-                constrained_nodes=LOCAL_CONSTRAINED_NODES, n_modes=k_eigs)
-            eigvals_this_t.append(vals)
-            eigvecs_this_t.append(vecs)
+            vals_along_traj = []
+            vecs_along_traj = []
+            for j in traj_hess_idx_per_task[task_idx]:
+                # n_modes=None -> full spectrum; the dense eigh solve below is
+                # unconditional, so truncating here would save no compute.
+                vals, vecs, _ = compute_hessian_spectrum(
+                    frames_clamped[j], edges, k_t, eq_lengths,
+                    constrained_nodes=LOCAL_CONSTRAINED_NODES, n_modes=None)
+                vals_along_traj.append(vals)
+                vecs_along_traj.append(vecs)
+            eigvals_this_t.append(np.stack(vals_along_traj))   # (n_hess, n_free_dofs)
+            eigvecs_this_t.append(np.stack(vecs_along_traj))   # (n_hess, n_free_dofs, n_free_dofs)
 
         elastic_eigvals_list.append(np.stack(eigvals_this_t))
         elastic_eigvecs_list.append(np.stack(eigvecs_this_t))
 
-    elastic_hessian_eigvals = np.stack(elastic_eigvals_list)
-    elastic_hessian_eigvecs = np.stack(elastic_eigvecs_list)
+    elastic_hessian_eigvals = np.stack(elastic_eigvals_list)   # (n_t, 2, n_hess, n_free_dofs) — full spectrum
+    elastic_hessian_eigvecs = np.stack(elastic_eigvecs_list)   # (n_t, 2, n_hess, n_free_dofs, n_free_dofs)
+
+    # Per-task frame indices / actuation progress at the sampled Hessian points.
+    # Frame index j (0-indexed) corresponds to cumulative input-node
+    # displacement dx*(j+1) (see training.lammps_utils.strain_network).
+    elastic_hessian_traj_indices = np.stack(traj_hess_idx_per_task)   # (2, n_hess)
+    elastic_hessian_traj_strain_frac = np.stack([
+        (traj_hess_idx_1 + 1) / nsteps,
+        (traj_hess_idx_2 + 1) / nsteps2,
+    ])   # (2, n_hess)
+    elastic_hessian_traj_strain = np.stack([
+        dx  * (traj_hess_idx_1 + 1),
+        dx2 * (traj_hess_idx_2 + 1),
+    ])   # (2, n_hess) — actual cumulative input-node displacement
 
     cost_before = _compute_cost_hessian_lammps(
         nodes, incidence_matrix, task_config, t_indices[0], stiffness_traj,
@@ -306,6 +383,9 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
         'recomputed_trajectory_loss': recomputed_trajectory_loss,
         'elastic_hessian_eigvals': elastic_hessian_eigvals,
         'elastic_hessian_eigvecs': elastic_hessian_eigvecs,
+        'elastic_hessian_traj_indices': elastic_hessian_traj_indices,
+        'elastic_hessian_traj_strain_frac': elastic_hessian_traj_strain_frac,
+        'elastic_hessian_traj_strain': elastic_hessian_traj_strain,
         'cost_hessian_before_eigvals': cost_before[0],
         'cost_hessian_before_eigvecs': cost_before[1],
         'cost_hessian_after_eigvals': cost_after[0],
@@ -319,7 +399,7 @@ def _incidence_to_edges(incidence_matrix):
 
 
 def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffness_traj,
-                                 k_eigs=20, hvp_epsilon=1e-3, grad_epsilon=1e-4,
+                                 k_eigs=10, hvp_epsilon=1e-3, grad_epsilon=1e-4,
                                  verbose=True):
     """
     Top-k eigenpairs of the combined (task1+task2) LAMMPS loss Hessian w.r.t.
@@ -375,7 +455,8 @@ def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffn
     H_op = LinearOperator((n_edges, n_edges), matvec=hvp, dtype=float)
     if verbose:
         print(f"  [allosteric sweep] cost Hessian: eigsh (k={k}) ...", flush=True)
-    eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LM')
+    # 'LA' = largest algebraic, i.e. the k most positive eigenvalues.
+    eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LA')
     order = np.argsort(eigenvalues)
     return eigenvalues[order], eigenvectors[:, order]
 

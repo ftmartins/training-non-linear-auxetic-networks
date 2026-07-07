@@ -268,7 +268,8 @@ def load_resume_state(output_path):
 
 # ── Actuation evaluation (free + clamped LAMMPS pair at fixed stiffnesses) ────
 
-def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA):
+def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA,
+                       return_trajectory=False):
     """
     Run one free+clamped LAMMPS actuation pair at fixed stiffnesses.
 
@@ -277,11 +278,21 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
     (analysis/timestep_sweep.py) so recomputed loss uses the exact same
     physics calls as training.
 
+    Parameters
+    ----------
+    return_trajectory : bool
+        If True, also return the full clamped-run quasistatic trajectory
+        (one frame per pull step, length `nsteps`) instead of just its final
+        frame — used by analysis.timestep_sweep.sweep_allosteric to sample
+        the elastic Hessian along the actuation trajectory.
+
     Returns
     -------
     mse : float                    (||nodes_free[2]-nodes_free[3]|| - tod)^2
     nodes_free : (N, 2) array      equilibrium positions, free (uncalibrated) run
     nodes_clamped : (N, 2) array   equilibrium positions, clamped (output-spring) run
+    frames_clamped : list of (N, 2) arrays, length nsteps
+        Only returned when return_trajectory=True.
     """
     f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses)
     nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
@@ -291,9 +302,12 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
                         id_outA=2, id_outB=3,
                         target_output_distance=eta * tod + (1 - eta) * cod,
                         k_output=K_OUTPUT)
-    nodes_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
-                                     dx=dx, nsteps=nsteps)[nsteps - 1]
+    frames_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
+                                      dx=dx, nsteps=nsteps)
+    nodes_clamped = frames_clamped[nsteps - 1]
     mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
+    if return_trajectory:
+        return mse, nodes_free, nodes_clamped, frames_clamped
     return mse, nodes_free, nodes_clamped
 
 
