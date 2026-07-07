@@ -52,8 +52,6 @@ def _nt_filename(filename, network_type):
 
     Example: _nt_filename('history.pkl', 'lattice') -> 'history_lattice.pkl'
     """
-    if network_type == 'jammed':
-        return filename
     stem, dot, ext = filename.partition('.')
     return f"{stem}_{network_type}{dot}{ext}"
 

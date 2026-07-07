@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=20gb
-#SBATCH --array=0-5%50
+#SBATCH --array=0-24%50
 #SBATCH --begin=now
 #SBATCH --job-name=targeted_auxetic
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/targeted_%A_%a.out
@@ -44,7 +44,6 @@ REALIZATION=$((SLURM_ARRAY_TASK_ID % 1))
 
 # Network generation method: 'jammed' (default) or 'lattice'.
 # Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_targeted.sh
-NETWORK_TYPE="${NETWORK_TYPE:-jammed}"
 
 echo ""
 echo "Running targeted training:"
@@ -58,8 +57,8 @@ python targeted_ensemble_runner.py \
     --task ${TASK_ID} \
     --realization ${REALIZATION} \
     --verbose \
-    --gradient-method newton
-    --network-type ${NETWORK_TYPE} \
+    --gradient-method newton \
+    --network-type lattice \
 
 EXIT_CODE=$?
 
