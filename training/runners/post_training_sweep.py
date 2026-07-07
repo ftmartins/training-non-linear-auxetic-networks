@@ -37,9 +37,9 @@ from analysis.timestep_sweep import (
 
 
 def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
-                 eps_min, n_traj_steps, k_eigs, force_type):
+                 eps_min, n_traj_steps, k_eigs, force_type, network_type):
     from base.elastic_network import ElasticNetwork
-    from training.src.checkpoint_manager import get_training_result_path
+    from training.src.checkpoint_manager import get_training_result_path, _nt_filename
     from training.src.data_loader import load_loss_trajectory, load_stiffness_trajectory
 
     if results_dir is None:
@@ -51,21 +51,21 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
             results_dir = RESULTS_DIR
     result_path = get_training_result_path(task, realization, results_dir)
 
-    with open(result_path / 'final_network.pkl', 'rb') as fh:
+    with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as fh:
         net_dict = pickle.load(fh)
     network = ElasticNetwork(
         positions=net_dict['positions'], edges=net_dict['edges'],
         rest_lengths=net_dict['rest_lengths'], stiffnesses=net_dict['stiffnesses'],
     )
 
-    with open(result_path / 'boundary_nodes.json', 'r') as fh:
+    with open(result_path / _nt_filename('boundary_nodes.json', network_type), 'r') as fh:
         boundary = {k: np.asarray(v, dtype=int) for k, v in json.load(fh).items()}
 
-    with open(result_path / 'task_config.json', 'r') as fh:
+    with open(result_path / _nt_filename('task_config.json', network_type), 'r') as fh:
         task_config = json.load(fh)
 
-    loss_traj      = load_loss_trajectory(task, realization, results_dir=results_dir)
-    stiffness_traj = load_stiffness_trajectory(task, realization, results_dir=results_dir)
+    loss_traj      = load_loss_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
+    stiffness_traj = load_stiffness_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
 
     if 'n_strain_steps' in task_config:
         n_strain_steps = task_config['n_strain_steps']
@@ -137,14 +137,21 @@ def main():
     parser.add_argument('--n-traj-steps', type=int, default=100, help='auxetic only')
     parser.add_argument('--k-eigs', type=int, default=20)
     parser.add_argument('--force-type', type=str, default='quadratic', help='auxetic only')
+    parser.add_argument('--network-type', choices=['jammed', 'lattice'], default=None,
+                        help="auxetic only; 'jammed' or 'lattice' (default: from config). "
+                             "Must match the network_type the training job used.")
     args = parser.parse_args()
+
+    if args.network_type is None:
+        from base.config import NETWORK_TYPE
+        args.network_type = NETWORK_TYPE
 
     try:
         if args.task_type in ('targeted', 'ensemble'):
             result_path, results = _run_auxetic(
                 args.task_type, args.task, args.realization, args.results_dir,
                 args.n_thresh_steps, args.eps_min, args.n_traj_steps, args.k_eigs,
-                args.force_type,
+                args.force_type, args.network_type,
             )
         else:
             result_path, results = _run_allosteric(
@@ -155,7 +162,15 @@ def main():
         print(f"post_training_sweep FAILED: {e!r}", file=sys.stderr)
         return 1
 
-    out_path = result_path / 'timestep_sweep.npz'
+    if args.task_type in ('targeted', 'ensemble'):
+        from training.src.checkpoint_manager import _nt_filename
+        sweep_filename = _nt_filename('timestep_sweep.npz', args.network_type)
+        meta_filename = _nt_filename('timestep_sweep_meta.json', args.network_type)
+    else:
+        sweep_filename = 'timestep_sweep.npz'
+        meta_filename = 'timestep_sweep_meta.json'
+
+    out_path = result_path / sweep_filename
     save_sweep_results(out_path, **results)
 
     meta = {
@@ -166,7 +181,9 @@ def main():
         'eps_min': args.eps_min,
         'n_timesteps_selected': int(len(results['t_indices'])),
     }
-    with open(result_path / 'timestep_sweep_meta.json', 'w') as fh:
+    if args.task_type in ('targeted', 'ensemble'):
+        meta['network_type'] = args.network_type
+    with open(result_path / meta_filename, 'w') as fh:
         json.dump(meta, fh, indent=2)
 
     recomputed = np.asarray(results['recomputed_stiffness_loss'])

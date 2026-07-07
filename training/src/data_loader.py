@@ -10,11 +10,11 @@ import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from base.config import RESULTS_DIR, N_TASKS, N_REALIZATIONS
-from .checkpoint_manager import get_training_result_path
+from base.config import RESULTS_DIR, N_TASKS, N_REALIZATIONS, NETWORK_TYPE
+from .checkpoint_manager import get_training_result_path, _nt_filename
 
 
-def load_loss_trajectory(task_seed, realization_seed, results_dir=None):
+def load_loss_trajectory(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Load only the loss trajectory (fast, without loading full history).
 
@@ -22,6 +22,7 @@ def load_loss_trajectory(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         loss: (n_steps,) numpy array of loss values
@@ -34,7 +35,7 @@ def load_loss_trajectory(task_seed, realization_seed, results_dir=None):
         results_dir = RESULTS_DIR
 
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-    loss_file = result_path / "loss_trajectory.npy"
+    loss_file = result_path / _nt_filename("loss_trajectory.npy", network_type)
 
     if not loss_file.exists():
         raise FileNotFoundError(f"Loss trajectory not found: {loss_file}")
@@ -42,7 +43,7 @@ def load_loss_trajectory(task_seed, realization_seed, results_dir=None):
     return np.load(loss_file)
 
 
-def load_stiffness_trajectory(task_seed, realization_seed, results_dir=None):
+def load_stiffness_trajectory(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
     Load only the stiffness trajectory (fast, without loading full history).
 
@@ -50,6 +51,7 @@ def load_stiffness_trajectory(task_seed, realization_seed, results_dir=None):
         task_seed: Task index
         realization_seed: Realization index
         results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
         stiffnesses: (n_steps, n_edges) numpy array of stiffness evolution
@@ -64,7 +66,7 @@ def load_stiffness_trajectory(task_seed, realization_seed, results_dir=None):
         results_dir = RESULTS_DIR
 
     result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-    stiffness_file = result_path / "stiffness_trajectory.npy"
+    stiffness_file = result_path / _nt_filename("stiffness_trajectory.npy", network_type)
 
     if not stiffness_file.exists():
         raise FileNotFoundError(f"Stiffness trajectory not found: {stiffness_file}")
