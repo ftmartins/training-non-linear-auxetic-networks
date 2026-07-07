@@ -59,11 +59,18 @@ REALIZATION_SEED=$((SLURM_ARRAY_TASK_ID % 20))
 # Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_ensemble_slurm.sh
 NETWORK_TYPE="${NETWORK_TYPE:-jammed}"
 
+# Gradient computation method: 'jax' (default here), 'parallel', 'newton', or 'fire'.
+# Results are partitioned by this value (results_dir/<gradient_method>/task_XX/...),
+# so it must match between training and the post-training analysis scripts below.
+# Override at submission time, e.g.: sbatch --export=GRADIENT_METHOD=parallel submit_ensemble_slurm.sh
+GRADIENT_METHOD="${GRADIENT_METHOD:-jax}"
+
 echo ""
 echo "Running training:"
 echo "  Task seed: ${TASK_SEED}"
 echo "  Realization seed: ${REALIZATION_SEED}"
 echo "  Network type: ${NETWORK_TYPE}"
+echo "  Gradient method: ${GRADIENT_METHOD}"
 echo ""
 
 # Run training with checkpoint support
@@ -72,6 +79,7 @@ python ensemble_runner.py \
     --task ${TASK_SEED} \
     --realization ${REALIZATION_SEED} \
     --network-type ${NETWORK_TYPE} \
+    --gradient-method ${GRADIENT_METHOD} \
     --verbose
 
 # Capture exit code
@@ -81,9 +89,9 @@ if [ ${EXIT_CODE} -eq 0 ]; then
     echo ""
     echo "Running post-training timestep-sweep analysis..."
     python post_training_sweep.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED} \
-        --network-type ${NETWORK_TYPE}
+        --network-type ${NETWORK_TYPE} --gradient-method ${GRADIENT_METHOD}
     python verify_and_plot_loss.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED} \
-        --network-type ${NETWORK_TYPE}
+        --network-type ${NETWORK_TYPE} --gradient-method ${GRADIENT_METHOD}
 fi
 
 echo ""

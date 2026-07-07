@@ -70,6 +70,7 @@ from training.src.checkpoint_manager import (
     has_nan_in_results,
     get_last_good_step,
     get_training_result_path,
+    _nt_filename,
 )
 import pickle
 
@@ -107,15 +108,20 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     TARGETED_RESULTS_DIR_ = TARGETED_RESULTS_DIR / f'{gradient_method}'
     TARGETED_RESULTS_DIR = TARGETED_RESULTS_DIR_
 
+    # Results are partitioned by gradient_method (newton/fire/parallel/jax all
+    # write to the same task/realization otherwise, silently overwriting each
+    # other's checkpoints and results).
+    results_dir = Path(TARGETED_RESULTS_DIR) / gradient_method
+
     # Check for NaN in previously saved results (takes priority over completion check)
     nan_detected = has_nan_in_results(task_id, realization_seed,
-                                      results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
+                                      results_dir=results_dir, network_type=network_type)
     recovery_mode = None   # None | 'from_last_good' | 'from_scratch'
     recovery_lr_scale = 1.0
 
     if nan_detected:
         last_good = get_last_good_step(task_id, realization_seed,
-                                       results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
+                                       results_dir=results_dir, network_type=network_type)
         if last_good >= 0:
             recovery_mode = 'from_last_good'
         else:
@@ -123,7 +129,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         recovery_lr_scale = LR_NAN_REDUCTION
         print(f"NaN detected in saved results — recovery_mode={recovery_mode}, "
               f"LR scale={recovery_lr_scale}")
-    elif is_training_complete(task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR,
+    elif is_training_complete(task_id, realization_seed, results_dir=results_dir,
                               network_type=network_type):
         print(f"Job already completed! Skipping...")
         print(f"{'='*80}\n")
@@ -139,7 +145,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         checkpoint = None
         if use_checkpoint:
             checkpoint = load_checkpoint(task_id, realization_seed,
-                                         results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
+                                         results_dir=results_dir, network_type=network_type)
             if checkpoint is not None:
                 print(f"Found checkpoint at step {checkpoint['current_step']}")
                 print(f"Resuming from checkpoint...")
@@ -175,10 +181,10 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         if recovery_mode == 'from_last_good':
             last_good = get_last_good_step(task_id, realization_seed,
-                                           results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
+                                           results_dir=results_dir, network_type=network_type)
             result_path = get_training_result_path(task_id, realization_seed,
-                                                   results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
-            with open(result_path / "history.pkl", 'rb') as f:
+                                                   results_dir=results_dir)
+            with open(result_path / _nt_filename("history.pkl", network_type), 'rb') as f:
                 saved_history = pickle.load(f)
             n_trim = last_good + 1
             history = {
@@ -204,7 +210,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             checkpoint = None
             if use_checkpoint:
                 checkpoint = load_checkpoint(task_id, realization_seed,
-                                             results_dir=TARGETED_RESULTS_DIR, network_type=network_type)
+                                             results_dir=results_dir, network_type=network_type)
                 if checkpoint is not None:
                     print(f"Found checkpoint at step {checkpoint['current_step']}")
                     network.positions = checkpoint['network']['positions']
@@ -272,7 +278,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 realization_seed=realization_seed,
                 save_interval=5,
                 task_config=task_config,
-                TARGETED_RESULTS_DIR=TARGETED_RESULTS_DIR,
+                TARGETED_RESULTS_DIR=results_dir,
                 network_type=network_type,
                 **method_kwarg,
             )
@@ -285,7 +291,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
         # 5b. Second NaN recovery
         if recovery_mode is not None and has_nan_in_results(
-                task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR, network_type=network_type):
+                task_id, realization_seed, results_dir=results_dir, network_type=network_type):
             print(f"\n{'!'*60}")
             print(f"NaN persists after {recovery_mode} recovery.")
             print(f"Restarting from scratch with LR scale={LR_NAN_REDUCTION}.")
@@ -308,13 +314,13 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             network=trained_network,
             task_config=task_config,
             boundary_dict=boundary_dict,
-            results_dir=TARGETED_RESULTS_DIR,
+            results_dir=results_dir,
             network_type=network_type,
         )
 
         # Remove checkpoint after success
         if use_checkpoint:
-            remove_checkpoint(task_id, realization_seed, results_dir=TARGETED_RESULTS_DIR,
+            remove_checkpoint(task_id, realization_seed, results_dir=results_dir,
                               network_type=network_type)
 
         elapsed = time.time() - start_time
@@ -373,7 +379,7 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
         jobs = get_incomplete_jobs(
             n_tasks=N_TASKS,
             n_realizations=N_REALIZATIONS,
-            results_dir=TARGETED_RESULTS_DIR,
+            results_dir=Path(TARGETED_RESULTS_DIR) / gradient_method,
             network_type=network_type,
         )
         print(f"Found {len(jobs)} incomplete jobs (out of {N_TASKS * N_REALIZATIONS} total)")
@@ -423,21 +429,22 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
     print(f"# Total time: {total_elapsed/60:.2f} minutes")
     print(f"{'#'*80}\n")
 
-    print_targeted_progress(network_type=network_type)
+    print_targeted_progress(network_type=network_type, gradient_method=gradient_method)
 
 
-def print_targeted_progress(network_type=NETWORK_TYPE):
+def print_targeted_progress(network_type=NETWORK_TYPE, gradient_method='newton'):
     """Print progress summary for targeted tasks."""
+    results_dir = Path(TARGETED_RESULTS_DIR) / gradient_method
     complete = get_complete_jobs(
         n_tasks=N_TASKS,
         n_realizations=N_REALIZATIONS,
-        results_dir=TARGETED_RESULTS_DIR,
+        results_dir=results_dir,
         network_type=network_type,
     )
     incomplete = get_incomplete_jobs(
         n_tasks=N_TASKS,
         n_realizations=N_REALIZATIONS,
-        results_dir=TARGETED_RESULTS_DIR,
+        results_dir=results_dir,
         network_type=network_type,
     )
     total = N_TASKS * N_REALIZATIONS
@@ -550,7 +557,7 @@ Examples:
 
     elif args.mode == 'status':
         print_targeted_tasks_summary()
-        print_targeted_progress(network_type=args.network_type)
+        print_targeted_progress(network_type=args.network_type, gradient_method=args.gradient_method)
 
 
 if __name__ == '__main__':

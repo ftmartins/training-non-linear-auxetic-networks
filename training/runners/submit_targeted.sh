@@ -46,12 +46,19 @@ REALIZATION=$((SLURM_ARRAY_TASK_ID % 1))
 # Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_targeted.sh
 
 NETWORK_TYPE=lattice
+GRADIENT_METHOD=newton
+
+# Gradient computation method: 'newton' (default), 'jax', 'fire', or 'parallel'.
+# Results are partitioned by this value (results_dir/<gradient_method>/task_XX/...),
+# so it must match between training and the post-training analysis scripts below.
+# Override at submission time, e.g.: sbatch --export=GRADIENT_METHOD=jax submit_targeted.sh
 
 echo ""
 echo "Running targeted training:"
 echo "  Task ID:     ${TASK_ID}"
 echo "  Realization: ${REALIZATION}"
 echo "  Network type: ${NETWORK_TYPE}"
+echo "  Gradient method: ${GRADIENT_METHOD}"
 echo ""
 
 python targeted_ensemble_runner.py \
@@ -59,16 +66,19 @@ python targeted_ensemble_runner.py \
     --task ${TASK_ID} \
     --realization ${REALIZATION} \
     --verbose \
-    --gradient-method newton \
+    --gradient-method $GRADIENT_METHOD \
     --network-type $NETWORK_TYPE \
+    --verbose
 
 EXIT_CODE=$?
 
 if [ ${EXIT_CODE} -eq 0 ]; then
     echo ""
     echo "Running post-training timestep-sweep analysis..."
-    python post_training_sweep.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION}  --network-type ${NETWORK_TYPE}
-    python verify_and_plot_loss.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION} --network-type ${NETWORK_TYPE}
+    python post_training_sweep.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION} \
+        --network-type ${NETWORK_TYPE} --gradient-method ${GRADIENT_METHOD}
+    python verify_and_plot_loss.py --task-type targeted --task ${TASK_ID} --realization ${REALIZATION} \
+        --network-type ${NETWORK_TYPE} --gradient-method ${GRADIENT_METHOD}
 fi
 
 echo ""

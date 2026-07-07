@@ -121,7 +121,8 @@ def compute_cost_hessian(network, compression_strain, target_poisson, boundary,
     compression_strain : float
     target_poisson : float
     boundary : dict with keys 'top', 'bottom', 'left', 'right'
-    k_eigs : int or None    number of eigenvalues; None → all (n_edges - 1)
+    k_eigs : int or None    number of top (largest positive / algebraic) eigenvalues
+                             to return; None → all (n_edges - 1)
     hvp_epsilon : float     finite-difference step for HVP
     force_type : str
     n_strain_steps : int
@@ -129,7 +130,8 @@ def compute_cost_hessian(network, compression_strain, target_poisson, boundary,
 
     Returns
     -------
-    eigenvalues  : (k,) sorted ascending
+    eigenvalues  : (k,) sorted ascending — the k largest algebraic (most positive)
+                   eigenvalues, not the k largest by absolute magnitude.
     eigenvectors : (n_edges, k)
     """
     n_edges = len(network.stiffnesses)
@@ -176,7 +178,10 @@ def compute_cost_hessian(network, compression_strain, target_poisson, boundary,
     if verbose:
         print(f"  Starting eigsh (k={k}) ...", flush=True)
     t_eig = time.time()
-    eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LM')
+    # 'LA' = largest algebraic, i.e. the k most positive eigenvalues (not the k
+    # largest in absolute value, which 'LM' would also pull from large-negative
+    # curvature directions).
+    eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LA')
     if verbose:
         print(f"  eigsh done in {time.time()-t_eig:.1f}s ({hvp_count[0]} HVPs)", flush=True)
 

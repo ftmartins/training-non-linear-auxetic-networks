@@ -37,7 +37,8 @@ from analysis.timestep_sweep import (
 
 
 def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
-                 eps_min, n_traj_steps, k_eigs, force_type, network_type):
+                 eps_min, n_traj_steps, k_eigs, force_type, network_type, gradient_method,
+                 n_hessian_traj_steps):
     from base.elastic_network import ElasticNetwork
     from training.src.checkpoint_manager import get_training_result_path, _nt_filename
     from training.src.data_loader import load_loss_trajectory, load_stiffness_trajectory
@@ -49,6 +50,9 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
         else:
             from base.config import RESULTS_DIR
             results_dir = RESULTS_DIR
+    # Results are partitioned by gradient_method (newton/fire/parallel/jax
+    # write to separate subdirectories to avoid clobbering each other).
+    results_dir = Path(results_dir) / gradient_method
     result_path = get_training_result_path(task, realization, results_dir)
 
     with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as fh:
@@ -77,13 +81,14 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
     results = sweep_auxetic(
         network, task_config, boundary, stiffness_traj, loss_traj,
         n_thresh_steps=n_thresh_steps, eps_min=eps_min, n_traj_steps=n_traj_steps,
+        n_hessian_traj_steps=n_hessian_traj_steps,
         k_eigs=k_eigs, force_type=force_type, n_strain_steps=n_strain_steps, tol=FORCE_TOL,
     )
     return result_path, results
 
 
 def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
-                    n_thresh_steps, eps_min, k_eigs):
+                    n_thresh_steps, eps_min, k_eigs, n_hessian_traj_steps):
     from training.runners.allosteric_trainer import (
         STRAIN_INPUT, STRAIN_INPUT2, NSTEPS_TASK1, NSTEPS_TASK2, TARGETED_ENSEMBLE,
     )
@@ -115,6 +120,7 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
         nodes, incidence_matrix, eq_lengths, task_config,
         stiffness_traj, steps, mse1, mse2,
         n_thresh_steps=n_thresh_steps, eps_min=eps_min, k_eigs=k_eigs,
+        n_hessian_traj_steps=n_hessian_traj_steps,
     )
     return result_path, results
 
@@ -133,13 +139,23 @@ def main():
                         default='/data2/shared/felipetm/allosteric_nets',
                         help='allosteric only')
     parser.add_argument('--n-thresh-steps', type=int, default=50)
-    parser.add_argument('--eps-min', type=float, default=1e-3)
+    parser.add_argument('--eps-min', type=float, default=1e-8)
     parser.add_argument('--n-traj-steps', type=int, default=100, help='auxetic only')
-    parser.add_argument('--k-eigs', type=int, default=20)
+    parser.add_argument('--n-hessian-traj-steps', type=int, default=20,
+                        help='number of linearly-spaced points along each recomputed '
+                             'compression/actuation trajectory at which the elastic Hessian '
+                             'spectrum is evaluated (auxetic and allosteric)')
+    parser.add_argument('--k-eigs', type=int, default=10,
+                        help="number of top (largest positive) cost-Hessian eigenpairs to "
+                             "compute; does not affect the elastic Hessian, which always "
+                             "returns its full spectrum")
     parser.add_argument('--force-type', type=str, default='quadratic', help='auxetic only')
     parser.add_argument('--network-type', choices=['jammed', 'lattice'], default=None,
                         help="auxetic only; 'jammed' or 'lattice' (default: from config). "
                              "Must match the network_type the training job used.")
+    parser.add_argument('--gradient-method', type=str, default='newton',
+                        help="auxetic only; gradient method subdirectory the training job used "
+                             "(e.g. 'newton', 'fire', 'parallel', 'jax')")
     args = parser.parse_args()
 
     if args.network_type is None:
@@ -151,12 +167,14 @@ def main():
         result_path, results = _run_auxetic(
                 args.task_type, args.task, args.realization, args.results_dir,
                 args.n_thresh_steps, args.eps_min, args.n_traj_steps, args.k_eigs,
-                args.force_type, args.network_type,
+                args.force_type, args.network_type, args.gradient_method,
+                args.n_hessian_traj_steps,
             )
     else:
         result_path, results = _run_allosteric(
                 args.task, args.realization, args.geometry, args.targeted_ensemble,
                 args.output_dir, args.n_thresh_steps, args.eps_min, args.k_eigs,
+                args.n_hessian_traj_steps,
             )
     #except Exception as e:
     #    print(f"post_training_sweep FAILED: {e!r}", file=sys.stderr)

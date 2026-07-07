@@ -39,7 +39,8 @@ for _p in (str(_ROOT), str(_SRC)):
 from analysis.timestep_sweep import load_sweep_results
 
 
-def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, force_type, network_type):
+def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, force_type, network_type,
+                         gradient_method):
     from base.elastic_network import ElasticNetwork
     from training.src.checkpoint_manager import get_training_result_path, _nt_filename
     from training.src.training_functions import poisson_loss_batch_parallel
@@ -51,6 +52,9 @@ def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, f
         else:
             from base.config import RESULTS_DIR
             results_dir = RESULTS_DIR
+    # Results are partitioned by gradient_method (newton/fire/parallel/jax
+    # write to separate subdirectories to avoid clobbering each other).
+    results_dir = Path(results_dir) / gradient_method
     result_path = get_training_result_path(task, realization, results_dir)
 
     with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as fh:
@@ -149,6 +153,9 @@ def main():
     parser.add_argument('--network-type', choices=['jammed', 'lattice'], default=None,
                         help="auxetic only; 'jammed' or 'lattice' (default: from config). "
                              "Must match the network_type the training job used.")
+    parser.add_argument('--gradient-method', type=str, default='newton',
+                        help="auxetic only; gradient method subdirectory the training job used "
+                             "(e.g. 'newton', 'fire', 'parallel', 'jax')")
     args = parser.parse_args()
 
     if args.network_type is None:
@@ -166,6 +173,9 @@ def main():
                 results_dir = RESULTS_DIR
         else:
             results_dir = args.results_dir
+        # Results are partitioned by gradient_method (newton/fire/parallel/jax
+        # write to separate subdirectories to avoid clobbering each other).
+        results_dir = Path(results_dir) / args.gradient_method
         result_path = get_training_result_path(args.task, args.realization, results_dir)
         sweep_filename = _nt_filename('timestep_sweep.npz', args.network_type)
         scatter_filename = _nt_filename('loss_reconstruction_scatter.png', args.network_type)
@@ -192,7 +202,7 @@ def main():
     if args.task_type in ('targeted', 'ensemble'):
         _, reloaded = _reload_auxetic_loss(
             args.task_type, args.task, args.realization, args.results_dir,
-            t_indices, args.force_type, args.network_type)
+            t_indices, args.force_type, args.network_type, args.gradient_method)
     else:
         _, reloaded = _reload_allosteric_loss(
             args.task, args.realization, args.geometry, args.targeted_ensemble,
