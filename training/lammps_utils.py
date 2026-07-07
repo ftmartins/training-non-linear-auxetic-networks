@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 from lammps import lammps
 import matplotlib.pyplot as plt
@@ -111,6 +112,12 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
         lmp.command("run 0 post no")
         lmp.command("min_style cg")
         lmp.command("minimize 1e-8 1e-8 1000 10000")
+        fnorm = lmp.get_thermo("fnorm")
+        if fnorm > 1e-6:
+            warnings.warn(
+                f"LAMMPS minimize did not converge at step {step}: fnorm={fnorm:.3e} > 1e-6",
+                RuntimeWarning,
+            )
         lmp.command(f"set atom {id_pull+1} x {coords[id_pull,0]:.6f}")
         lmp.command(f"set atom {id_pull+1} y {coords[id_pull,1]:.6f}")
         lmp.command("run 0 post no")
