@@ -42,6 +42,24 @@ def get_training_result_path(task_seed, realization_seed, results_dir=None):
     return task_dir / f"realization_{realization_seed:02d}"
 
 
+def results_dir_for_gradient_method(base_dir, gradient_method):
+    """
+    Append a `gradient_method` subdirectory to `base_dir`, idempotently.
+
+    Results are partitioned by gradient_method (newton/fire/parallel/jax write
+    to separate subdirectories so they don't clobber each other's checkpoints).
+    This is idempotent — if `base_dir`'s last path component already equals
+    `gradient_method`, it is returned unchanged instead of appending a second
+    time — so callers can safely apply it to a `results_dir` that may already
+    be gradient_method-specific (e.g. a user-supplied --results-dir override)
+    without ever producing a doubled-up path like `.../newton/newton/...`.
+    """
+    base_dir = Path(base_dir)
+    if base_dir.name == gradient_method:
+        return base_dir
+    return base_dir / gradient_method
+
+
 def _nt_filename(filename, network_type):
     """
     Insert `network_type` into a filename unless it is 'jammed' (the

@@ -45,7 +45,8 @@ from training.src.checkpoint_manager import (
     save_checkpoint,
     load_checkpoint,
     has_checkpoint,
-    remove_checkpoint
+    remove_checkpoint,
+    results_dir_for_gradient_method,
 )
 
 # Import training functions
@@ -87,7 +88,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
     # Results are partitioned by gradient_method (parallel/jax write to the
     # same task/realization otherwise, silently overwriting each other's
     # checkpoints and results).
-    results_dir = Path(RESULTS_DIR) / gradient_method
+    results_dir = results_dir_for_gradient_method(RESULTS_DIR, gradient_method)
 
     # Check if already complete
     if is_training_complete(task_seed, realization_seed, results_dir=results_dir, network_type=network_type):
@@ -307,7 +308,8 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     print(f"{'#'*80}\n")
 
     if resume:
-        jobs = get_incomplete_jobs(results_dir=Path(RESULTS_DIR) / gradient_method, network_type=network_type)
+        jobs = get_incomplete_jobs(results_dir=results_dir_for_gradient_method(RESULTS_DIR, gradient_method),
+                                   network_type=network_type)
         print(f"Found {len(jobs)} incomplete jobs (out of {N_TASKS * N_REALIZATIONS} total)")
     else:
         jobs = [
@@ -359,7 +361,8 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     print(f"{'#'*80}\n")
 
     # Print final progress summary
-    print_progress_summary(results_dir=Path(RESULTS_DIR) / gradient_method, network_type=network_type)
+    print_progress_summary(results_dir=results_dir_for_gradient_method(RESULTS_DIR, gradient_method),
+                           network_type=network_type)
 
 
 def main():
@@ -454,7 +457,7 @@ Examples:
                                 network_type=args.network_type)
 
     elif args.mode == 'status':
-        print_progress_summary(results_dir=Path(RESULTS_DIR) / args.gradient_method,
+        print_progress_summary(results_dir=results_dir_for_gradient_method(RESULTS_DIR, args.gradient_method),
                                network_type=args.network_type)
 
 

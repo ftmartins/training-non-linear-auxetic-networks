@@ -71,6 +71,7 @@ from training.src.checkpoint_manager import (
     get_last_good_step,
     get_training_result_path,
     _nt_filename,
+    results_dir_for_gradient_method,
 )
 import pickle
 
@@ -111,7 +112,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     # Results are partitioned by gradient_method (newton/fire/parallel/jax all
     # write to the same task/realization otherwise, silently overwriting each
     # other's checkpoints and results).
-    results_dir = Path(TARGETED_RESULTS_DIR) / gradient_method
+    results_dir = results_dir_for_gradient_method(TARGETED_RESULTS_DIR, gradient_method)
 
     # Check for NaN in previously saved results (takes priority over completion check)
     nan_detected = has_nan_in_results(task_id, realization_seed,
@@ -379,7 +380,7 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
         jobs = get_incomplete_jobs(
             n_tasks=N_TASKS,
             n_realizations=N_REALIZATIONS,
-            results_dir=Path(TARGETED_RESULTS_DIR) / gradient_method,
+            results_dir=results_dir_for_gradient_method(TARGETED_RESULTS_DIR, gradient_method),
             network_type=network_type,
         )
         print(f"Found {len(jobs)} incomplete jobs (out of {N_TASKS * N_REALIZATIONS} total)")
@@ -434,7 +435,7 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
 
 def print_targeted_progress(network_type=NETWORK_TYPE, gradient_method='newton'):
     """Print progress summary for targeted tasks."""
-    results_dir = Path(TARGETED_RESULTS_DIR) / gradient_method
+    results_dir = results_dir_for_gradient_method(TARGETED_RESULTS_DIR, gradient_method)
     complete = get_complete_jobs(
         n_tasks=N_TASKS,
         n_realizations=N_REALIZATIONS,

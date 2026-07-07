@@ -40,7 +40,9 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
                  eps_min, n_traj_steps, k_eigs, force_type, network_type, gradient_method,
                  n_hessian_traj_steps):
     from base.elastic_network import ElasticNetwork
-    from training.src.checkpoint_manager import get_training_result_path, _nt_filename
+    from training.src.checkpoint_manager import (
+        get_training_result_path, _nt_filename, results_dir_for_gradient_method,
+    )
     from training.src.data_loader import load_loss_trajectory, load_stiffness_trajectory
 
     if results_dir is None:
@@ -50,9 +52,10 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
         else:
             from base.config import RESULTS_DIR
             results_dir = RESULTS_DIR
-    # Results are partitioned by gradient_method (newton/fire/parallel/jax
-    # write to separate subdirectories to avoid clobbering each other).
-    results_dir = Path(results_dir) / gradient_method
+    # Idempotent: safe even if results_dir (default or an explicit
+    # --results-dir override) already points at a gradient_method
+    # subdirectory — never produces a doubled-up .../newton/newton/... path.
+    results_dir = results_dir_for_gradient_method(results_dir, gradient_method)
     result_path = get_training_result_path(task, realization, results_dir)
 
     with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as fh:
