@@ -39,9 +39,9 @@ for _p in (str(_ROOT), str(_SRC)):
 from analysis.timestep_sweep import load_sweep_results
 
 
-def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, force_type):
+def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, force_type, network_type):
     from base.elastic_network import ElasticNetwork
-    from training.src.checkpoint_manager import get_training_result_path
+    from training.src.checkpoint_manager import get_training_result_path, _nt_filename
     from training.src.training_functions import poisson_loss_batch_parallel
 
     if results_dir is None:
@@ -53,15 +53,15 @@ def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, f
             results_dir = RESULTS_DIR
     result_path = get_training_result_path(task, realization, results_dir)
 
-    with open(result_path / 'final_network.pkl', 'rb') as fh:
+    with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as fh:
         net_dict = pickle.load(fh)
     network = ElasticNetwork(
         positions=net_dict['positions'], edges=net_dict['edges'],
         rest_lengths=net_dict['rest_lengths'], stiffnesses=net_dict['stiffnesses'],
     )
-    with open(result_path / 'boundary_nodes.json', 'r') as fh:
+    with open(result_path / _nt_filename('boundary_nodes.json', network_type), 'r') as fh:
         boundary = {k: np.asarray(v, dtype=int) for k, v in json.load(fh).items()}
-    with open(result_path / 'task_config.json', 'r') as fh:
+    with open(result_path / _nt_filename('task_config.json', network_type), 'r') as fh:
         task_config = json.load(fh)
 
     compression_strains   = list(task_config['compression_strains'])
@@ -74,7 +74,7 @@ def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, f
     from base.config import FORCE_TOL
 
     # Fresh re-read from disk, independent of post_training_sweep.py's in-memory state.
-    stiffness_traj = np.load(result_path / 'stiffness_trajectory.npy')
+    stiffness_traj = np.load(result_path / _nt_filename('stiffness_trajectory.npy', network_type))
 
     reloaded_loss = np.full(len(t_indices), np.nan)
     for i, t in enumerate(t_indices):
@@ -146,10 +146,17 @@ def main():
     parser.add_argument('--output-dir', type=str,
                         default='/data2/shared/felipetm/allosteric_nets', help='allosteric only')
     parser.add_argument('--force-type', type=str, default='quadratic', help='auxetic only')
+    parser.add_argument('--network-type', choices=['jammed', 'lattice'], default=None,
+                        help="auxetic only; 'jammed' or 'lattice' (default: from config). "
+                             "Must match the network_type the training job used.")
     args = parser.parse_args()
 
+    if args.network_type is None:
+        from base.config import NETWORK_TYPE
+        args.network_type = NETWORK_TYPE
+
     if args.task_type in ('targeted', 'ensemble'):
-        from training.src.checkpoint_manager import get_training_result_path
+        from training.src.checkpoint_manager import get_training_result_path, _nt_filename
         if args.results_dir is None:
             if args.task_type == 'targeted':
                 from training.src.targeted_task_generator import TARGETED_RESULTS_DIR
@@ -160,12 +167,16 @@ def main():
         else:
             results_dir = args.results_dir
         result_path = get_training_result_path(args.task, args.realization, results_dir)
+        sweep_filename = _nt_filename('timestep_sweep.npz', args.network_type)
+        scatter_filename = _nt_filename('loss_reconstruction_scatter.png', args.network_type)
     else:
         geom_dir = 'geometry_targeted' if args.targeted_ensemble else f'geometry_{args.geometry}'
         result_path = (Path(args.output_dir) / geom_dir /
                        f'task_{args.task}' / f'realization_{args.realization}')
+        sweep_filename = 'timestep_sweep.npz'
+        scatter_filename = 'loss_reconstruction_scatter.png'
 
-    sweep_path = result_path / 'timestep_sweep.npz'
+    sweep_path = result_path / sweep_filename
     if not sweep_path.exists():
         print(f"verify_and_plot_loss: {sweep_path} not found "
               f"(run post_training_sweep.py first)", file=sys.stderr)
@@ -181,7 +192,7 @@ def main():
     if args.task_type in ('targeted', 'ensemble'):
         _, reloaded = _reload_auxetic_loss(
             args.task_type, args.task, args.realization, args.results_dir,
-            t_indices, args.force_type)
+            t_indices, args.force_type, args.network_type)
     else:
         _, reloaded = _reload_allosteric_loss(
             args.task, args.realization, args.geometry, args.targeted_ensemble,
@@ -202,7 +213,7 @@ def main():
         rel_err = np.abs(values - stored) / np.maximum(np.abs(stored), 1e-300)
         print(f"{label:<42}{rel_err.mean():>16.3e}{rel_err.max():>16.3e}")
 
-    out_path = result_path / 'loss_reconstruction_scatter.png'
+    out_path = result_path / scatter_filename
     _make_scatter(stored, series, out_path)
     print(f"Saved {out_path}")
     return 0

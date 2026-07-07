@@ -80,8 +80,10 @@ EXIT_CODE=$?
 if [ ${EXIT_CODE} -eq 0 ]; then
     echo ""
     echo "Running post-training timestep-sweep analysis..."
-    python post_training_sweep.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED}
-    python verify_and_plot_loss.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED}
+    python post_training_sweep.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED} \
+        --network-type ${NETWORK_TYPE}
+    python verify_and_plot_loss.py --task-type ensemble --task ${TASK_SEED} --realization ${REALIZATION_SEED} \
+        --network-type ${NETWORK_TYPE}
 fi
 
 echo ""
