@@ -43,7 +43,9 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
     from training.src.checkpoint_manager import (
         get_training_result_path, _nt_filename, results_dir_for_gradient_method,
     )
-    from training.src.data_loader import load_loss_trajectory, load_stiffness_trajectory
+    from training.src.data_loader import (
+        load_loss_trajectory, load_stiffness_trajectory, load_positions_trajectory,
+    )
 
     if results_dir is None:
         if task_type == 'targeted':
@@ -73,6 +75,7 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
 
     loss_traj      = load_loss_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
     stiffness_traj = load_stiffness_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
+    positions_traj = load_positions_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
 
     if 'n_strain_steps' in task_config:
         n_strain_steps = task_config['n_strain_steps']
@@ -82,10 +85,11 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
     from base.config import FORCE_TOL
 
     results = sweep_auxetic(
-        network, task_config, boundary, stiffness_traj, loss_traj,
+        network, task_config, boundary, stiffness_traj, positions_traj, loss_traj,
         n_thresh_steps=n_thresh_steps, eps_min=eps_min, n_traj_steps=n_traj_steps,
         n_hessian_traj_steps=n_hessian_traj_steps,
         k_eigs=k_eigs, force_type=force_type, n_strain_steps=n_strain_steps, tol=FORCE_TOL,
+        gradient_method=gradient_method,
     )
     return result_path, results
 

@@ -359,7 +359,7 @@ def _quasistatic_newton(network, compression_strain, top_nodes, bottom_nodes,
         pf, res_norm = jax_solver(jnp.array(pos.flatten()), edges_j, rest_j, k_j, tol_j)
         pos = np.array(pf).reshape(-1, 2)
 
-        if float(res_norm/n_dof) >= tol:
+        if float(res_norm) >= tol:
             # Regularized Newton stalled (likely a near-mechanism / near-singular K_ff
             # configuration) — fall back to Cython FIRE, which is more robust to soft
             # modes, starting from Newton's last iterate.
@@ -451,7 +451,7 @@ def compute_ift_gradient(network, compression_strains, target_poissons,
             pf, res_norm = jax_solver(jnp.array(pos_cur.flatten()), edges_j, rest_j, k_j, tol_j)
             pos_cur = np.array(pf).reshape(-1, 2)
 
-            if float(res_norm/n_dof) >= tol:
+            if float(res_norm) >= tol:
                 # Regularized Newton stalled (likely a near-mechanism / near-singular
                 # K_ff configuration) — fall back to Cython FIRE, more robust to soft
                 # modes, starting from Newton's last iterate.

@@ -74,6 +74,41 @@ def load_stiffness_trajectory(task_seed, realization_seed, results_dir=None, net
     return np.load(stiffness_file)
 
 
+def load_positions_trajectory(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
+    """
+    Load only the per-step positions trajectory (from history.pkl — the only
+    file that stores it; there is no positions_trajectory.npy).
+
+    Args:
+        task_seed: Task index
+        realization_seed: Realization index
+        results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+
+    Returns:
+        positions: list of (n_nodes, 2) arrays, length n_steps — positions[t] is
+            the network state that history['loss'][t] / stiffness_trajectory[t]
+            were computed against.
+
+    Example:
+        >>> positions = load_positions_trajectory(task_seed=0, realization_seed=5)
+        >>> best_step_positions = positions[np.argmin(load_loss_trajectory(0, 5))]
+    """
+    if results_dir is None:
+        results_dir = RESULTS_DIR
+
+    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
+    history_file = result_path / _nt_filename("history.pkl", network_type)
+
+    if not history_file.exists():
+        raise FileNotFoundError(f"History not found: {history_file}")
+
+    with open(history_file, "rb") as f:
+        history = pickle.load(f)
+
+    return history['positions']
+
+
 def load_training_result(task_seed, realization_seed, results_dir=None):
     """
     Load results for a single training run.
