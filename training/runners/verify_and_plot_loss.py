@@ -45,7 +45,8 @@ def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, f
     from training.src.checkpoint_manager import (
         get_training_result_path, _nt_filename, results_dir_for_gradient_method,
     )
-    from training.src.training_functions import poisson_loss_batch_parallel
+    from training.src.data_loader import load_positions_trajectory
+    from analysis.timestep_sweep import recompute_stiffness_loss
 
     if results_dir is None:
         if task_type == 'targeted':
@@ -82,17 +83,17 @@ def _reload_auxetic_loss(task_type, task, realization, results_dir, t_indices, f
 
     # Fresh re-read from disk, independent of post_training_sweep.py's in-memory state.
     stiffness_traj = np.load(result_path / _nt_filename('stiffness_trajectory.npy', network_type))
+    positions_traj = load_positions_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
 
+    top, bottom, left, right = boundary['top'], boundary['bottom'], boundary['left'], boundary['right']
     reloaded_loss = np.full(len(t_indices), np.nan)
     for i, t in enumerate(t_indices):
         network.stiffnesses = np.asarray(stiffness_traj[t], dtype=float)
-        mse, _ = poisson_loss_batch_parallel(
-            network, target_poisson_ratios,
-            boundary['top'], boundary['bottom'], boundary['left'], boundary['right'],
-            compression_strains, n_strain_steps=n_strain_steps,
-            force_type=force_type, tol=FORCE_TOL,
+        network.positions = np.asarray(positions_traj[t], dtype=float)
+        reloaded_loss[i] = recompute_stiffness_loss(
+            network, target_poisson_ratios, top, bottom, left, right,
+            compression_strains, n_strain_steps, force_type, FORCE_TOL, gradient_method,
         )
-        reloaded_loss[i] = mse
     return result_path, reloaded_loss
 
 

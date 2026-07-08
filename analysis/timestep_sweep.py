@@ -90,24 +90,74 @@ LOCAL_CONSTRAINED_NODES = np.array([0, 1, 2, 3])
 # Auxetic ("global") sweep
 # ---------------------------------------------------------------------------
 
-def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
+def recompute_stiffness_loss(net, target_poisson_ratios, top, bottom, left, right,
+                             compression_strains, n_strain_steps, force_type, tol,
+                             gradient_method):
+    """
+    Recompute loss for the current net.positions/net.stiffnesses with the same
+    solver the training run actually used — this is what makes it a genuine
+    "training's own evaluation path" check instead of an independent cross-check.
+
+    gradient_method: 'newton' -> compute_ift_gradient (Newton IFT), matching
+        finish_training_GD_auxetic_batch(method='newton'). Anything else
+        ('fire', 'parallel', 'jax') -> poisson_loss_batch_parallel (Cython FIRE
+        quasistatic + finite-difference loss); 'fire'/'parallel' training uses
+        this exact function, and 'jax' training relaxes with the same Cython
+        FIRE minimizer (just autodiffs the loss instead), so this is the
+        closest non-autodiff reconstruction available for it.
+    """
+    from base.simulate import compute_ift_gradient
+    from training.src.training_functions import poisson_loss_batch_parallel
+
+    if gradient_method == 'newton':
+        mse, _ = compute_ift_gradient(
+            net, compression_strains=compression_strains, target_poissons=target_poisson_ratios,
+            top_nodes=top, bottom_nodes=bottom, left_nodes=left, right_nodes=right,
+            tol=tol, n_strain_steps=n_strain_steps,
+        )
+    else:
+        mse, _ = poisson_loss_batch_parallel(
+            net, target_poisson_ratios, top, bottom, left, right,
+            compression_strains, n_strain_steps=n_strain_steps,
+            force_type=force_type, tol=tol,
+        )
+    return float(mse)
+
+
+def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj, loss_traj,
                   n_thresh_steps=50, eps_min=1e-8, n_traj_steps=100, k_eigs=10,
                   n_hessian_traj_steps=20,
                   force_type='quadratic', n_strain_steps=100, tol=1e-10,
-                  verbose=True):
+                  gradient_method='newton', verbose=True):
     """
     Run the full timestep-sweep analysis for one auxetic training result.
 
     Parameters
     ----------
-    network : ElasticNetwork        topology (edges, rest_lengths); stiffnesses
-                                     are overwritten per selected step.
+    network : ElasticNetwork        topology (edges, rest_lengths); positions
+                                     and stiffnesses are overwritten per
+                                     selected step from positions_traj/stiffness_traj.
     task_config : dict              must have 'compression_strains' and
                                      'target_poisson_ratios' (equal-length lists).
     boundary : dict                 keys 'top', 'bottom', 'left', 'right'.
     stiffness_traj : (T, E) array   full per-step stiffness trajectory.
+    positions_traj : sequence of (N, 2) arrays, length T
+                                     full per-step positions trajectory
+                                     (history['positions']) — must be indexed
+                                     identically to stiffness_traj/loss_traj so
+                                     that step t's stiffness is evaluated at
+                                     step t's actual starting positions, not
+                                     e.g. the final network's positions.
     loss_traj : (T,) array          full per-step stored loss (same array used
                                      to select timesteps).
+    gradient_method : str           'newton', 'fire', 'parallel', or 'jax' — the
+                                     gradient method the training run actually
+                                     used (see finish_training_GD_auxetic_batch/
+                                     finish_training_GD_auxetic_batch_jax).
+                                     Selects the loss solver used to recompute
+                                     recomputed_stiffness_loss/recomputed_trajectory_loss
+                                     so the sweep matches training's own evaluation
+                                     path instead of always using FIRE.
     n_hessian_traj_steps : int      number of linearly-spaced points along each
                                      recomputed compression trajectory (0 -> full
                                      compression_strain) at which the elastic
@@ -124,13 +174,15 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
     -------
     dict of numpy arrays, ready for np.savez_compressed.
     """
-    from training.src.training_functions import poisson_loss_batch_parallel
-
     compression_strains   = list(task_config['compression_strains'])
     target_poisson_ratios = list(task_config['target_poisson_ratios'])
     top, bottom, left, right = boundary['top'], boundary['bottom'], boundary['left'], boundary['right']
     constrained_nodes = global_constrained_nodes(boundary)
     n_sub = len(compression_strains)
+
+    # 'newton' training loss <-> compute_ift_gradient; everything else <-> FIRE —
+    # mirrors finish_training_GD_auxetic_batch's own method dispatch.
+    traj_method = 'newton' if gradient_method == 'newton' else 'fire'
 
     t_indices = select_loss_threshold_steps(loss_traj, n_thresh_steps, eps_min)
     n_t = len(t_indices)
@@ -155,17 +207,17 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
     for i, t in enumerate(t_indices):
         k_t = np.asarray(stiffness_traj[t], dtype=float)
         net.stiffnesses = k_t
+        net.positions = np.asarray(positions_traj[t], dtype=float)
 
         if verbose:
             print(f"  [auxetic sweep] step {i+1}/{n_t} (t={t}) ...", flush=True)
 
         # (a) stiffness-based loss — the exact training-time evaluation path
-        mse, _ = poisson_loss_batch_parallel(
+        mse = recompute_stiffness_loss(
             net, target_poisson_ratios, top, bottom, left, right,
-            compression_strains, n_strain_steps=n_strain_steps,
-            force_type=force_type, tol=tol,
+            compression_strains, n_strain_steps, force_type, tol, gradient_method,
         )
-        recomputed_stiffness_loss[i] = float(mse)
+        recomputed_stiffness_loss[i] = mse
 
         # (b) trajectory-based loss + (c) elastic Hessian along the trajectory, per subtask
         eigvals_this_t = []
@@ -173,7 +225,7 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
         sub_losses = np.full(n_sub, np.nan)
         for s, (cs, tp) in enumerate(zip(compression_strains, target_poisson_ratios)):
             traj = compute_trajectory(k_t, net, boundary, cs, n_steps=n_traj_steps,
-                                      force_type=force_type, tol=tol)
+                                      force_type=force_type, tol=tol, method=traj_method)
             sub_losses[s] = loss_from_trajectory(traj, cs, tp, boundary)
 
             vals_along_traj = []
@@ -206,6 +258,7 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, loss_traj,
     ):
         k_t = np.asarray(stiffness_traj[t], dtype=float)
         net.stiffnesses = k_t
+        net.positions = np.asarray(positions_traj[t], dtype=float)
         for s, (cs, tp) in enumerate(zip(compression_strains, target_poisson_ratios)):
             if verbose:
                 print(f"  [auxetic sweep] cost Hessian ({tag}, subtask {s}) ...", flush=True)

@@ -26,7 +26,7 @@ from base.simulate import compute_poisson_ratio_single_jax, crf as _crf
 # ---------------------------------------------------------------------------
 
 def compute_trajectory(stiffnesses, network, boundary, compression_strain,
-                       n_steps=100, force_type='quadratic', tol=1e-6):
+                       n_steps=100, force_type='quadratic', tol=1e-6, method='fire'):
     """
     Compute quasistatic trajectory for given stiffness vector K.
 
@@ -42,6 +42,9 @@ def compute_trajectory(stiffnesses, network, boundary, compression_strain,
     n_steps : int
     force_type : str
     tol : float
+    method : str   'fire' (Cython FIRE, default) or 'newton' (Newton-Raphson) —
+                   pass the same method the training run used so the recomputed
+                   trajectory uses the same solver as the stored loss.
 
     Returns
     -------
@@ -52,7 +55,8 @@ def compute_trajectory(stiffnesses, network, boundary, compression_strain,
     net = copy.copy(network)
     net.stiffnesses = np.asarray(stiffnesses, dtype=float)
     return compute_auxetic_trajectory(net, compression_strain, boundary,
-                                      n_steps=n_steps, force_type=force_type, tol=tol)
+                                      n_steps=n_steps, force_type=force_type, tol=tol,
+                                      method=method)
 
 
 # ---------------------------------------------------------------------------
