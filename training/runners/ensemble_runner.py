@@ -75,7 +75,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         realization_seed: Realization index (0 to N_REALIZATIONS-1)
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing (default: True)
-        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
+        gradient_method: 'newton' (IFT), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
 
     Returns:
@@ -210,9 +210,12 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         remaining_steps = N_STEPS - start_step
 
         if remaining_steps > 0:
-            train_fn = (finish_training_GD_auxetic_batch_jax
-                        if gradient_method == 'jax'
-                        else finish_training_GD_auxetic_batch)
+            if gradient_method == 'jax':
+                train_fn = finish_training_GD_auxetic_batch_jax
+                method_kwarg = {}
+            else:
+                train_fn = finish_training_GD_auxetic_batch
+                method_kwarg = {'method': 'fire' if gradient_method in ('fire', 'parallel') else 'newton'}
             history, trained_network = train_fn(
                 network=network,
                 history=history,
@@ -234,6 +237,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 save_interval=500,
                 network_type=network_type,
                 TARGETED_RESULTS_DIR=results_dir,
+                **method_kwarg,
             )
         else:
             trained_network = network
@@ -298,7 +302,7 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     Args:
         resume: Skip already completed jobs
         verbose: Print detailed progress
-        gradient_method: 'parallel' (finite-difference) or 'jax' (autodiff)
+        gradient_method: 'newton' (IFT), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     print(f"\n{'#'*80}")
@@ -421,9 +425,10 @@ Examples:
     )
     parser.add_argument(
         '--gradient-method',
-        choices=['parallel', 'jax'],
+        choices=['newton', 'jax', 'fire', 'parallel'],
         default='jax',
-        help='Gradient computation method: parallel (finite-difference, default) or jax (autodiff)'
+        help='Gradient computation method: newton (IFT), jax (autodiff, default), '
+             'or fire/parallel (finite-difference)'
     )
     parser.add_argument(
         '--network-type',
