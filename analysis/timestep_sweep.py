@@ -12,6 +12,13 @@ Cost Hessian (eigenpairs of the loss w.r.t. stiffnesses) is only evaluated at
 the first and last selected step (before/after training), since it is much
 more expensive than the elastic Hessian.
 
+The full per-subtask/per-task trajectory (all frames, not just the
+`n_hessian_traj_steps` sparse points the elastic Hessian is evaluated at) is
+also saved, since it costs little next to the eigenvector arrays already kept
+and lets downstream consumers (e.g. participation-ratio analyses, which need
+displacement between arbitrary consecutive frames) index into it directly
+instead of recomputing the trajectory.
+
 Two physics engines, matching what each trainer actually uses:
   - `sweep_auxetic`    — auxetic/"global" networks, JAX quasistatic solver
                          (analysis.cost_utils, same as ensemble_runner.py /
@@ -172,7 +179,12 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
 
     Returns
     -------
-    dict of numpy arrays, ready for np.savez_compressed.
+    dict of numpy arrays, ready for np.savez_compressed. Includes the full
+    per-subtask, per-selected-step trajectory (`trajectory_positions`) — cheap
+    to store next to the (n_free_dofs, n_free_dofs) eigenvector arrays already
+    kept — so downstream analyses that need displacement between arbitrary
+    frames (e.g. participation ratio) can index into it directly instead of
+    recomputing the trajectory.
     """
     compression_strains   = list(task_config['compression_strains'])
     target_poisson_ratios = list(task_config['target_poisson_ratios'])
@@ -201,6 +213,7 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
 
     elastic_eigvals_list = []   # (n_sub,) list of (n_hess_steps, n_free_dofs) arrays, per t — full spectrum
     elastic_eigvecs_list = []   # (n_sub,) list of (n_hess_steps, n_free_dofs, n_free_dofs) arrays, per t
+    traj_positions_list  = []   # (n_sub,) list of (n_strain_steps, N, 2) arrays, per t — full trajectory
 
     net = copy.deepcopy(network)
 
@@ -222,6 +235,7 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
         # (b) trajectory-based loss + (c) elastic Hessian along the trajectory, per subtask
         eigvals_this_t = []
         eigvecs_this_t = []
+        traj_pos_this_t = []
         sub_losses = np.full(n_sub, np.nan)
         for s, (cs, tp) in enumerate(zip(compression_strains, target_poisson_ratios)):
             traj = compute_trajectory(k_t, net, boundary, cs, n_steps=n_strain_steps,
@@ -240,14 +254,21 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
                 vecs_along_traj.append(vecs)
             eigvals_this_t.append(np.stack(vals_along_traj))   # (n_hess_steps, n_free_modes)
             eigvecs_this_t.append(np.stack(vecs_along_traj))   # (n_hess_steps, n_free_dofs, n_free_modes)
+            # Full-resolution positions (not just at traj_hess_idx) so downstream
+            # analyses (e.g. participation ratio, which needs displacement between
+            # arbitrary consecutive frames) can index into the trajectory themselves
+            # without recomputing it.
+            traj_pos_this_t.append(np.stack([np.asarray(p) for p in traj]))  # (n_strain_steps, N, 2)
 
         subtask_trajectory_loss[i]    = sub_losses
         recomputed_trajectory_loss[i] = float(np.mean(sub_losses))
         elastic_eigvals_list.append(np.stack(eigvals_this_t))
         elastic_eigvecs_list.append(np.stack(eigvecs_this_t))
+        traj_positions_list.append(np.stack(traj_pos_this_t))   # (n_sub, n_strain_steps, N, 2)
 
     elastic_hessian_eigvals = np.stack(elastic_eigvals_list)   # (n_t, n_sub, n_hess_steps, n_free_dofs) — full spectrum
     elastic_hessian_eigvecs = np.stack(elastic_eigvecs_list)   # (n_t, n_sub, n_hess_steps, n_free_dofs, n_free_dofs)
+    trajectory_positions    = np.stack(traj_positions_list)    # (n_t, n_sub, n_strain_steps, N, 2) — full trajectory, all selected steps
 
     # Cost Hessian only before (first selected step) and after (last selected step)
     cost_before_vals, cost_before_vecs = [], []
@@ -280,6 +301,8 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
         'elastic_hessian_traj_strain_frac': traj_hess_idx / (n_strain_steps - 1),
         'elastic_hessian_traj_strain': np.outer(
             compression_strains, traj_hess_idx / (n_strain_steps - 1)),  # (n_sub, n_hess_steps)
+        'trajectory_positions': trajectory_positions,   # (n_t, n_sub, n_strain_steps, N, 2) — full trajectory
+        'trajectory_strain_frac': np.arange(n_strain_steps) / (n_strain_steps - 1),   # (n_strain_steps,)
         'cost_hessian_before_eigvals': np.stack(cost_before_vals),
         'cost_hessian_before_eigvecs': np.stack(cost_before_vecs),
         'cost_hessian_after_eigvals': np.stack(cost_after_vals),
@@ -341,7 +364,11 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
 
     Returns
     -------
-    dict of numpy arrays, ready for np.savez_compressed.
+    dict of numpy arrays, ready for np.savez_compressed. Includes the full
+    per-task, per-selected-step actuation trajectory (`trajectory_positions_task1`/
+    `_task2`, kept separate since nsteps can differ between the two tasks) so
+    downstream analyses that need displacement between arbitrary frames (e.g.
+    participation ratio) can index into it directly instead of recomputing it.
     """
     from training.runners.allosteric_trainer import evaluate_actuation
 
@@ -370,6 +397,8 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
     recomputed_trajectory_loss = np.full((n_t, 2), np.nan)
     elastic_eigvals_list = []   # per t: (2, n_hess, n_free_dofs) — full spectrum
     elastic_eigvecs_list = []   # per t: (2, n_hess, n_free_dofs, n_free_dofs)
+    traj_pos_task1_list  = []   # per t: (nsteps, N, 2) — full task1 trajectory
+    traj_pos_task2_list  = []   # per t: (nsteps2, N, 2) — full task2 trajectory
 
     for i, t in enumerate(t_indices):
         k_t = np.asarray(stiffness_traj[t], dtype=float)
@@ -378,6 +407,7 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
 
         eigvals_this_t = []
         eigvecs_this_t = []
+        traj_pos_this_t = []
         for task_idx, (tgt, dxi, nsi) in enumerate(
                 ((tod, dx, nsteps), (tod2, dx2, nsteps2))):
             mse, nodes_free, nodes_clamped, frames_clamped = evaluate_actuation(
@@ -401,12 +431,20 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                 vecs_along_traj.append(vecs)
             eigvals_this_t.append(np.stack(vals_along_traj))   # (n_hess, n_free_dofs)
             eigvecs_this_t.append(np.stack(vecs_along_traj))   # (n_hess, n_free_dofs, n_free_dofs)
+            # Full-resolution positions (not just at traj_hess_idx_per_task) so
+            # downstream analyses (e.g. participation ratio) can index into the
+            # trajectory themselves without recomputing it.
+            traj_pos_this_t.append(np.stack([np.asarray(p) for p in frames_clamped]))
 
         elastic_eigvals_list.append(np.stack(eigvals_this_t))
         elastic_eigvecs_list.append(np.stack(eigvecs_this_t))
+        traj_pos_task1_list.append(traj_pos_this_t[0])   # (nsteps, N, 2)
+        traj_pos_task2_list.append(traj_pos_this_t[1])   # (nsteps2, N, 2)
 
     elastic_hessian_eigvals = np.stack(elastic_eigvals_list)   # (n_t, 2, n_hess, n_free_dofs) — full spectrum
     elastic_hessian_eigvecs = np.stack(elastic_eigvecs_list)   # (n_t, 2, n_hess, n_free_dofs, n_free_dofs)
+    trajectory_positions_task1 = np.stack(traj_pos_task1_list)   # (n_t, nsteps, N, 2)
+    trajectory_positions_task2 = np.stack(traj_pos_task2_list)   # (n_t, nsteps2, N, 2)
 
     # Per-task frame indices / actuation progress at the sampled Hessian points.
     # Frame index j (0-indexed) corresponds to cumulative input-node
@@ -439,6 +477,10 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
         'elastic_hessian_traj_indices': elastic_hessian_traj_indices,
         'elastic_hessian_traj_strain_frac': elastic_hessian_traj_strain_frac,
         'elastic_hessian_traj_strain': elastic_hessian_traj_strain,
+        'trajectory_positions_task1': trajectory_positions_task1,   # (n_t, nsteps, N, 2)
+        'trajectory_positions_task2': trajectory_positions_task2,   # (n_t, nsteps2, N, 2)
+        'trajectory_strain_frac_task1': (np.arange(nsteps)  + 1) / nsteps,
+        'trajectory_strain_frac_task2': (np.arange(nsteps2) + 1) / nsteps2,
         'cost_hessian_before_eigvals': cost_before[0],
         'cost_hessian_before_eigvecs': cost_before[1],
         'cost_hessian_after_eigvals': cost_after[0],
