@@ -192,7 +192,7 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
     # elastic Hessian is evaluated; same for every selected timestep/subtask
     # since n_traj_steps is fixed for the whole sweep.
     traj_hess_idx = np.unique(np.round(
-        np.linspace(0, n_traj_steps - 1, n_hessian_traj_steps)
+        np.linspace(0, n_strain_steps - 1, n_hessian_traj_steps)
     ).astype(int))
 
     recomputed_stiffness_loss  = np.full(n_t, np.nan)
@@ -224,7 +224,7 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
         eigvecs_this_t = []
         sub_losses = np.full(n_sub, np.nan)
         for s, (cs, tp) in enumerate(zip(compression_strains, target_poisson_ratios)):
-            traj = compute_trajectory(k_t, net, boundary, cs, n_steps=n_traj_steps,
+            traj = compute_trajectory(k_t, net, boundary, cs, n_steps=n_strain_steps,
                                       force_type=force_type, tol=tol, method=traj_method)
             sub_losses[s] = loss_from_trajectory(traj, cs, tp, boundary)
 
@@ -277,9 +277,9 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
         'elastic_hessian_eigvals': elastic_hessian_eigvals,
         'elastic_hessian_eigvecs': elastic_hessian_eigvecs,
         'elastic_hessian_traj_indices': traj_hess_idx,
-        'elastic_hessian_traj_strain_frac': traj_hess_idx / (n_traj_steps - 1),
+        'elastic_hessian_traj_strain_frac': traj_hess_idx / (n_strain_steps - 1),
         'elastic_hessian_traj_strain': np.outer(
-            compression_strains, traj_hess_idx / (n_traj_steps - 1)),  # (n_sub, n_hess_steps)
+            compression_strains, traj_hess_idx / (n_strain_steps - 1)),  # (n_sub, n_hess_steps)
         'cost_hessian_before_eigvals': np.stack(cost_before_vals),
         'cost_hessian_before_eigvecs': np.stack(cost_before_vecs),
         'cost_hessian_after_eigvals': np.stack(cost_after_vals),
