@@ -44,7 +44,7 @@ def _uniform_stiffnesses(realization_seed, n_edges):
     rng = np.random.RandomState(realization_seed)
     return rng.uniform(VMIN, VMAX, size=n_edges)
 
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 
 # Import targeted config and task definitions
 from training.src.targeted_task_generator import (

@@ -191,7 +191,7 @@ def finish_training_GD_auxetic_batch(
     top_nodes, bottom_nodes, left_nodes, right_nodes,
     force_type='quadratic', n_strain_steps=100,
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
-    verbose=False, stiffnesses_filename=None, force_tol=1e-6,
+    verbose=False, stiffnesses_filename=None, force_tol=1e-8,
     vmin=1e-3, vmax=1e3,
     task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol=1e-5,
     method='newton', network_type=NETWORK_TYPE,
