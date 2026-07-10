@@ -31,7 +31,7 @@ ENSEMBLE_DIR = BASE_DIR
 TARGETED_RESULTS_DIR = Path('/data2/shared/felipetm/auxetic_networks/targeted_results_sqr')
 
 N_STEPS = 5_000
-N_STRAIN_STEPS = 400    # Same for all targeted tasks
+N_STRAIN_STEPS = 200    # Same for all targeted tasks
 N_TARGETED_NODES = 100  # Same network size for all targeted tasks
 PACKING_SEED = 42  # Same network topology for all tasks
 
