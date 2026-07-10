@@ -183,6 +183,68 @@ def finite_difference_gradient_parallel_batch(network, target_poisson_list, top_
 
 
 # ============================================================================
+# TRAINING HELPER FUNCTIONS (Newton-loss + finite-difference gradient)
+# ============================================================================
+
+def _newton_fd_gradient_entry(i, network, target_poisson_list, top_nodes, bottom_nodes,
+                              left_nodes, right_nodes, compression_strain_list,
+                              epsilon, n_strain_steps, tol):
+    """
+    Central-difference gradient for a single stiffness, using the Newton-solved
+    loss (compute_ift_gradient's forward pass) instead of its analytic gradient.
+    """
+    orig = network.stiffnesses[i]
+
+    network.stiffnesses[i] = orig + epsilon
+    loss_plus, _ = compute_ift_gradient(
+        network, compression_strains=compression_strain_list, target_poissons=target_poisson_list,
+        top_nodes=top_nodes, bottom_nodes=bottom_nodes, left_nodes=left_nodes, right_nodes=right_nodes,
+        tol=tol, n_strain_steps=n_strain_steps,
+    )
+
+    network.stiffnesses[i] = orig - epsilon
+    loss_minus, _ = compute_ift_gradient(
+        network, compression_strains=compression_strain_list, target_poissons=target_poisson_list,
+        top_nodes=top_nodes, bottom_nodes=bottom_nodes, left_nodes=left_nodes, right_nodes=right_nodes,
+        tol=tol, n_strain_steps=n_strain_steps,
+    )
+
+    network.stiffnesses[i] = orig
+    return (i, (loss_plus - loss_minus) / (2 * epsilon))
+
+
+def finite_difference_gradient_newton_batch(network, target_poisson_list, top_nodes, bottom_nodes,
+                                            left_nodes, right_nodes, compression_strain_list,
+                                            epsilon=1e-8, n_jobs=4,
+                                            n_strain_steps=100, tol=FORCE_TOL):
+    """
+    Gradient across all stiffnesses via central finite differences of the Newton-solved
+    loss (base.simulate.compute_ift_gradient's Newton-Raphson forward pass), bypassing
+    its analytic implicit-function-theorem gradient entirely.
+
+    Parallelized across stiffness indices only (each Newton solve already accounts for
+    all compression strains internally, unlike the Cython-FIRE finite-difference path
+    above which parallelizes strains too).
+    """
+    n_edges = len(network.stiffnesses)
+
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(_newton_fd_gradient_entry)(
+            i, network, target_poisson_list,
+            top_nodes, bottom_nodes, left_nodes, right_nodes,
+            compression_strain_list, epsilon, n_strain_steps, tol,
+        )
+        for i in range(n_edges)
+    )
+
+    grad = np.zeros(n_edges)
+    for i, value in results:
+        grad[i] = value
+
+    return grad
+
+
+# ============================================================================
 # MAIN TRAINING FUNCTION
 # ============================================================================
 
@@ -219,13 +281,21 @@ def finish_training_GD_auxetic_batch(
         task_seed: Task index (for saving intermediate results)
         realization_seed: Realization index (for saving intermediate results)
         save_interval: Save intermediate trajectories every N steps (default: 500)
-        method: 'newton' (default) — Newton quasistatic + IFT gradient (fast);
-                'fire'   — Cython FIRE quasistatic + finite-difference gradient (original).
+        method: 'newton'    (default) — Newton quasistatic + analytic IFT gradient (fast);
+                'newton_fd' — Newton quasistatic loss, but the gradient is a plain
+                              central finite difference over stiffnesses of that loss
+                              (no IFT/adjoint formula at all — much slower than 'newton');
+                'fire'      — Cython FIRE quasistatic + finite-difference gradient (original).
 
     Returns:
         history: Updated history dictionary with training results
     """
     import copy
+
+    # The quasistatic trajectory itself (used for best-step reconstruction below) is
+    # always solved via Newton for both 'newton' and 'newton_fd' — they only differ in
+    # how the training-time gradient is obtained, not in the loss/position solver.
+    traj_method = 'newton' if method in ('newton', 'newton_fd') else 'fire'
 
     network = copy.copy(network)
     last_relaxed_positions = np.copy(network.positions)
@@ -295,6 +365,20 @@ def finish_training_GD_auxetic_batch(
                 n_strain_steps=n_strain_steps,
             )
             update = -grad
+        elif method == 'newton_fd':
+            update = -finite_difference_gradient_newton_batch(
+                copy.deepcopy(network),
+                target_poisson_list=desired_poisson_list,
+                top_nodes=top_nodes,
+                bottom_nodes=bottom_nodes,
+                left_nodes=left_nodes,
+                right_nodes=right_nodes,
+                compression_strain_list=source_compression_strain_list,
+                epsilon=1e-8,
+                n_strain_steps=n_strain_steps,
+                tol=force_tol,
+                n_jobs=4,
+            )
         else:
             update = -finite_difference_gradient_parallel_batch(
                 copy.deepcopy(network),
@@ -341,7 +425,7 @@ def finish_training_GD_auxetic_batch(
         # history['loss'][i] and history['stiffnesses'][i] are now aligned:
         # both reflect the network state AFTER the stiffness update at step i.
         network.update_positions(min_pos)
-        if method == 'newton':
+        if method in ('newton', 'newton_fd'):
             loss, _ = compute_ift_gradient(
                 network,
                 compression_strains=source_compression_strain_list,
@@ -415,7 +499,7 @@ def finish_training_GD_auxetic_batch(
                 history['best_trajectory'] = compute_quasistatic_trajectory_auxetic(
                     _bn, min(source_compression_strain_list), top_nodes, bottom_nodes,
                     n_steps=n_strain_steps, tol=force_tol,
-                    force_type=force_type, method=method,
+                    force_type=force_type, method=traj_method,
                 )
                 history['best_step'] = _cur_best
                 _last_traj_best_step = _cur_best
@@ -455,7 +539,7 @@ def finish_training_GD_auxetic_batch(
         history['best_trajectory'] = compute_quasistatic_trajectory_auxetic(
             best_net, min(source_compression_strain_list), top_nodes, bottom_nodes,
             n_steps=n_strain_steps, tol=force_tol,
-            force_type=force_type, method=method,
+            force_type=force_type, method=traj_method,
         )
         history['best_step'] = best_step
 

@@ -46,8 +46,8 @@ def results_dir_for_gradient_method(base_dir, gradient_method):
     """
     Append a `gradient_method` subdirectory to `base_dir`, idempotently.
 
-    Results are partitioned by gradient_method (newton/fire/parallel/jax write
-    to separate subdirectories so they don't clobber each other's checkpoints).
+    Results are partitioned by gradient_method (newton/newton_fd/fire/parallel/jax
+    write to separate subdirectories so they don't clobber each other's checkpoints).
     This is idempotent — if `base_dir`'s last path component already equals
     `gradient_method`, it is returned unchanged instead of appending a second
     time — so callers can safely apply it to a `results_dir` that may already

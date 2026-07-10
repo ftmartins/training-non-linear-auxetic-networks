@@ -96,7 +96,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing
-        gradient_method: 'newton' (IFT, default), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
+        gradient_method: 'newton' (IFT, default), 'newton_fd' (Newton loss + finite-difference
+            gradient), 'jax' (autodiff), or 'fire'/'parallel' (Cython FIRE + finite-difference)
 
     Returns:
         success: Boolean indicating success
@@ -109,8 +110,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     TARGETED_RESULTS_DIR_ = TARGETED_RESULTS_DIR / f'{gradient_method}'
     TARGETED_RESULTS_DIR = TARGETED_RESULTS_DIR_
 
-    # Results are partitioned by gradient_method (newton/fire/parallel/jax all
-    # write to the same task/realization otherwise, silently overwriting each
+    # Results are partitioned by gradient_method (newton/newton_fd/fire/parallel/jax
+    # all write to the same task/realization otherwise, silently overwriting each
     # other's checkpoints and results).
     results_dir = results_dir_for_gradient_method(TARGETED_RESULTS_DIR, gradient_method)
 
@@ -258,7 +259,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 method_kwarg = {}
             else:
                 train_fn = finish_training_GD_auxetic_batch
-                method_kwarg = {'method': 'fire' if gradient_method in ('fire', 'parallel') else 'newton'}
+                method_kwarg = {'method': 'fire' if gradient_method in ('fire', 'parallel') else gradient_method}
             return train_fn(
                 network=net,
                 history=hist,
@@ -365,7 +366,8 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
     Args:
         resume: Skip already completed jobs
         verbose: Print detailed progress
-        gradient_method: 'newton' (IFT, default), 'jax' (autodiff), or 'fire'/'parallel' (finite-difference)
+        gradient_method: 'newton' (IFT, default), 'newton_fd' (Newton loss + finite-difference
+            gradient), 'jax' (autodiff), or 'fire'/'parallel' (Cython FIRE + finite-difference)
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
     """
     print(f"\n{'#'*80}")
@@ -525,9 +527,10 @@ Examples:
     )
     parser.add_argument(
         '--gradient-method',
-        choices=['newton', 'jax', 'fire', 'parallel'],
+        choices=['newton', 'newton_fd', 'jax', 'fire', 'parallel'],
         default='newton',
-        help='Gradient computation method: newton (IFT, default), jax (autodiff), fire/parallel (finite-difference)'
+        help='Gradient computation method: newton (IFT, default), newton_fd (Newton loss + '
+             'finite-difference gradient), jax (autodiff), fire/parallel (Cython FIRE + finite-difference)'
     )
     parser.add_argument(
         '--network-type',
