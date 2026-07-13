@@ -255,7 +255,7 @@ def finish_training_GD_auxetic_batch(
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
     verbose=False, stiffnesses_filename=None, force_tol=1e-8,
     vmin=1e-3, vmax=1e3,
-    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol=1e-5,
+    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol=1e-6,
     method='newton', network_type=NETWORK_TYPE,
 ):
     """
@@ -571,7 +571,7 @@ def finish_training_GD_auxetic_batch_jax(
     vmin=1e-6, vmax=1e3,
     task_seed=None, realization_seed=None, save_interval=10,
     task_config=None, TARGETED_RESULTS_DIR=None,
-    fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE,
+    fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE, loss_tol=1e-6,
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
@@ -598,6 +598,7 @@ def finish_training_GD_auxetic_batch_jax(
         task_config, TARGETED_RESULTS_DIR: For checkpoint saving
         fire_max_steps: Max steps for JAX FIRE solver
         fire_tol: Convergence tolerance for JAX FIRE solver
+        loss_tol: Early-stopping threshold — training stops once loss drops below this
 
     Returns:
         (history, trained_network)
@@ -724,6 +725,9 @@ def finish_training_GD_auxetic_batch_jax(
                 results_dir=TARGETED_RESULTS_DIR,
                 network_type=network_type,
             )
+
+        if loss < loss_tol:
+            break
 
     # Final summary
     print(f"\n{'='*60}")
