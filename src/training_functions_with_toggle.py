@@ -24,9 +24,12 @@ from checkpoint_manager import (
     save_training_results,
     save_checkpoint,
 )
-from config import FORCE_TOL
+from base.config import FORCE_TOL
 
 import jax
+
+jax.config.update("jax_enable_x64", True)
+
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 
@@ -726,7 +729,7 @@ def finish_training_GD_auxetic_batch(
     source_compression_strain_list=[0.2], desired_target_extension_list=[0.2],
     verbose=False, stiffnesses_filename=None, force_tol=1e-6,
     vmin=1e-3, vmax=1e3,
-    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol = 1e-5
+    task_seed=None, realization_seed=None, save_interval=500, task_config=None, TARGETED_RESULTS_DIR=None, loss_tol = 1e-6
 ):
     """
     Train the network for auxetic response using gradient descent.
