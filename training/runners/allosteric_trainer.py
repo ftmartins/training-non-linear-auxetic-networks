@@ -30,6 +30,10 @@ import textwrap
 import numpy as np
 from scipy.optimize import fsolve
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # project root
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import training.lammps_utils as f
 
 # ── Constants ─────────────────────────────────────────────────────────────────
