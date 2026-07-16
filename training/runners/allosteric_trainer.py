@@ -60,7 +60,7 @@ NSTEPS_TASK2   = 50
 N_GEOMETRIES   = 5
 N_TASKS        = 5
 N_REALIZATIONS = 10 # 5
-N_TRAINING_STEPS = 100_000
+N_TRAINING_STEPS = 1_000
 
 # Non-overlapping seed namespaces
 _GEOMETRY_BASE    = 1_000_000
