@@ -3,7 +3,6 @@ import re
 import tempfile
 import warnings
 import numpy as np
-from lammps import lammps
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
@@ -85,6 +84,8 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
 
     Returns frames: list of (N, 2) node position arrays, one per step.
     """
+    from lammps import lammps  # deferred: only 'lammps' solver users need this installed
+
     bond_coeffs_free    = "bond_coeffs_free.in"
     bond_coeffs_clamped = "bond_coeffs_clamped.in"
     if work_dir is not None:
@@ -141,7 +142,7 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
         # where energy stops changing well before force actually vanishes,
         # satisfying etol long before ftol. Only force/line-search/iteration
         # limits should end the minimization now.
-        lmp.command("minimize 0.0 1e-8 10000 100000")
+        lmp.command("minimize 0.0 1e-8 100000 1000000")
         fnorm = lmp.get_thermo("fnorm")
         with open(log_path) as log_fh:
             log_fh.seek(log_pos)

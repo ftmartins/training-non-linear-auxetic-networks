@@ -36,6 +36,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import training.lammps_utils as f
+import training.jax_actuation as jx
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 K_MIN    = 1e-3
@@ -44,8 +45,12 @@ ETA      = 1.0
 K_OUTPUT = 1e3
 LR_TARGET_LOG = -3.5   # target mean(log10|delta_K|)
 
+# Physics backend for evaluate_actuation: 'jax_fire' (default, same
+# differentiable FIRE solver as auxetic training) or 'lammps' (legacy).
+DEFAULT_SOLVER = 'jax_fire'
+
 # Fixed input-actuation schedule, shared by training and by post-training
-# analysis (analysis/timestep_sweep.py) so both use identical LAMMPS calls.
+# analysis (analysis/timestep_sweep.py) so both use identical physics calls.
 STRAIN_INPUT   = 1.0
 STRAIN_INPUT2  = 0.5
 NSTEPS_TASK1   = 100
@@ -271,12 +276,12 @@ def load_resume_state(output_path):
     return None
 
 
-# ── Actuation evaluation (free + clamped LAMMPS pair at fixed stiffnesses) ────
+# ── Actuation evaluation (free + clamped actuation pair at fixed stiffnesses) ─
 
 def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA,
-                       return_trajectory=False):
+                       return_trajectory=False, solver=DEFAULT_SOLVER):
     """
-    Run one free+clamped LAMMPS actuation pair at fixed stiffnesses.
+    Run one free+clamped actuation pair at fixed stiffnesses.
 
     This is the read-only half of the training step (no stiffness update) —
     used both by the training loop and by post-training analysis
@@ -290,6 +295,11 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
         (one frame per pull step, length `nsteps`) instead of just its final
         frame — used by analysis.timestep_sweep.sweep_allosteric to sample
         the elastic Hessian along the actuation trajectory.
+    solver : 'jax_fire' (default) or 'lammps'
+        Physics backend. 'jax_fire' uses the same differentiable FIRE solver
+        (base.simulate.make_compute_response_fire) as auxetic training;
+        'lammps' is the original LAMMPS-based implementation, kept as an
+        option.
 
     Returns
     -------
@@ -299,6 +309,44 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
     frames_clamped : list of (N, 2) arrays, length nsteps
         Only returned when return_trajectory=True.
     """
+    if solver == 'jax_fire':
+        return _evaluate_actuation_jax(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps,
+                                       eta=eta, return_trajectory=return_trajectory)
+    elif solver == 'lammps':
+        return _evaluate_actuation_lammps(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps,
+                                          eta=eta, return_trajectory=return_trajectory)
+    raise ValueError(f"Unknown solver: {solver!r} (expected 'jax_fire' or 'lammps')")
+
+
+def _evaluate_actuation_jax(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA,
+                            return_trajectory=False):
+    edges = f.incidence_to_edges(incidence_matrix)
+    rest_lengths = np.linalg.norm(nodes[edges[:, 1]] - nodes[edges[:, 0]], axis=1)
+
+    frames_free = jx.strain_network_jax(jx.FREE_CRF, nodes, edges, rest_lengths, stiffnesses,
+                                        0, 1, dx=dx, nsteps=nsteps)
+    nodes_free = frames_free[nsteps - 1]
+    cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
+
+    edges_clamped        = np.vstack([edges, (2, 3)])
+    rest_lengths_clamped = np.append(rest_lengths, eta * tod + (1 - eta) * cod)
+    stiffnesses_clamped  = np.append(stiffnesses, K_OUTPUT)
+
+    # CLAMPED_CRF, not FREE_CRF: the output spring's stiffness (K_OUTPUT)
+    # is far above the base network's range and destabilizes FREE_CRF's
+    # larger timestep (see training/jax_actuation.py).
+    frames_clamped = jx.strain_network_jax(jx.CLAMPED_CRF, nodes, edges_clamped,
+                                           rest_lengths_clamped, stiffnesses_clamped,
+                                           0, 1, dx=dx, nsteps=nsteps)
+    nodes_clamped = frames_clamped[nsteps - 1]
+    mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
+    if return_trajectory:
+        return mse, nodes_free, nodes_clamped, frames_clamped
+    return mse, nodes_free, nodes_clamped
+
+
+def _evaluate_actuation_lammps(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA,
+                               return_trajectory=False):
     # Each call gets its own scratch dir: evaluate_actuation is invoked both
     # from the training loop (already cwd-isolated per SLURM array task) and
     # from post_training_sweep.py (runs in the shared $SLURM_SUBMIT_DIR), so
@@ -342,10 +390,10 @@ def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
 # ── Learning-rate calibration ─────────────────────────────────────────────────
 
 def calibrate_learning_rate(nodes, incidence_matrix, eq_lengths, stiffnesses,
-                             eta, tod, dx, nsteps):
-    """One LAMMPS step at lr=1; scale so mean(log10|delta_K|) = LR_TARGET_LOG."""
+                             eta, tod, dx, nsteps, solver=DEFAULT_SOLVER):
+    """One actuation step at lr=1; scale so mean(log10|delta_K|) = LR_TARGET_LOG."""
     _, nodes_free, nodes_clamped = evaluate_actuation(
-        nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=eta)
+        nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=eta, solver=solver)
 
     dVfree    = np.linalg.norm(incidence_matrix @ nodes_free,    axis=1) - eq_lengths
     dVclamped = np.linalg.norm(incidence_matrix @ nodes_clamped, axis=1) - eq_lengths
@@ -368,7 +416,8 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                        learning_rate, tod, tod2, dinputdistance, dinputdistance2,
                        nsteps, nsteps2, n_steps, output_path,
                        msearray=None, msearray2=None, step_offset=0,
-                       best_stiffnesses=None, best_combined_mse=np.inf):
+                       best_stiffnesses=None, best_combined_mse=np.inf,
+                       solver=DEFAULT_SOLVER):
     if msearray  is None: msearray  = np.array([])
     if msearray2 is None: msearray2 = np.array([])
     if best_stiffnesses is None:
@@ -382,14 +431,14 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
     for j in range(n_steps):
         # Task 1
         _, nodes_free, nodes_clamped = evaluate_actuation(
-            nodes, incidence_matrix, stiffnesses, tod, dx, nsteps)
+            nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, solver=solver)
         stiffnesses, mse, _ = learning_update(
             nodes_free, nodes_clamped, tod, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
 
         # Task 2
         _, nodes_free, nodes_clamped = evaluate_actuation(
-            nodes, incidence_matrix, stiffnesses, tod2, dx2, nsteps2)
+            nodes, incidence_matrix, stiffnesses, tod2, dx2, nsteps2, solver=solver)
         stiffnesses, mse2, _ = learning_update(
             nodes_free, nodes_clamped, tod2, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
@@ -512,6 +561,8 @@ def main():
                         default='/data2/shared/felipetm/allosteric_nets')
     parser.add_argument('--targeted-ensemble', action='store_true',
                         help='Use TARGETED_ENSEMBLE fixed tasks with a shared fixed geometry')
+    parser.add_argument('--solver', choices=['jax_fire', 'lammps'], default=DEFAULT_SOLVER,
+                        help="Physics backend for evaluate_actuation (default: %(default)s)")
     args = parser.parse_args()
 
     gid = args.geometry_id
@@ -520,11 +571,12 @@ def main():
     training_steps = args.training_steps
     output_dir     = args.output_dir
     targeted       = args.targeted_ensemble
+    solver         = args.solver
 
     log_dir = '/home1/felipetm/auxetic_networks/ensemble_training/Logs'
 
     mode_tag = 'targeted' if targeted else f'geometry={gid}'
-    print(f"=== Allosteric trainer: {mode_tag}, task={tid}, realization={rid} ===")
+    print(f"=== Allosteric trainer: {mode_tag}, task={tid}, realization={rid}, solver={solver} ===")
 
     # Per-job temp dir so parallel LAMMPS jobs don't share files
     work_dir = f"/tmp/allosteric_{'tgt' if targeted else f'g{gid}'}_t{tid}_r{rid}_{os.getpid()}"
@@ -614,7 +666,8 @@ def main():
                    else f"Attempt 1 resumed — {attempt1_remaining} steps remaining")
             print(f"\n--- {tag} ---")
             lr = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
-                                         stiffnesses.copy(), ETA, tod, dx, nsteps)
+                                         stiffnesses.copy(), ETA, tod, dx, nsteps,
+                                         solver=solver)
             msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
                 _run_training_loop(
                     nodes, incidence_matrix, eq_lengths, stiffnesses,
@@ -623,7 +676,8 @@ def main():
                     msearray=msearray, msearray2=msearray2,
                     step_offset=start_step,
                     best_stiffnesses=best_stiffnesses,
-                    best_combined_mse=best_combined_mse)
+                    best_combined_mse=best_combined_mse,
+                    solver=solver)
 
         if check_success(msearray, msearray2):
             print("\nAttempt 1 succeeded.")
@@ -638,7 +692,8 @@ def main():
                        else f"Attempt 2 resumed — {attempt2_remaining} steps remaining")
                 print(f"\n--- {tag} ---")
                 lr2 = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
-                                              stiffnesses.copy(), ETA, tod, dx, nsteps)
+                                              stiffnesses.copy(), ETA, tod, dx, nsteps,
+                                              solver=solver)
                 msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
                     _run_training_loop(
                         nodes, incidence_matrix, eq_lengths, stiffnesses,
@@ -647,7 +702,8 @@ def main():
                         msearray=msearray, msearray2=msearray2,
                         step_offset=step_after_a1,
                         best_stiffnesses=best_stiffnesses,
-                        best_combined_mse=best_combined_mse)
+                        best_combined_mse=best_combined_mse,
+                        solver=solver)
 
             if check_success(msearray, msearray2):
                 print("\nAttempt 2 succeeded.")
