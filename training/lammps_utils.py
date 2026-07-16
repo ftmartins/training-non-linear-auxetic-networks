@@ -1,9 +1,13 @@
 import os
+import re
+import tempfile
 import warnings
 import numpy as np
 from lammps import lammps
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+
+_STOPPING_CRITERION_RE = re.compile(r"Stopping criterion\s*=\s*(.+)")
 
 
 def incidence_to_edges(incidence):
@@ -88,7 +92,14 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
         bond_coeffs_free    = os.path.join(work_dir, bond_coeffs_free)
         bond_coeffs_clamped = os.path.join(work_dir, bond_coeffs_clamped)
 
-    args = ["-screen", "none", "-log", "none"]
+    # Route the LAMMPS log to a real file (instead of "none") so that, on
+    # non-convergence, we can report *why* minimize stopped (energy
+    # tolerance / force tolerance / line search failure / maxiter / maxeval)
+    # rather than just the residual fnorm.
+    log_dir = work_dir if work_dir is not None else tempfile.mkdtemp(prefix="strain_network_")
+    log_path = os.path.join(log_dir, "clamped.log" if clamped else "free.log")
+
+    args = ["-screen", "none", "-log", log_path]
     lmp = lammps(cmdargs=args)
     lmp.command("units lj")
     lmp.command("atom_style bond")
@@ -116,6 +127,7 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
 
     frames = []
     coords = np.array(lmp.gather_atoms("x", 1, 3)).reshape(N, 3)
+    log_pos = 0
 
     for step in range(nsteps):
         coords[id_pull, 0] += dx
@@ -124,11 +136,23 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
         lmp.command(f"set atom {id_pull+1} z {coords[id_pull,2]:.6f}")
         lmp.command("run 0 post no")
         lmp.command("min_style fire")
-        lmp.command("minimize 1e-8 1e-8 10000 100000")
+        # etol=0.0: don't let the energy-tolerance criterion stop the run —
+        # near-isostatic networks can have floppy/near-zero-energy modes
+        # where energy stops changing well before force actually vanishes,
+        # satisfying etol long before ftol. Only force/line-search/iteration
+        # limits should end the minimization now.
+        lmp.command("minimize 0.0 1e-8 10000 100000")
         fnorm = lmp.get_thermo("fnorm")
+        with open(log_path) as log_fh:
+            log_fh.seek(log_pos)
+            new_log_text = log_fh.read()
+            log_pos = log_fh.tell()
         if fnorm > 1e-6:
+            reasons = _STOPPING_CRITERION_RE.findall(new_log_text)
+            stop_reason = reasons[-1].strip() if reasons else "unknown (log parse failed)"
             warnings.warn(
-                f"LAMMPS minimize did not converge at step {step}: fnorm={fnorm:.3e} > 1e-6",
+                f"LAMMPS minimize did not converge at step {step}: fnorm={fnorm:.3e} > 1e-6 "
+                f"(stopping criterion: {stop_reason})",
                 RuntimeWarning,
             )
         lmp.command(f"set atom {id_pull+1} x {coords[id_pull,0]:.6f}")
