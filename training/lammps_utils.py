@@ -1,3 +1,4 @@
+import os
 import warnings
 import numpy as np
 from lammps import lammps
@@ -18,7 +19,7 @@ def incidence_to_edges(incidence):
 def write_lammps_data(filename, positions, incidence, stiffnesses,
                       id_outA=None, id_outB=None,
                       target_output_distance=None,
-                      k_output=1e3, mass=1.0):
+                      k_output=1e3, mass=1.0, work_dir=None):
     N = positions.shape[0]
     edges = incidence_to_edges(incidence)
     M = len(edges)
@@ -29,6 +30,10 @@ def write_lammps_data(filename, positions, incidence, stiffnesses,
         stiffnesses = np.append(stiffnesses, k_output)
         bond_coeff_name = "bond_coeffs_clamped.in"
         M += 1
+
+    if work_dir is not None:
+        filename = os.path.join(work_dir, filename)
+        bond_coeff_name = os.path.join(work_dir, bond_coeff_name)
 
     with open(filename, "w") as f:
         f.write("Elastic network with output spring\n\n")
@@ -69,12 +74,20 @@ def write_lammps_data(filename, positions, incidence, stiffnesses,
             f.write(f"bond_coeff {bi} {k:.6f} {r0:.6f}\n")
 
 
-def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=200):
+def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=200,
+                   work_dir=None):
     """
     Quasi-static pulling of a single node in a 2D network via LAMMPS.
 
     Returns frames: list of (N, 2) node position arrays, one per step.
     """
+    bond_coeffs_free    = "bond_coeffs_free.in"
+    bond_coeffs_clamped = "bond_coeffs_clamped.in"
+    if work_dir is not None:
+        datafile             = os.path.join(work_dir, datafile)
+        bond_coeffs_free    = os.path.join(work_dir, bond_coeffs_free)
+        bond_coeffs_clamped = os.path.join(work_dir, bond_coeffs_clamped)
+
     args = ["-screen", "none", "-log", "none"]
     lmp = lammps(cmdargs=args)
     lmp.command("units lj")
@@ -85,9 +98,9 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
     lmp.command("bond_style harmonic")
     lmp.command("pair_style none")
     if not clamped:
-        lmp.command("include bond_coeffs_free.in")
+        lmp.command(f"include {bond_coeffs_free}")
     else:
-        lmp.command("include bond_coeffs_clamped.in")
+        lmp.command(f"include {bond_coeffs_clamped}")
 
     N = lmp.get_natoms()
 
@@ -111,7 +124,7 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
         lmp.command(f"set atom {id_pull+1} z {coords[id_pull,2]:.6f}")
         lmp.command("run 0 post no")
         lmp.command("min_style cg")
-        lmp.command("minimize 1e-8 1e-8 1000 10000")
+        lmp.command("minimize 1e-8 1e-8 10000 100000")
         fnorm = lmp.get_thermo("fnorm")
         if fnorm > 1e-6:
             warnings.warn(
