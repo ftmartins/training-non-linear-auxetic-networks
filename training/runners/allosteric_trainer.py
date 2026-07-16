@@ -25,6 +25,7 @@ import sys
 import random
 import shutil
 import subprocess
+import tempfile
 import textwrap
 
 import numpy as np
@@ -298,16 +299,26 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
     frames_clamped : list of (N, 2) arrays, length nsteps
         Only returned when return_trajectory=True.
     """
-    f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses)
-    nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
-                                  dx=dx, nsteps=nsteps)[nsteps - 1]
-    cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
-    f.write_lammps_data("data_clamped.network", nodes, incidence_matrix, stiffnesses,
-                        id_outA=2, id_outB=3,
-                        target_output_distance=eta * tod + (1 - eta) * cod,
-                        k_output=K_OUTPUT)
-    frames_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
-                                      dx=dx, nsteps=nsteps)
+    # Each call gets its own scratch dir: evaluate_actuation is invoked both
+    # from the training loop (already cwd-isolated per SLURM array task) and
+    # from post_training_sweep.py (runs in the shared $SLURM_SUBMIT_DIR), so
+    # relying on the caller's cwd let concurrent array tasks clobber each
+    # other's data_free.network / bond_coeffs_free.in.
+    work_dir = tempfile.mkdtemp(prefix="allosteric_actuation_")
+    try:
+        f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses,
+                            work_dir=work_dir)
+        nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
+                                      dx=dx, nsteps=nsteps, work_dir=work_dir)[nsteps - 1]
+        cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
+        f.write_lammps_data("data_clamped.network", nodes, incidence_matrix, stiffnesses,
+                            id_outA=2, id_outB=3,
+                            target_output_distance=eta * tod + (1 - eta) * cod,
+                            k_output=K_OUTPUT, work_dir=work_dir)
+        frames_clamped = f.strain_network("data_clamped.network", 0, 1, clamped=True,
+                                          dx=dx, nsteps=nsteps, work_dir=work_dir)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
     nodes_clamped = frames_clamped[nsteps - 1]
     mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
     if return_trajectory:
