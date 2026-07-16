@@ -123,7 +123,7 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
         lmp.command(f"set atom {id_pull+1} y {coords[id_pull,1]:.6f}")
         lmp.command(f"set atom {id_pull+1} z {coords[id_pull,2]:.6f}")
         lmp.command("run 0 post no")
-        lmp.command("min_style cg")
+        lmp.command("min_style fire")
         lmp.command("minimize 1e-8 1e-8 10000 100000")
         fnorm = lmp.get_thermo("fnorm")
         if fnorm > 1e-6:
