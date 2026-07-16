@@ -30,6 +30,7 @@ import textwrap
 
 import numpy as np
 from scipy.optimize import fsolve
+from tqdm import tqdm
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # project root
 if _ROOT not in sys.path:
@@ -428,7 +429,9 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
 
     best_updated = False
 
-    for j in range(n_steps):
+    pbar = tqdm(range(n_steps),
+               desc=f'(mse1={np.nan:.4e}, mse2={np.nan:.4e}, best_combined={best_combined_mse:.4e})')
+    for j in pbar:
         # Task 1
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, solver=solver)
@@ -451,6 +454,9 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             best_combined_mse = combined
             best_stiffnesses  = stiffnesses.copy()
             best_updated      = True
+
+        pbar.set_description(
+            f'(mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e})')
 
         global_step = step_offset + j + 1
         if global_step % 500 == 0:
