@@ -320,12 +320,27 @@ def _select_local_threshold_indices(steps, mse1, mse2, n_thresh_steps, eps_min):
     """Checkpoint-aligned timestep selection for allosteric results.
 
     `steps` (1-indexed global step numbers) indexes into the sparse
-    `stiffnesses_traj.npy` checkpoints; the full-resolution loss (mse1+mse2)
-    is aligned to those checkpoints via `steps - 1`, exactly as
-    NewFiguresJune.ipynb's load_local_stiffness_trajectory does.
+    `stiffnesses_traj.npy` checkpoints. `stiffnesses_traj[c]` (checkpoint at
+    global_step `steps[c]`) is saved *after* iteration `j = steps[c] - 1`
+    completes both its task1 and task2 stiffness updates — i.e. it's the
+    stiffness in effect at the *start* of the next training iteration,
+    `j = steps[c]` (0-indexed). `mse1[j]` is recorded from task1's evaluation
+    at the start of iteration `j`, before that iteration's own update — so
+    `mse1[steps[c]]` (NOT `mse1[steps[c] - 1]`) is the entry computed at
+    exactly `stiffnesses_traj[c]`. Indexing with `steps - 1` (as an earlier
+    version of this function, and NewFiguresJune.ipynb's
+    load_local_stiffness_trajectory, both do) is off by one iteration: it
+    pairs each checkpoint with the loss from the *previous* iteration's
+    stiffness instead of its own.
+
+    mse2 has no exact alignment under either indexing: task2 is evaluated
+    after task1's update has already been applied within the same iteration,
+    at an intermediate stiffness state that's never itself checkpointed.
+    `mse2[steps[c]]` is still the closest available value (same iteration
+    `steps[c]` that starts at `stiffnesses_traj[c]`), just not an exact match.
     """
     loss_full = np.asarray(mse1) + np.asarray(mse2)
-    idx = np.clip(np.asarray(steps, dtype=int) - 1, 0, len(loss_full) - 1)
+    idx = np.clip(np.asarray(steps, dtype=int), 0, len(loss_full) - 1)
     loss_ckpt = loss_full[idx]
     t_indices = select_loss_threshold_steps(loss_ckpt, n_thresh_steps, eps_min)
     return t_indices, loss_ckpt
@@ -335,7 +350,7 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                      stiffness_traj, steps, mse1, mse2,
                      n_thresh_steps=50, eps_min=1e-8, k_eigs=10,
                      n_hessian_traj_steps=20, use_clamped_trajectory=True,
-                     cost_hessian_fn=None, verbose=True):
+                     cost_hessian_fn=None, solver=None, verbose=True):
     """
     Run the full timestep-sweep analysis for one allosteric training result.
 
@@ -393,6 +408,19 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                                      cost_hessian_fn=_compute_cost_hessian_lammps
                                      explicitly for a solver-matched (or LAMMPS-exact)
                                      finite-difference cross-check instead.
+    solver : str or None            Physics backend ('jax_fire' or 'lammps') for the
+                                     elastic-Hessian / stiffness-loss recompute below
+                                     (the part that mirrors training's own evaluation
+                                     path — unlike cost_hessian_fn, this one should
+                                     match whatever solver actually trained this
+                                     realization). post_training_sweep.py passes the
+                                     solver recorded in training_meta.json (written by
+                                     allosteric_trainer.py at training start) here.
+                                     None (default) falls back to evaluate_actuation's
+                                     own default (DEFAULT_SOLVER) — only correct if
+                                     that hasn't changed since this realization was
+                                     trained, which isn't guaranteed (DEFAULT_SOLVER
+                                     has already changed once, lammps -> jax_fire).
     k_eigs : int                    number of top (largest positive / algebraic)
                                      cost-Hessian eigenpairs to compute. Does NOT
                                      affect the elastic Hessian, which always
@@ -410,6 +438,10 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
     participation ratio) can index into it directly instead of recomputing it.
     """
     from training.runners.allosteric_trainer import evaluate_actuation
+
+    # Only override evaluate_actuation's own (DEFAULT_SOLVER) default when the
+    # caller passed an explicit solver — see the solver parameter docstring above.
+    evaluate_actuation_kwargs = {} if solver is None else {'solver': solver}
 
     tod, tod2 = task_config['tod'], task_config['tod2']
     dinputdistance, dinputdistance2 = task_config['dinputdistance'], task_config['dinputdistance2']
@@ -451,7 +483,7 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                 ((tod, dx, nsteps), (tod2, dx2, nsteps2))):
             mse, nodes_free, nodes_clamped, frames = evaluate_actuation(
                 nodes, incidence_matrix, k_t, tgt, dxi, nsi, return_trajectory=True,
-                compute_clamped=use_clamped_trajectory)
+                compute_clamped=use_clamped_trajectory, **evaluate_actuation_kwargs)
             recomputed_stiffness_loss[i, task_idx]  = mse
             # "loss from trajectory" here is the same quantity (mse is already
             # evaluated at the recomputed equilibrium, i.e. end of the LAMMPS
@@ -538,19 +570,24 @@ def _incidence_to_edges(incidence_matrix):
 
 def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffness_traj,
                                  k_eigs=10, hvp_epsilon=1e-3, grad_epsilon=1e-4,
-                                 verbose=True):
+                                 solver=None, verbose=True):
     """
     Top-k eigenpairs of the combined (task1+task2) LAMMPS loss Hessian w.r.t.
     stiffnesses, via finite-difference gradient + finite-difference HVP + Lanczos.
 
     Mirrors analysis/cost_utils.compute_cost_hessian's structure, but the loss
-    function calls LAMMPS (training.runners.allosteric_trainer.evaluate_actuation)
-    instead of JAX, since the allosteric physics engine isn't autodiff-differentiable.
-    This is expensive: each HVP costs ~4 LAMMPS actuation-pairs (2 for the forward
-    gradient, x2 tasks); keep k_eigs modest.
+    function calls evaluate_actuation (training.runners.allosteric_trainer)
+    instead of a JAX-traced ramp, since finite differences work with any
+    physics backend. Despite the name, this uses whatever `solver` is passed
+    (or evaluate_actuation's own DEFAULT_SOLVER default if solver=None) — pass
+    solver='lammps' explicitly for an actual LAMMPS-exact cross-check. This is
+    expensive: each HVP costs ~4 actuation-pairs (2 for the forward gradient,
+    x2 tasks); keep k_eigs modest.
     """
     from scipy.sparse.linalg import LinearOperator, eigsh
     from training.runners.allosteric_trainer import evaluate_actuation
+
+    evaluate_actuation_kwargs = {} if solver is None else {'solver': solver}
 
     tod, tod2 = task_config['tod'], task_config['tod2']
     dinputdistance, dinputdistance2 = task_config['dinputdistance'], task_config['dinputdistance2']
@@ -565,9 +602,9 @@ def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffn
         # evaluate_actuation's docstring), so skipping it here is a pure
         # speedup — every eigsh iteration costs 2*n_edges loss_fn calls.
         mse1, _, _  = evaluate_actuation(nodes, incidence_matrix, k, tod,  dx,  nsteps,
-                                         compute_clamped=False)
+                                         compute_clamped=False, **evaluate_actuation_kwargs)
         mse2, _, _  = evaluate_actuation(nodes, incidence_matrix, k, tod2, dx2, nsteps2,
-                                         compute_clamped=False)
+                                         compute_clamped=False, **evaluate_actuation_kwargs)
         return 0.5 * (mse1 + mse2)
 
     def grad_fn(k):
