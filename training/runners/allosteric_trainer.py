@@ -280,9 +280,9 @@ def load_resume_state(output_path):
 # ── Actuation evaluation (free + clamped actuation pair at fixed stiffnesses) ─
 
 def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA,
-                       return_trajectory=False, solver=DEFAULT_SOLVER):
+                       return_trajectory=False, solver=DEFAULT_SOLVER, compute_clamped=True):
     """
-    Run one free+clamped actuation pair at fixed stiffnesses.
+    Run one free(+clamped) actuation pair at fixed stiffnesses.
 
     This is the read-only half of the training step (no stiffness update) —
     used both by the training loop and by post-training analysis
@@ -292,27 +292,41 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
     Parameters
     ----------
     return_trajectory : bool
-        If True, also return the full clamped-run quasistatic trajectory
-        (one frame per pull step, length `nsteps`) instead of just its final
-        frame — used by analysis.timestep_sweep.sweep_allosteric to sample
-        the elastic Hessian along the actuation trajectory.
+        If True, also return the full quasistatic trajectory (one frame per
+        pull step, length `nsteps`) instead of just its final frame — used by
+        analysis.timestep_sweep.sweep_allosteric to sample the elastic
+        Hessian along the actuation trajectory. The clamped run's trajectory
+        is returned unless compute_clamped=False, in which case the free
+        run's trajectory is returned instead.
     solver : 'jax_fire' (default) or 'lammps'
         Physics backend. 'jax_fire' uses the same differentiable FIRE solver
         (base.simulate.make_compute_response_fire) as auxetic training;
         'lammps' is the original LAMMPS-based implementation, kept as an
         option.
+    compute_clamped : bool
+        `mse` only ever depends on the free run (see below) — the clamped
+        (output-spring) run exists solely to build the Hebbian learning
+        signal (learning_update). Callers that only need `mse` (e.g. a
+        gradient-descent loss, or the cost-Hessian finite-difference recipe
+        in analysis/timestep_sweep.py) can pass False to skip that extra,
+        smaller-timestep FIRE ramp entirely. Ignored by the 'lammps' solver,
+        which always computes both runs.
 
     Returns
     -------
     mse : float                    (||nodes_free[2]-nodes_free[3]|| - tod)^2
     nodes_free : (N, 2) array      equilibrium positions, free (uncalibrated) run
-    nodes_clamped : (N, 2) array   equilibrium positions, clamped (output-spring) run
-    frames_clamped : list of (N, 2) arrays, length nsteps
-        Only returned when return_trajectory=True.
+    nodes_clamped : (N, 2) array or None
+        Equilibrium positions, clamped (output-spring) run; None when
+        compute_clamped=False.
+    frames : list of (N, 2) arrays, length nsteps
+        Only returned when return_trajectory=True. The clamped run's frames,
+        unless compute_clamped=False, in which case the free run's frames.
     """
     if solver == 'jax_fire':
         return _evaluate_actuation_jax(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps,
-                                       eta=eta, return_trajectory=return_trajectory)
+                                       eta=eta, return_trajectory=return_trajectory,
+                                       compute_clamped=compute_clamped)
     elif solver == 'lammps':
         return _evaluate_actuation_lammps(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps,
                                           eta=eta, return_trajectory=return_trajectory)
@@ -320,13 +334,28 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
 
 
 def _evaluate_actuation_jax(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA,
-                            return_trajectory=False):
+                            return_trajectory=False, compute_clamped=True):
     edges = f.incidence_to_edges(incidence_matrix)
     rest_lengths = np.linalg.norm(nodes[edges[:, 1]] - nodes[edges[:, 0]], axis=1)
 
-    frames_free = jx.strain_network_jax(jx.FREE_CRF, nodes, edges, rest_lengths, stiffnesses,
-                                        0, 1, dx=dx, nsteps=nsteps)
-    nodes_free = frames_free[nsteps - 1]
+    # Only return_trajectory=True needs every frame; otherwise the jitted
+    # final-frame-only ramp is dramatically cheaper for repeated calls (see
+    # strain_network_jax_final's docstring) and gives identical values.
+    if return_trajectory:
+        frames_free = jx.strain_network_jax(jx.FREE_CRF, nodes, edges, rest_lengths, stiffnesses,
+                                            0, 1, dx=dx, nsteps=nsteps)
+        nodes_free = frames_free[nsteps - 1]
+    else:
+        frames_free = None
+        nodes_free = jx.strain_network_jax_final(jx.FREE_CRF, nodes, edges, rest_lengths,
+                                                  stiffnesses, 0, 1, dx=dx, nsteps=nsteps)
+    mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
+
+    if not compute_clamped:
+        if return_trajectory:
+            return mse, nodes_free, None, frames_free
+        return mse, nodes_free, None
+
     cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
 
     edges_clamped        = np.vstack([edges, (2, 3)])
@@ -336,13 +365,16 @@ def _evaluate_actuation_jax(nodes, incidence_matrix, stiffnesses, tod, dx, nstep
     # CLAMPED_CRF, not FREE_CRF: the output spring's stiffness (K_OUTPUT)
     # is far above the base network's range and destabilizes FREE_CRF's
     # larger timestep (see training/jax_actuation.py).
-    frames_clamped = jx.strain_network_jax(jx.CLAMPED_CRF, nodes, edges_clamped,
-                                           rest_lengths_clamped, stiffnesses_clamped,
-                                           0, 1, dx=dx, nsteps=nsteps)
-    nodes_clamped = frames_clamped[nsteps - 1]
-    mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
     if return_trajectory:
+        frames_clamped = jx.strain_network_jax(jx.CLAMPED_CRF, nodes, edges_clamped,
+                                               rest_lengths_clamped, stiffnesses_clamped,
+                                               0, 1, dx=dx, nsteps=nsteps)
+        nodes_clamped = frames_clamped[nsteps - 1]
         return mse, nodes_free, nodes_clamped, frames_clamped
+
+    nodes_clamped = jx.strain_network_jax_final(jx.CLAMPED_CRF, nodes, edges_clamped,
+                                                rest_lengths_clamped, stiffnesses_clamped,
+                                                0, 1, dx=dx, nsteps=nsteps)
     return mse, nodes_free, nodes_clamped
 
 
