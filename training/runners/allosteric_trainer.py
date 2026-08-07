@@ -40,22 +40,23 @@ import training.lammps_utils as f
 import training.jax_actuation as jx
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-K_MIN    = 1e-3
+K_MIN    = 1e-4
 K_MAX    = 1e1
 ETA      = 1.0
 K_OUTPUT = 1e3
-LR_TARGET_LOG = -3.5   # target mean(log10|delta_K|)
+LR_TARGET_LOG = -3.0   # target mean(log10|delta_K|)
+LEARNING_RATE = 5e-2
 
 # Physics backend for evaluate_actuation: 'jax_fire' (default, same
 # differentiable FIRE solver as auxetic training) or 'lammps' (legacy).
-DEFAULT_SOLVER = 'jax_fire'
+DEFAULT_SOLVER = 'lammps'
 
 # Fixed input-actuation schedule, shared by training and by post-training
 # analysis (analysis/timestep_sweep.py) so both use identical physics calls.
 STRAIN_INPUT   = 1.0
 STRAIN_INPUT2  = 0.5
-NSTEPS_TASK1   = 100
-NSTEPS_TASK2   = 50
+NSTEPS_TASK1   = 40
+NSTEPS_TASK2   = 20
 
 N_GEOMETRIES   = 5
 N_TASKS        = 5
@@ -382,7 +383,7 @@ def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
     dVfree    = np.linalg.norm(incidence_matrix @ nodesfree,    axis=1) - eq_lengths
     dVclamped = np.linalg.norm(incidence_matrix @ nodesclamped, axis=1) - eq_lengths
     factors   = (dVfree - dVclamped) * dVfree
-    delta_K   = (learning_rate / eta) * stiffnesses * factors
+    delta_K   = (1 / eta) * stiffnesses * factors
     stiffnesses = np.clip(stiffnesses + delta_K, K_MIN, K_MAX)
     mse = (np.linalg.norm(nodesfree[2] - nodesfree[3]) - tod) ** 2
     return stiffnesses, mse, delta_K
@@ -426,25 +427,31 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
 
     dx  = dinputdistance  / nsteps
     dx2 = dinputdistance2 / nsteps2
+    update_mag = np.nan
 
     best_updated = False
 
     pbar = tqdm(range(n_steps),
-               desc=f'(mse1={np.nan:.4e}, mse2={np.nan:.4e}, best_combined={best_combined_mse:.4e})')
+                desc=f'(mse1={np.nan:.4e}, mse2={np.nan:.4e}, best_combined={best_combined_mse:.4e}), updated_mag={update_mag:.4e}')
     for j in pbar:
         # Task 1
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, solver=solver)
-        stiffnesses, mse, _ = learning_update(
+        _, mse, update_mag = learning_update(
             nodes_free, nodes_clamped, tod, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
 
         # Task 2
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod2, dx2, nsteps2, solver=solver)
-        stiffnesses, mse2, _ = learning_update(
+        _, mse2, update_mag2 = learning_update(
             nodes_free, nodes_clamped, tod2, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
+
+        delta_K = update_mag + update_mag2
+        delta_K = learning_rate * delta_K#/np.linalg.norm(delta_K)
+
+        stiffnesses = np.clip(stiffnesses + delta_K, K_MIN, K_MAX)
 
         msearray  = np.append(msearray,  mse)
         msearray2 = np.append(msearray2, mse2)
@@ -456,10 +463,10 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             best_updated      = True
 
         pbar.set_description(
-            f'(mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e})')
+                f'(loss={(mse+mse):.4e}, mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e}), update_mag={np.mean(np.log10(np.abs(update_mag))):.4e}')
 
         global_step = step_offset + j + 1
-        if global_step % 500 == 0:
+        if global_step % 50 == 0:
             print(f"  step {global_step}: MSE1={mse:.4e}  MSE2={mse2:.4e}"
                   f"  best_combined={best_combined_mse:.4e}")
             np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
@@ -486,7 +493,32 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             np.save(traj_path,  traj)
             np.save(steps_path, steps)
 
-        if mse < 5e-8 and mse2 < 5e-8:
+        if mse/msearray[0] < 8e-5 and mse2/msearray2[0] < 8e-5:
+            np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
+            np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
+            np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
+            if not np.any(np.isnan(stiffnesses)):
+                np.save(os.path.join(output_path, 'stiffnesses_ckpt.npy'), stiffnesses)
+                np.savetxt(os.path.join(output_path, 'ckpt_step.txt'),
+                           [global_step], fmt='%d')
+            if best_updated:
+                np.save(os.path.join(output_path, 'best_stiffnesses.npy'), best_stiffnesses)
+                np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'),
+                           [best_combined_mse])
+                best_updated = False
+            # Append current stiffnesses to trajectory (one row per checkpoint).
+            traj_path  = os.path.join(output_path, 'stiffnesses_traj.npy')
+            steps_path = os.path.join(output_path, 'stiffnesses_traj_steps.npy')
+            if os.path.exists(traj_path) and os.path.exists(steps_path):
+                traj  = np.vstack([np.load(traj_path),  stiffnesses])
+                steps = np.append(np.load(steps_path), global_step)
+            else:
+                traj  = stiffnesses[np.newaxis, :]
+                steps = np.array([global_step])
+            np.save(traj_path,  traj)
+            np.save(steps_path, steps)
+
+
             print(f"  Early stop at step {global_step}: both tasks converged.")
             break
 
@@ -674,6 +706,7 @@ def main():
             lr = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
                                          stiffnesses.copy(), ETA, tod, dx, nsteps,
                                          solver=solver)
+            print('Learning rate: ', lr)
             msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
                 _run_training_loop(
                     nodes, incidence_matrix, eq_lengths, stiffnesses,
