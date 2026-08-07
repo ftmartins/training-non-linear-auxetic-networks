@@ -17,7 +17,7 @@ from base.simulate import make_compute_response_fire
 # the production network that relaxing 1e-10 -> 1e-8 roughly halves wall
 # time with only ~2e-5 position drift after 15 accumulated pulling steps —
 # negligible next to the O(1-10) network scale.
-ACTUATION_TOL = 1e-8
+ACTUATION_TOL = 1e-6
 
 # Own instance (not base.simulate's shared `crf` singleton) so this tol
 # choice doesn't couple to auxetic training's solver.
