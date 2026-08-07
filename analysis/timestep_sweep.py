@@ -334,7 +334,8 @@ def _select_local_threshold_indices(steps, mse1, mse2, n_thresh_steps, eps_min):
 def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                      stiffness_traj, steps, mse1, mse2,
                      n_thresh_steps=50, eps_min=1e-8, k_eigs=10,
-                     n_hessian_traj_steps=20, verbose=True):
+                     n_hessian_traj_steps=20, use_clamped_trajectory=True,
+                     cost_hessian_fn=None, verbose=True):
     """
     Run the full timestep-sweep analysis for one allosteric training result.
 
@@ -354,6 +355,44 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                                      clamped to min(n_hessian_traj_steps, nsteps,
                                      nsteps2) to keep both tasks' arrays the same
                                      length.
+    use_clamped_trajectory : bool   If True (default, matches the original
+                                     behavior of this function), the elastic
+                                     Hessian and saved trajectory are sampled
+                                     along the *clamped* (output-spring) run.
+                                     If False, the clamped run is skipped
+                                     entirely (evaluate_actuation is called
+                                     with compute_clamped=False) and the
+                                     *free* run's trajectory is used instead —
+                                     appropriate for trainers (e.g. a
+                                     gradient-descent trainer) whose loss only
+                                     ever depends on the free run, since mse
+                                     never depends on the clamped run either way.
+    cost_hessian_fn : callable or None
+                                     Function computing the cost-Hessian eigenpairs
+                                     at one checkpoint: cost_hessian_fn(nodes,
+                                     incidence_matrix, task_config, t, stiffness_traj,
+                                     k_eigs=..., verbose=...) -> (eigenvalues, eigenvectors).
+                                     Defaults to _compute_cost_hessian_jax: exact
+                                     autodiff (jax.grad for the base gradient,
+                                     forward-over-reverse jax.jvp(jax.grad(...)) for
+                                     each Lanczos HVP) through training.jax_actuation's
+                                     differentiable JAX-FIRE ramp (training.jax_actuation.
+                                     FREE_CRF) — one physics-ramp-equivalent pass per
+                                     gradient/HVP instead of _compute_cost_hessian_lammps's
+                                     O(n_edges) finite-difference physics calls per
+                                     gradient, repeated every Lanczos iteration.
+                                     Deliberately hardcoded to jax_fire regardless of
+                                     DEFAULT_SOLVER / whichever solver the training run
+                                     actually used (only jax_fire's custom_vjp is
+                                     differentiable — LAMMPS isn't) — this is the one
+                                     piece of the sweep that intentionally does NOT
+                                     mirror training's own evaluation path; the elastic
+                                     Hessian and stiffness/trajectory loss recompute
+                                     below still go through evaluate_actuation and so
+                                     still respect DEFAULT_SOLVER. Pass
+                                     cost_hessian_fn=_compute_cost_hessian_lammps
+                                     explicitly for a solver-matched (or LAMMPS-exact)
+                                     finite-difference cross-check instead.
     k_eigs : int                    number of top (largest positive / algebraic)
                                      cost-Hessian eigenpairs to compute. Does NOT
                                      affect the elastic Hessian, which always
@@ -410,8 +449,9 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
         traj_pos_this_t = []
         for task_idx, (tgt, dxi, nsi) in enumerate(
                 ((tod, dx, nsteps), (tod2, dx2, nsteps2))):
-            mse, nodes_free, nodes_clamped, frames_clamped = evaluate_actuation(
-                nodes, incidence_matrix, k_t, tgt, dxi, nsi, return_trajectory=True)
+            mse, nodes_free, nodes_clamped, frames = evaluate_actuation(
+                nodes, incidence_matrix, k_t, tgt, dxi, nsi, return_trajectory=True,
+                compute_clamped=use_clamped_trajectory)
             recomputed_stiffness_loss[i, task_idx]  = mse
             # "loss from trajectory" here is the same quantity (mse is already
             # evaluated at the recomputed equilibrium, i.e. end of the LAMMPS
@@ -425,7 +465,7 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                 # n_modes=None -> full spectrum; the dense eigh solve below is
                 # unconditional, so truncating here would save no compute.
                 vals, vecs, _ = compute_hessian_spectrum(
-                    frames_clamped[j], edges, k_t, eq_lengths,
+                    frames[j], edges, k_t, eq_lengths,
                     constrained_nodes=LOCAL_CONSTRAINED_NODES, n_modes=None)
                 vals_along_traj.append(vals)
                 vecs_along_traj.append(vecs)
@@ -434,7 +474,7 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
             # Full-resolution positions (not just at traj_hess_idx_per_task) so
             # downstream analyses (e.g. participation ratio) can index into the
             # trajectory themselves without recomputing it.
-            traj_pos_this_t.append(np.stack([np.asarray(p) for p in frames_clamped]))
+            traj_pos_this_t.append(np.stack([np.asarray(p) for p in frames]))
 
         elastic_eigvals_list.append(np.stack(eigvals_this_t))
         elastic_eigvecs_list.append(np.stack(eigvecs_this_t))
@@ -459,10 +499,13 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
         dx2 * (traj_hess_idx_2 + 1),
     ])   # (2, n_hess) — actual cumulative input-node displacement
 
-    cost_before = _compute_cost_hessian_lammps(
+    if cost_hessian_fn is None:
+        cost_hessian_fn = _compute_cost_hessian_jax
+
+    cost_before = cost_hessian_fn(
         nodes, incidence_matrix, task_config, t_indices[0], stiffness_traj,
         k_eigs=k_eigs, verbose=verbose)
-    cost_after = _compute_cost_hessian_lammps(
+    cost_after = cost_hessian_fn(
         nodes, incidence_matrix, task_config, t_indices[-1], stiffness_traj,
         k_eigs=k_eigs, verbose=verbose)
 
@@ -518,8 +561,13 @@ def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffn
     n_edges = len(base_k)
 
     def loss_fn(k):
-        mse1, _, _  = evaluate_actuation(nodes, incidence_matrix, k, tod,  dx,  nsteps)
-        mse2, _, _  = evaluate_actuation(nodes, incidence_matrix, k, tod2, dx2, nsteps2)
+        # compute_clamped=False: mse never depends on the clamped run (see
+        # evaluate_actuation's docstring), so skipping it here is a pure
+        # speedup — every eigsh iteration costs 2*n_edges loss_fn calls.
+        mse1, _, _  = evaluate_actuation(nodes, incidence_matrix, k, tod,  dx,  nsteps,
+                                         compute_clamped=False)
+        mse2, _, _  = evaluate_actuation(nodes, incidence_matrix, k, tod2, dx2, nsteps2,
+                                         compute_clamped=False)
         return 0.5 * (mse1 + mse2)
 
     def grad_fn(k):
@@ -551,6 +599,88 @@ def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffn
     if verbose:
         print(f"  [allosteric sweep] cost Hessian: eigsh (k={k}) ...", flush=True)
     # 'LA' = largest algebraic, i.e. the k most positive eigenvalues.
+    eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LA')
+    order = np.argsort(eigenvalues)
+    return eigenvalues[order], eigenvectors[:, order]
+
+
+def _compute_cost_hessian_jax(nodes, incidence_matrix, task_config, t, stiffness_traj,
+                              k_eigs=10, verbose=True):
+    """
+    Top-k eigenpairs of the combined (task1+task2) loss Hessian w.r.t.
+    stiffnesses, via exact JAX autodiff instead of _compute_cost_hessian_lammps's
+    finite differences.
+
+    Builds the mse1+mse2 loss as a single JAX-traced scalar using
+    training.jax_actuation.strain_network_jax_final_traced (which keeps the
+    whole FIRE ramp a jnp value, unlike evaluate_actuation, whose numpy
+    conversion breaks the autodiff graph and is why the LAMMPS-recipe version
+    needs finite differences at all). The base gradient is one jax.grad call;
+    each Lanczos HVP is one forward-over-reverse jax.jvp(jax.grad(...), (k,),
+    (v,)) call — one physics-ramp-equivalent pass each, vs. _compute_cost_
+    hessian_lammps's O(n_edges) physics calls per gradient (repeated every
+    Lanczos iteration).
+
+    Always uses training.jax_actuation.FREE_CRF (jax_fire), regardless of
+    DEFAULT_SOLVER / whatever solver the training run actually used — see
+    sweep_allosteric's cost_hessian_fn docstring for why (only jax_fire is
+    differentiable; this is the one part of the sweep that intentionally
+    doesn't mirror training's own evaluation path).
+
+    Validated against finite differences on the production geometry_targeted/
+    task_0/realization_0 network (n_edges=253): jax.grad matches central
+    differences on sampled edges to ~1e-3-1e-6 relative error; the jax.jvp HVP
+    matches an independent finite-difference-of-the-exact-gradient reference
+    to ~2e-7 relative error (cosine similarity 1.000000). A vmap-batched
+    finite-difference alternative (computing all edges' perturbations in one
+    batched call instead of this exact-gradient approach) was also tried and
+    discarded — vmap-ing the ~150-step FIRE ramp (each step containing an
+    internal jax.lax.fori_loop(max_steps=1_000_000) with jax.lax.cond
+    branches) blows up XLA compile time; a 16-edge batch didn't finish
+    compiling after 40+ minutes.
+    """
+    import jax
+    import jax.numpy as jnp
+    jax.config.update("jax_enable_x64", True)
+    from scipy.sparse.linalg import LinearOperator, eigsh
+    import training.jax_actuation as jx_act
+
+    tod, tod2 = task_config['tod'], task_config['tod2']
+    dinputdistance, dinputdistance2 = task_config['dinputdistance'], task_config['dinputdistance2']
+    nsteps, nsteps2 = task_config['nsteps'], task_config['nsteps2']
+    dx, dx2 = dinputdistance / nsteps, dinputdistance2 / nsteps2
+
+    base_k = np.asarray(stiffness_traj[t], dtype=float)
+    n_edges = len(base_k)
+    edges = _incidence_to_edges(incidence_matrix)
+    rest_lengths = np.linalg.norm(nodes[edges[:, 1]] - nodes[edges[:, 0]], axis=1)
+
+    def scalar_loss(k_jax):
+        pos1 = jx_act.strain_network_jax_final_traced(
+            jx_act.FREE_CRF, nodes, edges, rest_lengths, k_jax, 0, 1, dx=dx, nsteps=nsteps
+        ).reshape(-1, 2)
+        pos2 = jx_act.strain_network_jax_final_traced(
+            jx_act.FREE_CRF, nodes, edges, rest_lengths, k_jax, 0, 1, dx=dx2, nsteps=nsteps2
+        ).reshape(-1, 2)
+        mse1 = (jnp.linalg.norm(pos1[2] - pos1[3]) - tod) ** 2
+        mse2 = (jnp.linalg.norm(pos2[2] - pos2[3]) - tod2) ** 2
+        return 0.5 * (mse1 + mse2)
+
+    @jax.jit
+    def hvp_jax(k_jax, v_jax):
+        _, Hv = jax.jvp(jax.grad(scalar_loss), (k_jax,), (v_jax,))
+        return Hv
+
+    k0_jax = jnp.asarray(base_k, dtype=jnp.float64)
+
+    def hvp(v):
+        return np.asarray(hvp_jax(k0_jax, jnp.asarray(v, dtype=jnp.float64)))
+
+    k = min(k_eigs, n_edges - 1)
+    H_op = LinearOperator((n_edges, n_edges), matvec=hvp, dtype=float)
+    if verbose:
+        print(f"  [allosteric sweep] cost Hessian (JAX autodiff, jax_fire): "
+              f"eigsh (k={k}) ...", flush=True)
     eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LA')
     order = np.argsort(eigenvalues)
     return eigenvalues[order], eigenvectors[:, order]
