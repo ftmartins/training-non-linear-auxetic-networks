@@ -480,32 +480,17 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         # iteration exactly.
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, solver=solver)
-<<<<<<< HEAD
-        _, mse, update_mag = learning_update(
-=======
         _, mse, delta_K1 = learning_update(
->>>>>>> 9072a0c1620140578a58c9feea29279ed683cf6e
             nodes_free, nodes_clamped, tod, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
 
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod2, dx2, nsteps2, solver=solver)
-<<<<<<< HEAD
-        _, mse2, update_mag2 = learning_update(
-            nodes_free, nodes_clamped, tod2, eq_lengths,
-            stiffnesses, incidence_matrix, ETA, learning_rate)
-
-        delta_K = update_mag + update_mag2
-        delta_K = learning_rate * delta_K#/np.linalg.norm(delta_K)
-
-        stiffnesses = np.clip(stiffnesses + delta_K, K_MIN, K_MAX)
-=======
         _, mse2, delta_K2 = learning_update(
             nodes_free, nodes_clamped, tod2, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
 
         stiffnesses = np.clip(stiffnesses + delta_K1 + delta_K2, K_MIN, K_MAX)
->>>>>>> 9072a0c1620140578a58c9feea29279ed683cf6e
 
         msearray  = np.append(msearray,  mse)
         msearray2 = np.append(msearray2, mse2)
