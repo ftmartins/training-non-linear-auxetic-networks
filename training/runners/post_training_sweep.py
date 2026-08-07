@@ -123,11 +123,29 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
         'nsteps': NSTEPS_TASK1, 'nsteps2': NSTEPS_TASK2,
     }
 
+    # Match training's actual physics backend for the stiffness-loss/elastic-
+    # Hessian recompute (see sweep_allosteric's solver= docstring) instead of
+    # silently falling back to whatever DEFAULT_SOLVER is today. Older
+    # realizations trained before allosteric_trainer.py started writing this
+    # file have no record of it -- fall back to None (evaluate_actuation's own
+    # default) and warn, since that's the pre-existing (unverified) behavior.
+    meta_path = result_path / 'training_meta.json'
+    if meta_path.exists():
+        with open(meta_path) as fh:
+            solver = json.load(fh)['solver']
+    else:
+        from training.runners.allosteric_trainer import DEFAULT_SOLVER
+        solver = None
+        print(f"  WARNING: {meta_path} not found (pre-dates training_meta.json); "
+              f"recomputing with evaluate_actuation's default (currently "
+              f"{DEFAULT_SOLVER!r}), which may not match what actually trained "
+              f"this realization.")
+
     results = sweep_allosteric(
         nodes, incidence_matrix, eq_lengths, task_config,
         stiffness_traj, steps, mse1, mse2,
         n_thresh_steps=n_thresh_steps, eps_min=eps_min, k_eigs=k_eigs,
-        n_hessian_traj_steps=n_hessian_traj_steps,
+        n_hessian_traj_steps=n_hessian_traj_steps, solver=solver,
     )
     return result_path, results
 

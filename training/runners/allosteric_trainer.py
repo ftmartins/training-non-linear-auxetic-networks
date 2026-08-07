@@ -20,6 +20,7 @@ fresh realization index (rid + N_REALIZATIONS).
 """
 
 import argparse
+import json
 import os
 import sys
 import random
@@ -466,16 +467,30 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
     pbar = tqdm(range(n_steps),
                 desc=f'(mse1={np.nan:.4e}, mse2={np.nan:.4e}, best_combined={best_combined_mse:.4e}), updated_mag={update_mag:.4e}')
     for j in pbar:
-        # Task 1
+        # Task 1 and task 2 both evaluate against the SAME stiffnesses (the
+        # value that will be checkpointed/saved for this iteration) instead
+        # of task 2 seeing task 1's already-applied update — that alternating
+        # scheme left mse2[j] computed at an intermediate stiffness state
+        # that was never itself saved anywhere, so total_loss/mse1/mse2 could
+        # never be exactly reconstructed from a saved stiffness snapshot (see
+        # analysis.timestep_sweep._select_local_threshold_indices). Both
+        # updates are computed here but only applied together afterward, so
+        # mse1[j] and mse2[j] are both exactly loss(stiffnesses-at-start-of-
+        # iteration-j), matching stiffnesses_traj/stiffnesses.npy for that
+        # iteration exactly.
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, solver=solver)
+<<<<<<< HEAD
         _, mse, update_mag = learning_update(
+=======
+        _, mse, delta_K1 = learning_update(
+>>>>>>> 9072a0c1620140578a58c9feea29279ed683cf6e
             nodes_free, nodes_clamped, tod, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
 
-        # Task 2
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod2, dx2, nsteps2, solver=solver)
+<<<<<<< HEAD
         _, mse2, update_mag2 = learning_update(
             nodes_free, nodes_clamped, tod2, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
@@ -484,6 +499,13 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         delta_K = learning_rate * delta_K#/np.linalg.norm(delta_K)
 
         stiffnesses = np.clip(stiffnesses + delta_K, K_MIN, K_MAX)
+=======
+        _, mse2, delta_K2 = learning_update(
+            nodes_free, nodes_clamped, tod2, eq_lengths,
+            stiffnesses, incidence_matrix, ETA, learning_rate)
+
+        stiffnesses = np.clip(stiffnesses + delta_K1 + delta_K2, K_MIN, K_MAX)
+>>>>>>> 9072a0c1620140578a58c9feea29279ed683cf6e
 
         msearray  = np.append(msearray,  mse)
         msearray2 = np.append(msearray2, mse2)
@@ -660,6 +682,27 @@ def main():
 
     print(geom_dir, output_path, 'test outputpath')
     os.makedirs(output_path, exist_ok=True)
+
+    # Persist which physics backend this realization is (or resumes being)
+    # trained with. Nothing else records this — evaluate_actuation's solver
+    # choice used to only be visible in the SLURM stdout log — so
+    # analysis.timestep_sweep.sweep_allosteric's post-training recompute had
+    # no way to match training's actual solver and silently fell back to
+    # whatever DEFAULT_SOLVER happens to be at sweep time (which has already
+    # changed once: lammps -> jax_fire). post_training_sweep.py reads this
+    # file and threads it through as sweep_allosteric's solver= argument.
+    meta_path = os.path.join(output_path, 'training_meta.json')
+    if os.path.exists(meta_path):
+        with open(meta_path) as fh:
+            training_meta = json.load(fh)
+        if training_meta.get('solver') != solver:
+            print(f"  WARNING: --solver={solver!r} but training_meta.json records this "
+                  f"realization as started with solver={training_meta.get('solver')!r}; "
+                  f"keeping the recorded solver (existing mse history was produced with it).")
+            solver = training_meta['solver']
+    else:
+        with open(meta_path, 'w') as fh:
+            json.dump({'solver': solver}, fh, indent=2)
 
     try:
         # ── Build geometry (load if present, recreate from seed if missing) ───
