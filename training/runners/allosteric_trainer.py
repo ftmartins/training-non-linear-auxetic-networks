@@ -476,8 +476,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         # analysis.timestep_sweep._select_local_threshold_indices). Both
         # updates are computed here but only applied together afterward, so
         # mse1[j] and mse2[j] are both exactly loss(stiffnesses-at-start-of-
-        # iteration-j), matching stiffnesses_traj/stiffnesses.npy for that
-        # iteration exactly.
+        # iteration-j).
         _, nodes_free, nodes_clamped = evaluate_actuation(
             nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, solver=solver)
         _, mse, delta_K1 = learning_update(
@@ -490,7 +489,27 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             nodes_free, nodes_clamped, tod2, eq_lengths,
             stiffnesses, incidence_matrix, ETA, learning_rate)
 
-        stiffnesses = np.clip(stiffnesses + delta_K1 + delta_K2, K_MIN, K_MAX)
+        # Snapshot the stiffnesses that mse/mse2 above were actually measured
+        # at, BEFORE folding in this iteration's update — this (not the
+        # post-update `stiffnesses` a few lines down) is what best_stiffnesses
+        # and stiffnesses_traj save below, so every persisted (stiffness,
+        # loss) pair for analysis is exactly self-consistent, including at
+        # the very last checkpoint of a run (previously that pairing only
+        # became correct retroactively, once training had produced a *later*
+        # mse entry to catch up to the checkpointed stiffness — which never
+        # happens for the final checkpoint, and was being silently papered
+        # over by an index-clamp in
+        # analysis.timestep_sweep._select_local_threshold_indices instead of
+        # actually matching). `stiffnesses.npy`/`stiffnesses_ckpt.npy` below
+        # deliberately keep saving the POST-update value (unchanged) since
+        # those are the resume checkpoint — resuming needs the state the
+        # next iteration should start from, not the state whose loss was
+        # last measured; do not "align" them to measured_stiffnesses too, or
+        # resume will silently replay this iteration's update.
+        measured_stiffnesses = stiffnesses
+        stiffnesses = np.clip(stiffnesses + learning_rate * (delta_K1 + delta_K2), K_MIN, K_MAX)
+
+        update_mag = np.mean(np.log10(np.abs(learning_rate * (delta_K1 + delta_K2))))
 
         msearray  = np.append(msearray,  mse)
         msearray2 = np.append(msearray2, mse2)
@@ -498,11 +517,11 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         combined = (mse + mse2) / 2.0
         if combined < best_combined_mse and not np.any(np.isnan(stiffnesses)):
             best_combined_mse = combined
-            best_stiffnesses  = stiffnesses.copy()
+            best_stiffnesses  = measured_stiffnesses.copy()
             best_updated      = True
 
         pbar.set_description(
-                f'(loss={(mse+mse):.4e}, mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e}), update_mag={np.mean(np.log10(np.abs(update_mag))):.4e}')
+                f'(loss={(mse+mse):.4e}, mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e}), update_mag={update_mag:.4e}')
 
         global_step = step_offset + j + 1
         if global_step % 50 == 0:
@@ -520,15 +539,23 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                 np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'),
                            [best_combined_mse])
                 best_updated = False
-            # Append current stiffnesses to trajectory (one row per checkpoint).
+            # Append measured_stiffnesses (see note above the snapshot,
+            # earlier in this loop) — the stiffness mse1/mse2's last entry
+            # was actually computed at — paired with its own exact array
+            # index (len(msearray) - 1), not global_step. That index is
+            # always in range for mse1[steps[c]]/mse2[steps[c]] (see
+            # analysis.timestep_sweep._select_local_threshold_indices) since
+            # it is, by construction, the index msearray/msearray2 were just
+            # appended to — including on this, possibly the run's last,
+            # checkpoint.
             traj_path  = os.path.join(output_path, 'stiffnesses_traj.npy')
             steps_path = os.path.join(output_path, 'stiffnesses_traj_steps.npy')
             if os.path.exists(traj_path) and os.path.exists(steps_path):
-                traj  = np.vstack([np.load(traj_path),  stiffnesses])
-                steps = np.append(np.load(steps_path), global_step)
+                traj  = np.vstack([np.load(traj_path),  measured_stiffnesses])
+                steps = np.append(np.load(steps_path), len(msearray) - 1)
             else:
-                traj  = stiffnesses[np.newaxis, :]
-                steps = np.array([global_step])
+                traj  = measured_stiffnesses[np.newaxis, :]
+                steps = np.array([len(msearray) - 1])
             np.save(traj_path,  traj)
             np.save(steps_path, steps)
 
@@ -545,15 +572,23 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                 np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'),
                            [best_combined_mse])
                 best_updated = False
-            # Append current stiffnesses to trajectory (one row per checkpoint).
+            # Append measured_stiffnesses (see note above the snapshot,
+            # earlier in this loop) — the stiffness mse1/mse2's last entry
+            # was actually computed at — paired with its own exact array
+            # index (len(msearray) - 1), not global_step. That index is
+            # always in range for mse1[steps[c]]/mse2[steps[c]] (see
+            # analysis.timestep_sweep._select_local_threshold_indices) since
+            # it is, by construction, the index msearray/msearray2 were just
+            # appended to — including on this, possibly the run's last,
+            # checkpoint.
             traj_path  = os.path.join(output_path, 'stiffnesses_traj.npy')
             steps_path = os.path.join(output_path, 'stiffnesses_traj_steps.npy')
             if os.path.exists(traj_path) and os.path.exists(steps_path):
-                traj  = np.vstack([np.load(traj_path),  stiffnesses])
-                steps = np.append(np.load(steps_path), global_step)
+                traj  = np.vstack([np.load(traj_path),  measured_stiffnesses])
+                steps = np.append(np.load(steps_path), len(msearray) - 1)
             else:
-                traj  = stiffnesses[np.newaxis, :]
-                steps = np.array([global_step])
+                traj  = measured_stiffnesses[np.newaxis, :]
+                steps = np.array([len(msearray) - 1])
             np.save(traj_path,  traj)
             np.save(steps_path, steps)
 
