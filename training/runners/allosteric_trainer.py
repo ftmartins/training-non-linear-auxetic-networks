@@ -46,7 +46,7 @@ K_MAX    = 1e1
 ETA      = 1.0
 K_OUTPUT = 1e3
 LR_TARGET_LOG = -3.0   # target mean(log10|delta_K|)
-LEARNING_RATE = 5e-2
+LEARNING_RATE = 1e-2
 
 # Physics backend for evaluate_actuation: 'jax_fire' (default, same
 # differentiable FIRE solver as auxetic training) or 'lammps' (legacy).
