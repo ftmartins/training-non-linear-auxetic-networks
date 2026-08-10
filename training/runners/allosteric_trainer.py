@@ -509,6 +509,8 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         measured_stiffnesses = stiffnesses
         stiffnesses = np.clip(stiffnesses + learning_rate * (delta_K1 + delta_K2), K_MIN, K_MAX)
 
+        update_mag = np.mean(np.log10(np.abs(learning_rate * (delta_K1 + delta_K2))))
+
         msearray  = np.append(msearray,  mse)
         msearray2 = np.append(msearray2, mse2)
 
@@ -519,7 +521,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             best_updated      = True
 
         pbar.set_description(
-                f'(loss={(mse+mse):.4e}, mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e}), update_mag={np.mean(np.log10(np.abs(update_mag))):.4e}')
+                f'(loss={(mse+mse):.4e}, mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e}), update_mag={update_mag:.4e}')
 
         global_step = step_offset + j + 1
         if global_step % 50 == 0:
