@@ -572,6 +572,7 @@ def finish_training_GD_auxetic_batch_jax(
     task_seed=None, realization_seed=None, save_interval=10,
     task_config=None, TARGETED_RESULTS_DIR=None,
     fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE, loss_tol=1e-6,
+    fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2,
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
@@ -597,7 +598,18 @@ def finish_training_GD_auxetic_batch_jax(
         save_interval: Save every N steps
         task_config, TARGETED_RESULTS_DIR: For checkpoint saving
         fire_max_steps: Max steps for JAX FIRE solver
-        fire_tol: Convergence tolerance for JAX FIRE solver
+        fire_tol: Convergence tolerance for JAX FIRE solver — applied at every
+            strain step of every quasistatic trajectory. No step is
+            under-converged.
+        fire_dt_max, fire_finc, fire_dt_init: FIRE step-size hyperparameters
+            (default max step 0.1, growth factor 1.1, initial step 0.01).
+            Tuned defaults here (1.0, 1.3, 0.01) reach the *same* force-tol
+            equilibrium in far fewer leapfrog iterations — validated (on the
+            real targeted-auxetic networks) to converge to the same trajectory
+            branch as the untuned defaults (identical final geometry/edge
+            topology), just ~6-9x faster. dt_max=2.0 was tested and found to
+            destabilize the integrator (diverges to NaN) — stay well under it;
+            these defaults have margin. See docs/jax_solver_speedup.md.
         loss_tol: Early-stopping threshold — training stops once loss drops below this
 
     Returns:
@@ -621,10 +633,21 @@ def finish_training_GD_auxetic_batch_jax(
         for cs, ext in zip(source_compression_strain_list, desired_target_extension_list)
     ]
 
-    # Build differentiable FIRE solver
+    # Build differentiable FIRE solver — same tol at every strain step as the
+    # original (no step is under-converged); only the step-size hyperparameters
+    # are tuned (see fire_dt_max/fire_finc docstring above) so the *same*
+    # force-balanced equilibrium is reached in far fewer iterations. Network
+    # topology is known concretely here (before anything becomes a JAX
+    # tracer), so pass it through to enable the sparse IFT-adjoint backward.
+    _edges_np = np.array(network.edges, dtype=np.int32)
+    _n_dof_np = 2 * len(network.positions)
+    _boundary_np = np.concatenate([np.asarray(top_nodes), np.asarray(bottom_nodes)])
+    _source_dof_np = np.concatenate([_boundary_np * 2, _boundary_np * 2 + 1])
     crf_local = make_compute_response_fire(
         d=2, force_type=force_type,
-        max_steps=fire_max_steps, tol=fire_tol
+        max_steps=fire_max_steps, tol=fire_tol,
+        dt_max=fire_dt_max, finc=fire_finc, dt_init=fire_dt_init,
+        edges_np=_edges_np, n_dof_np=_n_dof_np, source_nodes_dof_np=_source_dof_np,
     )
 
     # Pre-convert static arrays to JAX
