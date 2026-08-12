@@ -521,7 +521,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             best_updated      = True
 
         pbar.set_description(
-                f'(loss={(mse+mse):.4e}, mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e}), update_mag={update_mag:.4e}')
+                f'(loss={(mse+mse2):.4e}, mse1={mse:.4e}, mse2={mse2:.4e}, best_combined={best_combined_mse:.4e}), update_mag={update_mag:.4e}')
 
         global_step = step_offset + j + 1
         if global_step % 50 == 0:

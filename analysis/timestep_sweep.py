@@ -319,25 +319,25 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
 def _select_local_threshold_indices(steps, mse1, mse2, n_thresh_steps, eps_min):
     """Checkpoint-aligned timestep selection for allosteric results.
 
-    `steps` (1-indexed global step numbers) indexes into the sparse
-    `stiffnesses_traj.npy` checkpoints. `stiffnesses_traj[c]` (checkpoint at
-    global_step `steps[c]`) is saved *after* iteration `j = steps[c] - 1`
-    completes both its task1 and task2 stiffness updates — i.e. it's the
-    stiffness in effect at the *start* of the next training iteration,
-    `j = steps[c]` (0-indexed). `mse1[j]` is recorded from task1's evaluation
-    at the start of iteration `j`, before that iteration's own update — so
-    `mse1[steps[c]]` (NOT `mse1[steps[c] - 1]`) is the entry computed at
-    exactly `stiffnesses_traj[c]`. Indexing with `steps - 1` (as an earlier
-    version of this function, and NewFiguresJune.ipynb's
-    load_local_stiffness_trajectory, both do) is off by one iteration: it
-    pairs each checkpoint with the loss from the *previous* iteration's
-    stiffness instead of its own.
+    `steps[c]` indexes into `mse1`/`mse2` directly: `mse1[steps[c]]` and
+    `mse2[steps[c]]` are both computed at exactly `stiffnesses_traj[c]`
+    (allosteric_trainer._run_training_loop snapshots the pre-update
+    stiffness — the one mse1/mse2 were actually evaluated at, and that
+    `stiffnesses_traj[c]` stores — and pairs it with that same iteration's
+    exact index into mse1/mse2, i.e. `len(mse1) - 1` at save time; task1 and
+    task2 both evaluate against that same pre-update stiffness, so mse1 and
+    mse2 are equally exact, unlike under the older alternating-update
+    trainer). This holds even for a run's *last* checkpoint, since the index
+    stored alongside each checkpoint is the mse array's own current length
+    at save time, not a separately-derived step count that could run ahead
+    of what mse1/mse2 actually contain.
 
-    mse2 has no exact alignment under either indexing: task2 is evaluated
-    after task1's update has already been applied within the same iteration,
-    at an intermediate stiffness state that's never itself checkpointed.
-    `mse2[steps[c]]` is still the closest available value (same iteration
-    `steps[c]` that starts at `stiffnesses_traj[c]`), just not an exact match.
+    Realizations trained before this pairing was introduced (or resumed
+    across the change) may still have `steps` entries following the older
+    convention, where the final checkpoint's `steps[c]` can equal
+    `len(mse1)` (one past the end, from a stiffness snapshot taken *after*
+    the update that produced it) — hence the defensive clip below, which
+    should never trigger for a checkpoint saved under the current trainer.
     """
     loss_full = np.asarray(mse1) + np.asarray(mse2)
     idx = np.clip(np.asarray(steps, dtype=int), 0, len(loss_full) - 1)

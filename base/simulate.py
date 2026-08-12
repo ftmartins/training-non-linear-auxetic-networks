@@ -16,6 +16,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
+from jax.experimental.sparse.linalg import spsolve as jsl_spsolve
 
 from .fire_minimize_memview_cy import fire_minimize_dof
 from .config import FORCE_TOL
@@ -556,15 +557,83 @@ def compute_quasistatic_trajectory_full_cycle(network, amp, top_nodes, bottom_no
 # JAX-DIFFERENTIABLE FIRE SOLVER
 # ============================================================================
 
+def _build_adjoint_csr_structure(edges_np, n_dof, mask_np):
+    """
+    Precompute (in plain numpy, fully concrete — no JAX tracing involved) the
+    static CSR sparsity structure for the IFT adjoint matrix M = J.T used in
+    `crf_bwd`'s quadratic-force-law fast path.
+
+    Must be called with genuinely concrete numpy arrays — this only works
+    because callers (e.g. `finish_training_GD_auxetic_batch_jax`) have plain
+    numpy network topology available *before* anything is converted to a JAX
+    array. Trying to do this same numpy-concretization from inside `crf_bwd`
+    itself fails: by the time `edges` reaches there, it has already passed
+    through a `jnp.asarray(...)` cast upstream (in
+    `compute_quasistatic_trajectory_auxetic_jax`), which re-abstracts it into
+    a tracer under the enclosing `jax.jit`, even though its value never
+    actually changes.
+
+    Returns a dict of static numpy/jax arrays consumed by `crf_bwd`, or None
+    if inputs weren't provided (caller should fall back to the dense path).
+    """
+    i_n, j_n = edges_np[:, 0], edges_np[:, 1]
+    ri_np, rj_np = 2 * i_n, 2 * j_n
+    rows_np = np.concatenate([ri_np, ri_np, ri_np + 1, ri_np + 1,
+                               rj_np, rj_np, rj_np + 1, rj_np + 1,
+                               ri_np, ri_np, ri_np + 1, ri_np + 1,
+                               rj_np, rj_np, rj_np + 1, rj_np + 1])
+    cols_np = np.concatenate([ri_np, ri_np + 1, ri_np, ri_np + 1,
+                               rj_np, rj_np + 1, rj_np, rj_np + 1,
+                               rj_np, rj_np + 1, rj_np, rj_np + 1,
+                               ri_np, ri_np + 1, ri_np, ri_np + 1])
+    diag_np = np.arange(n_dof)
+    pairs = np.stack([np.concatenate([rows_np, diag_np]),
+                       np.concatenate([cols_np, diag_np])], axis=1)
+    unique_pairs, inverse = np.unique(pairs, axis=0, return_inverse=True)
+    inverse = np.asarray(inverse).reshape(-1)
+    nnz = unique_pairs.shape[0]
+    u_rows, u_cols = unique_pairs[:, 0], unique_pairs[:, 1]
+    indptr_np = np.searchsorted(u_rows, np.arange(n_dof + 1)).astype(np.int32)
+    indices_np = u_cols.astype(np.int32)
+    diag_slot_np = np.where(u_rows == u_cols)[0].astype(np.int32)  # one per row
+    return dict(
+        nnz=nnz,
+        indices=jnp.asarray(indices_np),
+        indptr=jnp.asarray(indptr_np),
+        diag_slot=jnp.asarray(diag_slot_np),
+        mapping_idx=jnp.asarray(inverse[:len(rows_np)]),
+        mask_cols_for_raw=jnp.asarray(mask_np[cols_np]),
+    )
+
+
 def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
                                 alpha_start=0.1, finc=1.1, fdec=0.5, falpha=0.99,
-                                max_steps=1_000_000, tol=1e-6, force_type="quadratic"):
+                                max_steps=1_000_000, tol=1e-6, force_type="quadratic",
+                                edges_np=None, n_dof_np=None, source_nodes_dof_np=None):
     """
     Returns a JAX-differentiable FIRE solver (custom VJP).
 
     Signature: (stiffnesses, edges, rest_lengths, positions0,
                 source_nodes_dof, imposed_positions) → final_positions
+
+    edges_np, n_dof_np, source_nodes_dof_np: optional concrete numpy/int
+        topology info known ahead of time (n_dof_np = 2 * n_nodes; must be
+        given explicitly rather than inferred from edges, since a node with
+        no incident edges would silently undercount it). When provided (and
+        d == 2, force_type == "quadratic"), the IFT adjoint solve in the
+        backward pass uses a precomputed sparse CSR structure + JAX's native
+        sparse solver instead of a dense linear solve — same math, faster,
+        because the sparsity *pattern* depends only on topology (known here)
+        while the matrix *values* stay fully JAX-traced/dynamic per call. If
+        omitted, falls back to the dense analytic path (still exact, just
+        without the sparse speedup).
     """
+    _sparse_struct = None
+    if edges_np is not None and n_dof_np is not None and d == 2 and force_type == "quadratic":
+        mask_np_static = np.ones(n_dof_np, dtype=bool)
+        if source_nodes_dof_np is not None:
+            mask_np_static[np.asarray(source_nodes_dof_np)] = False
+        _sparse_struct = _build_adjoint_csr_structure(np.asarray(edges_np), n_dof_np, mask_np_static)
 
     def _fire_forward(stiffnesses, edges, rest_lengths, positions0,
                       source_nodes_dof, imposed_positions):
@@ -576,8 +645,29 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
         def energy_fn(pos_flat, k):
             return elastic_energy(pos_flat, edges, rest_lengths, k, d=d, force_type=force_type)
 
-        def forces(pos_flat, k):
-            return jax.grad(energy_fn, argnums=0)(pos_flat, k)
+        if d == 2 and force_type == "quadratic":
+            # Closed-form dE/dp (== jax.grad(energy_fn) for the quadratic force
+            # law, verified to match to float64 machine precision) — this is
+            # the innermost, by-far-most-called operation in FIRE (2 evals per
+            # iteration, hundreds to thousands of iterations per quasistatic
+            # step), so avoiding jax.grad's generic reverse-mode bookkeeping
+            # here costs nothing and is a strict subset of what crf_bwd
+            # already computes analytically for the same physics.
+            i_n, j_n = edges[:, 0], edges[:, 1]
+
+            def forces(pos_flat, k):
+                pos = pos_flat.reshape(-1, 2)
+                r_ij = pos[j_n] - pos[i_n]
+                dist = jnp.linalg.norm(r_ij, axis=1)
+                coef = k * (dist - rest_lengths) / dist
+                contrib = coef[:, None] * r_ij
+                g = jnp.zeros_like(pos)
+                g = g.at[j_n].add(contrib)
+                g = g.at[i_n].add(-contrib)
+                return g.flatten()
+        else:
+            def forces(pos_flat, k):
+                return jax.grad(energy_fn, argnums=0)(pos_flat, k)
 
         vel0 = jnp.zeros_like(positions0)
         pos0 = positions0.at[source_nodes_dof].set(imposed_positions)
@@ -662,6 +752,69 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
         n_dof = pos_final.shape[0]
         mask = jnp.ones((n_dof,), dtype=bool).at[jnp.asarray(source_nodes_dof, dtype=jnp.int32)].set(False)
 
+        if d == 2 and force_type == "quadratic":
+            # Closed-form IFT adjoint: for a quadratic spring network, R = masked
+            # dE/dp and its Jacobians w.r.t. p and k are known analytically per
+            # edge (each edge only touches its own 2x2 stiffness block, and
+            # dR/dk_e = stretch_e * r_hat_e, independent of jax.jacobian's
+            # generic — and here, dense, O(n_dof) or O(n_edges) reverse-mode
+            # sweep-based — construction). Same O(n_edges) formula as
+            # `_grad_k_from_adjoint`, used by the numpy/Newton IFT path.
+            pos = pos_final.reshape(-1, 2)
+            i_n, j_n = edges[:, 0], edges[:, 1]
+            r_ij = pos[j_n] - pos[i_n]
+            norms = jnp.linalg.norm(r_ij, axis=1)
+            stretch = norms - rest_lengths
+            t1 = stiffnesses * (1.0 - rest_lengths / norms)
+            t2 = stiffnesses * rest_lengths / norms ** 3
+            dxe, dye = r_ij[:, 0], r_ij[:, 1]
+            K00 = t1 + t2 * dxe ** 2
+            K01 = t2 * dxe * dye
+            K11 = t1 + t2 * dye ** 2
+            ri, rj = 2 * i_n, 2 * j_n
+            dxh = dxe / norms; dyh = dye / norms
+
+            if _sparse_struct is not None:
+                # M = J.T, where J = H*mask[:,None] (zero constrained ROWS of
+                # H). By H's symmetry, J.T[r,c] = J[c,r] = H[c,r]*mask[c] —
+                # i.e. M is H masked by COLUMN instead of row, same sparsity
+                # pattern as H, so no explicit transpose is needed: just mask
+                # the raw per-edge values by their COLUMN before scattering
+                # into the precomputed CSR structure (topology-only, built
+                # once in plain numpy — see `_build_adjoint_csr_structure`).
+                raw_vals = jnp.concatenate([K00, K01, K01, K11, K00, K01, K01, K11,
+                                             -K00, -K01, -K01, -K11, -K00, -K01, -K01, -K11])
+                data = (jnp.zeros(_sparse_struct["nnz"], dtype=pos_final.dtype)
+                        .at[_sparse_struct["mapping_idx"]].add(raw_vals * _sparse_struct["mask_cols_for_raw"]))
+                data = data.at[_sparse_struct["diag_slot"]].add(1e-8)  # same regularizer as dense path
+                w = jsl_spsolve(data, _sparse_struct["indices"], _sparse_struct["indptr"],
+                                 cot_pos_flat, tol=1e-12)
+            else:
+                H = jnp.zeros((n_dof, n_dof), dtype=pos_final.dtype)
+                H = H.at[ri, ri].add(K00); H = H.at[ri, ri + 1].add(K01)
+                H = H.at[ri + 1, ri].add(K01); H = H.at[ri + 1, ri + 1].add(K11)
+                H = H.at[rj, rj].add(K00); H = H.at[rj, rj + 1].add(K01)
+                H = H.at[rj + 1, rj].add(K01); H = H.at[rj + 1, rj + 1].add(K11)
+                H = H.at[ri, rj].add(-K00); H = H.at[ri, rj + 1].add(-K01)
+                H = H.at[ri + 1, rj].add(-K01); H = H.at[ri + 1, rj + 1].add(-K11)
+                H = H.at[rj, ri].add(-K00); H = H.at[rj, ri + 1].add(-K01)
+                H = H.at[rj + 1, ri].add(-K01); H = H.at[rj + 1, ri + 1].add(-K11)
+                J = H * mask[:, None]  # zero constrained ROWS only, matching R's masking
+                J_reg = J + 1e-8 * jnp.eye(n_dof, dtype=J.dtype)
+                w = jsp_linalg.solve(J_reg.T, cot_pos_flat)
+
+            # dR_dk's rows are zero at constrained dof (R is identically zero
+            # there, so all its derivatives are too) — mask w the same way
+            # before contracting, or a constrained dof's near-arbitrary solved
+            # w-value (its column in M is ~singular, only the epsilon
+            # regularizer pins it) leaks spuriously into the result.
+            w = jnp.where(mask, w, 0.0)
+
+            wi_x, wi_y = w[ri], w[ri + 1]
+            wj_x, wj_y = w[rj], w[rj + 1]
+            grad_k = stretch * (dxh * (wi_x - wj_x) + dyh * (wi_y - wj_y))
+            return (grad_k, None, None, None, None, None)
+
         def energy_fn(p_flat, k):
             return elastic_energy(p_flat, edges, rest_lengths, k, d=d, force_type=force_type)
 
@@ -714,6 +867,18 @@ def compute_quasistatic_trajectory_auxetic_jax(crf_fn, stiffnesses, edges, rest_
     all_boundary = jnp.concatenate([top_nodes, bottom_nodes])
     source_nodes_dof = jnp.concatenate([all_boundary * d, all_boundary * d + 1])
 
+    # crf_fn's custom_vjp already returns None (no gradient) for its `positions0`
+    # input, so intermediate steps' contribution to d(final_pos)/d(stiffnesses)
+    # via position warm-starting is already cut. But *stiffnesses* is passed
+    # un-stopped to every step, so every intermediate step still triggers a full
+    # custom_vjp backward pass whose result is multiplied by a cotangent that is
+    # analytically zero (only the final step's output feeds the loss). Stopping
+    # the gradient on `stiffnesses` for all but the last step is a no-op on the
+    # forward values (stop_gradient is identity forward) and removes those
+    # zero-valued backward passes entirely — same trajectory, same loss, same
+    # total gradient, ~n_steps/1 fewer adjoint solves.
+    stiffnesses_stopped = jax.lax.stop_gradient(stiffnesses)
+
     current_pos = positions_flat
     for step in range(n_steps):
         frac = step / (n_steps - 1)
@@ -723,7 +888,8 @@ def compute_quasistatic_trajectory_auxetic_jax(crf_fn, stiffnesses, edges, rest_
             x_top_init, x_bottom_init,
             y_top_new + top_offsets, y_bottom_init,
         ])
-        current_pos = crf_fn(stiffnesses, edges, rest_lengths,
+        step_stiffnesses = stiffnesses if step == n_steps - 1 else stiffnesses_stopped
+        current_pos = crf_fn(step_stiffnesses, edges, rest_lengths,
                              current_pos, source_nodes_dof, imposed_positions)
 
     return current_pos
