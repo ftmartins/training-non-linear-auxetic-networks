@@ -72,8 +72,26 @@ from training.src.checkpoint_manager import (
     get_training_result_path,
     _nt_filename,
     results_dir_for_gradient_method,
+    save_run_metadata,
+    save_run_code_snapshot,
+    job_has_critical_mismatch,
+    reset_job,
 )
 import pickle
+
+# Code archived alongside each job's results (see save_run_code_snapshot) so
+# the exact code that produced it is recoverable without relying on git
+# history/dirty state alone.
+_CODE_SNAPSHOT_FILES = [
+    Path(__file__),
+    _SRC / 'targeted_task_generator.py',
+    _SRC / 'task_generator.py',
+    _SRC / 'checkpoint_manager.py',
+    _SRC / 'training_functions.py',
+    _SRC / 'run_provenance.py',
+    _ROOT / 'base' / 'config.py',
+    _ROOT / 'base' / 'network_utils.py',
+]
 
 # Learning-rate reduction factor applied when NaN is detected in saved results
 LR_NAN_REDUCTION = 0.1
@@ -86,7 +104,7 @@ from training.src.training_functions import (
 TRAINING_FUNCTIONS_AVAILABLE = True
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
-                        gradient_method='newton', network_type=NETWORK_TYPE):
+                        gradient_method='newton', network_type=NETWORK_TYPE, overwrite=False):
     """
     Run a single targeted training job with checkpoint support.
 
@@ -98,6 +116,13 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         use_checkpoint: Whether to use checkpointing
         gradient_method: 'newton' (IFT, default), 'newton_fd' (Newton loss + finite-difference
             gradient), 'jax' (autodiff), or 'fire'/'parallel' (Cython FIRE + finite-difference)
+        overwrite: If False (default) and this job's recorded solver/gradient_method/
+            learning_rate/k_min/k_max/force_tol conflict with the current run's values,
+            raises HyperparameterMismatchError instead of continuing (n_steps is exempt —
+            resuming to train longer is fine). If True, the job's saved state (checkpoint,
+            results, meta) is wiped and restarted from scratch under the new hyperparameters
+            — never resumed under a relabeled meta, which would make training_meta.json
+            describe a trajectory that never actually happened.
 
     Returns:
         success: Boolean indicating success
@@ -114,6 +139,33 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     # all write to the same task/realization otherwise, silently overwriting each
     # other's checkpoints and results).
     results_dir = results_dir_for_gradient_method(TARGETED_RESULTS_DIR, gradient_method)
+
+    # Guard against silently mixing incompatible hyperparameters into one
+    # saved trajectory. Must run BEFORE any NaN/checkpoint/completion check —
+    # resuming a checkpoint trained under OLD hyperparameters and merely
+    # relabeling training_meta.json with the NEW ones would make it describe
+    # a run that never actually happened.
+    critical_hparams = {
+        'learning_rate': LEARNING_RATE,
+        'k_min': VMIN,
+        'k_max': VMAX,
+        'force_tol': FORCE_TOL,
+        'gradient_method': gradient_method,
+    }
+    if job_has_critical_mismatch(task_id, realization_seed, critical_hparams,
+                                 results_dir=results_dir, network_type=network_type):
+        if not overwrite:
+            print(f"\n{'='*80}")
+            print(f"ERROR: Targeted Task {task_id}, Realization {realization_seed}")
+            print(f"Recorded solver/gradient_method/learning_rate/k_min/k_max/force_tol "
+                  f"differ from this run's. Pass overwrite=True (--overwrite) to wipe and "
+                  f"restart from scratch under the new hyperparameters.")
+            print(f"{'='*80}\n")
+            return False
+        print(f"  overwrite=True: recorded hyperparameters differ from this run's — wiping "
+              f"saved state for task {task_id}, realization {realization_seed} and "
+              f"restarting from scratch under the new hyperparameters.")
+        reset_job(task_id, realization_seed, results_dir=results_dir, network_type=network_type)
 
     # Check for NaN in previously saved results (takes priority over completion check)
     nan_detected = has_nan_in_results(task_id, realization_seed,
@@ -249,6 +301,31 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         print(f"    Strain steps: {N_STRAIN_STEPS}")
         print(f"    Force tolerance: {FORCE_TOL}")
 
+        # Record the nominal learning rate (unmodified by NaN-recovery
+        # scaling — recovery_lr_scale is tracked separately so the actually-
+        # applied effective_lr = learning_rate * recovery_lr_scale is still
+        # derivable) + which code version (git commit) invoked it. Raises
+        # HyperparameterMismatchError (caught below) if this job was
+        # previously recorded with different solver/gradient_method/
+        # learning_rate/k_min/k_max/force_tol and overwrite=False.
+        save_run_metadata(
+            task_id, realization_seed,
+            hyperparams={
+                'learning_rate': LEARNING_RATE,
+                'recovery_lr_scale': recovery_lr_scale,
+                'k_min': VMIN,
+                'k_max': VMAX,
+                'n_steps': N_STEPS,
+                'force_tol': FORCE_TOL,
+                'gradient_method': gradient_method,
+            },
+            results_dir=results_dir,
+            network_type=network_type,
+            overwrite=overwrite,
+        )
+        save_run_code_snapshot(task_id, realization_seed, _CODE_SNAPSHOT_FILES,
+                               results_dir=results_dir, network_type=network_type)
+
         # 5. Run training
         if verbose:
             print("Step 4: Running training...")
@@ -359,7 +436,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         return False
 
 
-def run_all_targeted(resume=True, verbose=False, gradient_method='newton', network_type=NETWORK_TYPE):
+def run_all_targeted(resume=True, verbose=False, gradient_method='newton', network_type=NETWORK_TYPE,
+                     overwrite=False):
     """
     Run all 5 targeted training jobs sequentially.
 
@@ -369,6 +447,7 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
         gradient_method: 'newton' (IFT, default), 'newton_fd' (Newton loss + finite-difference
             gradient), 'jax' (autodiff), or 'fire'/'parallel' (Cython FIRE + finite-difference)
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+        overwrite: Passed through to run_single_training (see there).
     """
     print(f"\n{'#'*80}")
     print(f"# TARGETED ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -405,7 +484,8 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
     for idx, (task_id, realization_seed) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
         success = run_single_training(task_id, realization_seed, verbose=verbose,
-                                      gradient_method=gradient_method, network_type=network_type)
+                                      gradient_method=gradient_method, network_type=network_type,
+                                      overwrite=overwrite)
 
         if success:
             success_count += 1
@@ -539,6 +619,12 @@ Examples:
         help="Network generation method: 'jammed' (packing-derived, default) or "
              "'lattice' (perturbed triangular lattice square)"
     )
+    parser.add_argument(
+        '--overwrite',
+        action='store_true',
+        help='Allow a job to replace previously recorded solver/gradient_method/learning_rate/'
+             'k_min/k_max/force_tol in training_meta.json instead of failing on mismatch'
+    )
 
     args = parser.parse_args()
 
@@ -551,13 +637,15 @@ Examples:
         print_targeted_tasks_summary()
         success = run_single_training(args.task, args.realization, verbose=args.verbose,
                                       gradient_method=args.gradient_method,
-                                      network_type=args.network_type)
+                                      network_type=args.network_type,
+                                      overwrite=args.overwrite)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
         run_all_targeted(resume=args.resume, verbose=args.verbose,
                          gradient_method=args.gradient_method,
-                         network_type=args.network_type)
+                         network_type=args.network_type,
+                         overwrite=args.overwrite)
 
     elif args.mode == 'status':
         print_targeted_tasks_summary()

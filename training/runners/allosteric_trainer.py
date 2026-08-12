@@ -20,7 +20,6 @@ fresh realization index (rid + N_REALIZATIONS).
 """
 
 import argparse
-import json
 import os
 import sys
 import random
@@ -28,6 +27,7 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import fsolve
@@ -39,14 +39,30 @@ if _ROOT not in sys.path:
 
 import training.lammps_utils as f
 import training.jax_actuation as jx
+from training.src.run_provenance import (
+    save_run_provenance,
+    save_training_meta,
+    save_code_snapshot,
+    has_critical_mismatch,
+    HyperparameterMismatchError,
+)
+
+# Code archived alongside each realization's results (see save_code_snapshot)
+# so the exact code that produced it is recoverable without relying on git
+# history/dirty state alone.
+_CODE_SNAPSHOT_FILES = [
+    Path(__file__),
+    Path(f.__file__),
+    Path(jx.__file__),
+    Path(__file__).resolve().parent.parent / 'src' / 'run_provenance.py',
+]
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 K_MIN    = 1e-4
 K_MAX    = 1e1
 ETA      = 1.0
 K_OUTPUT = 1e3
-LR_TARGET_LOG = -3.0   # target mean(log10|delta_K|)
-LEARNING_RATE = 5e-2
+LEARNING_RATE = 5e-2   # fixed lr for both attempt 1 and attempt 2; override with --learning-rate
 
 # Physics backend for evaluate_actuation: 'jax_fire' (default, same
 # differentiable FIRE solver as auxetic training) or 'lammps' (legacy).
@@ -422,30 +438,6 @@ def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
     return stiffnesses, mse, delta_K
 
 
-# ── Learning-rate calibration ─────────────────────────────────────────────────
-
-def calibrate_learning_rate(nodes, incidence_matrix, eq_lengths, stiffnesses,
-                             eta, tod, dx, nsteps, solver=DEFAULT_SOLVER):
-    """One actuation step at lr=1; scale so mean(log10|delta_K|) = LR_TARGET_LOG."""
-    _, nodes_free, nodes_clamped = evaluate_actuation(
-        nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=eta, solver=solver)
-
-    dVfree    = np.linalg.norm(incidence_matrix @ nodes_free,    axis=1) - eq_lengths
-    dVclamped = np.linalg.norm(incidence_matrix @ nodes_clamped, axis=1) - eq_lengths
-    factors   = (dVfree - dVclamped) * dVfree
-
-    base = (1.0 / eta) * stiffnesses * factors
-    mask = base != 0
-    if not np.any(mask):
-        print("  [calibrate] All delta_K zero; defaulting lr=1e-3")
-        return 1e-3
-
-    base_log_mean = np.mean(np.log10(np.abs(base[mask])))
-    lr = float(10 ** (LR_TARGET_LOG - base_log_mean))
-    print(f"  [calibrate] base_log_mean={base_log_mean:.3f} → lr={lr:.3e}")
-    return lr
-
-
 # ── Core training loop ────────────────────────────────────────────────────────
 def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                        learning_rate, tod, tod2, dinputdistance, dinputdistance2,
@@ -675,6 +667,13 @@ def main():
                         help='Use TARGETED_ENSEMBLE fixed tasks with a shared fixed geometry')
     parser.add_argument('--solver', choices=['jax_fire', 'lammps'], default=DEFAULT_SOLVER,
                         help="Physics backend for evaluate_actuation (default: %(default)s)")
+    parser.add_argument('--learning-rate', type=float, default=LEARNING_RATE,
+                        help="Fixed learning rate used for both attempt 1 and attempt 2 "
+                             "(default: %(default)s)")
+    parser.add_argument('--overwrite', action='store_true',
+                        help='Allow this run to replace previously recorded solver/gradient_method/'
+                             'learning_rate/k_min/k_max/force_tol in training_meta.json instead of '
+                             'failing on mismatch')
     args = parser.parse_args()
 
     gid = args.geometry_id
@@ -684,6 +683,8 @@ def main():
     output_dir     = args.output_dir
     targeted       = args.targeted_ensemble
     solver         = args.solver
+    learning_rate  = args.learning_rate
+    overwrite      = args.overwrite
 
     log_dir = '/home1/felipetm/auxetic_networks/ensemble_training/Logs'
 
@@ -703,26 +704,52 @@ def main():
     print(geom_dir, output_path, 'test outputpath')
     os.makedirs(output_path, exist_ok=True)
 
-    # Persist which physics backend this realization is (or resumes being)
-    # trained with. Nothing else records this — evaluate_actuation's solver
-    # choice used to only be visible in the SLURM stdout log — so
-    # analysis.timestep_sweep.sweep_allosteric's post-training recompute had
-    # no way to match training's actual solver and silently fell back to
-    # whatever DEFAULT_SOLVER happens to be at sweep time (which has already
-    # changed once: lammps -> jax_fire). post_training_sweep.py reads this
-    # file and threads it through as sweep_allosteric's solver= argument.
-    meta_path = os.path.join(output_path, 'training_meta.json')
-    if os.path.exists(meta_path):
-        with open(meta_path) as fh:
-            training_meta = json.load(fh)
-        if training_meta.get('solver') != solver:
-            print(f"  WARNING: --solver={solver!r} but training_meta.json records this "
-                  f"realization as started with solver={training_meta.get('solver')!r}; "
-                  f"keeping the recorded solver (existing mse history was produced with it).")
-            solver = training_meta['solver']
-    else:
-        with open(meta_path, 'w') as fh:
-            json.dump({'solver': solver}, fh, indent=2)
+    # Persist run-level hyperparameters and provenance for this realization.
+    # training_meta.json is the source of truth for which solver, learning
+    # rate, and stiffness bounds actually produced this realization's saved
+    # trajectory (these are otherwise hardcoded/CLI values with no other
+    # per-run record); run_provenance.json additionally records the git
+    # commit that produced it, appended on every invocation.
+    #
+    # Checked against THIS invocation's values BEFORE any resume state is
+    # read — a mismatch on solver/learning_rate/k_min/k_max fails outright
+    # unless --overwrite is passed. On --overwrite, the realization's saved
+    # state (stiffnesses/mse/best-state/geometry/meta) is wiped and restarted
+    # from scratch under the new hyperparameters: resuming a trajectory
+    # trained under the OLD settings and merely relabeling training_meta.json
+    # with the NEW ones would make it describe a run that never actually
+    # happened, defeating the point of tracking it. n_training_steps is
+    # exempt: resuming to train for longer is expected and fine.
+    current_hparams = {
+        'solver': solver,
+        'learning_rate': learning_rate,
+        'k_min': K_MIN,
+        'k_max': K_MAX,
+        'n_training_steps': training_steps,
+    }
+    if has_critical_mismatch(output_path, current_hparams):
+        if not overwrite:
+            os.chdir(original_dir)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            raise HyperparameterMismatchError(
+                f"{output_path}/training_meta.json already recorded different solver/"
+                f"learning_rate/k_min/k_max than this run's. Resuming would mix incompatible "
+                f"settings into one training trajectory. Pass --overwrite to wipe it and "
+                f"restart from scratch under the new hyperparameters."
+            )
+        print(f"  --overwrite set: recorded hyperparameters differ from this run's — wiping "
+              f"{output_path} and restarting from scratch under the new hyperparameters.")
+        shutil.rmtree(output_path)
+        os.makedirs(output_path, exist_ok=True)
+
+    try:
+        save_training_meta(output_path, current_hparams)
+        save_run_provenance(output_path, extra=current_hparams)
+        save_code_snapshot(output_path, _CODE_SNAPSHOT_FILES)
+    except Exception:
+        os.chdir(original_dir)
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise
 
     try:
         # ── Build geometry (load if present, recreate from seed if missing) ───
@@ -762,8 +789,6 @@ def main():
 
         nsteps  = NSTEPS_TASK1
         nsteps2 = NSTEPS_TASK2
-        dx  = dinputdistance  / nsteps
-        dx2 = dinputdistance2 / nsteps2
 
         # ── Resume or fresh start ─────────────────────────────────────────────
         resume = load_resume_state(output_path)
@@ -798,14 +823,11 @@ def main():
             tag = ("Attempt 1" if start_step == 0
                    else f"Attempt 1 resumed — {attempt1_remaining} steps remaining")
             print(f"\n--- {tag} ---")
-            lr = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
-                                         stiffnesses.copy(), ETA, tod, dx, nsteps,
-                                         solver=solver)
-            print('Learning rate: ', lr)
+            print('Learning rate: ', learning_rate)
             msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
                 _run_training_loop(
                     nodes, incidence_matrix, eq_lengths, stiffnesses,
-                    lr, tod, tod2, dinputdistance, dinputdistance2,
+                    learning_rate, tod, tod2, dinputdistance, dinputdistance2,
                     nsteps, nsteps2, attempt1_remaining, output_path,
                     msearray=msearray, msearray2=msearray2,
                     step_offset=start_step,
@@ -816,22 +838,19 @@ def main():
         if check_success(msearray, msearray2):
             print("\nAttempt 1 succeeded.")
         else:
-            # ── Attempt 2: recalibrated LR, up to 2× more steps ──────────────
+            # ── Attempt 2: same fixed lr, up to 2× more steps ─────────────────
             # Total budget = training_steps (attempt 1) + 2 * training_steps (attempt 2).
             # If resuming mid-attempt-2, only the remaining portion is run.
             step_after_a1    = len(msearray)
             attempt2_remaining = max(0, 3 * training_steps - step_after_a1)
             if attempt2_remaining > 0:
-                tag = ("Attempt 2 (2× steps, recalibrated LR)" if step_after_a1 <= training_steps
+                tag = ("Attempt 2 (2× steps)" if step_after_a1 <= training_steps
                        else f"Attempt 2 resumed — {attempt2_remaining} steps remaining")
                 print(f"\n--- {tag} ---")
-                lr2 = calibrate_learning_rate(nodes, incidence_matrix, eq_lengths,
-                                              stiffnesses.copy(), ETA, tod, dx, nsteps,
-                                              solver=solver)
                 msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
                     _run_training_loop(
                         nodes, incidence_matrix, eq_lengths, stiffnesses,
-                        lr2, tod, tod2, dinputdistance, dinputdistance2,
+                        learning_rate, tod, tod2, dinputdistance, dinputdistance2,
                         nsteps, nsteps2, attempt2_remaining, output_path,
                         msearray=msearray, msearray2=msearray2,
                         step_offset=step_after_a1,
