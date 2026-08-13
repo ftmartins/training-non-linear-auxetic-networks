@@ -38,6 +38,7 @@ from .checkpoint_manager import (
     save_training_results,
     save_checkpoint,
 )
+from . import lr_schedule
 
 
 
@@ -397,9 +398,12 @@ def finish_training_GD_auxetic_batch(
             )
 
         # --- Update stiffnesses ---
-        update_norm = np.linalg.norm(update)
-        if update_norm > 0:
-            network.stiffnesses = np.array(network.stiffnesses) + learning_rate * np.array(update) / update_norm
+        # lr_scale is a pure function of the loss trajectory so far (steps
+        # completed before this one) — no normalized-gradient step anymore,
+        # and no separately persisted LR state to keep in sync on resume.
+        lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
+        current_lr = learning_rate * lr_scale
+        network.stiffnesses = np.array(network.stiffnesses) + current_lr * np.array(update)
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # Check for NaN in stiffnesses
@@ -480,7 +484,9 @@ def finish_training_GD_auxetic_batch(
             min_loss = loss
 
         # Update progress bar
-        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}), grad_norm = {np.linalg.norm(update):.4e}')
+        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}), '
+                              f'grad_norm = {np.linalg.norm(update):.4e}, '
+                              f'lr_scale = {lr_scale:.3g}')
 
         # Verbose output
         if verbose and step % 100 == 0:
@@ -520,7 +526,9 @@ def finish_training_GD_auxetic_batch(
                 history=history,
                 network=network,
                 task_config=task_config,
-                current_step=step,
+                current_step=len(history['loss']),  # global step count, not
+                                                      # loop-local `step` — see
+                                                      # module note on resume.
                 results_dir=TARGETED_RESULTS_DIR,
                 network_type=network_type,
             )
@@ -702,9 +710,12 @@ def finish_training_GD_auxetic_batch_jax(
         history['positions'].append(np.copy(min_pos))
 
         # --- Update stiffnesses ---
+        # lr_scale is a pure function of the loss trajectory so far (see
+        # module note on resume) — no normalized-gradient step anymore.
         grad_norm = np.linalg.norm(grad_np)
-        if grad_norm > 0:
-            network.stiffnesses = np.array(network.stiffnesses) - learning_rate * grad_np / grad_norm
+        lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
+        current_lr = learning_rate * lr_scale
+        network.stiffnesses = np.array(network.stiffnesses) - current_lr * grad_np
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # Check for NaN
@@ -726,7 +737,8 @@ def finish_training_GD_auxetic_batch_jax(
         if loss < min_loss:
             min_loss = loss
 
-        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}, init loss = {history["loss"][0]:.4e}, log mean update ={np.mean(np.log10(np.abs(grad_np / grad_norm + 1e-12))):.2f})')
+        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}, init loss = {history["loss"][0]:.4e}, '
+                              f'grad_norm = {grad_norm:.4e}, lr_scale = {lr_scale:.3g})')
 
         if verbose and step % save_interval == 0:
             print(f"\nStep {step}:")
@@ -744,7 +756,7 @@ def finish_training_GD_auxetic_batch_jax(
             save_checkpoint(
                 task_seed=task_seed, realization_seed=realization_seed,
                 history=history, network=network,
-                task_config=task_config, current_step=step,
+                task_config=task_config, current_step=len(history['loss']),
                 results_dir=TARGETED_RESULTS_DIR,
                 network_type=network_type,
             )
