@@ -40,7 +40,8 @@ VMIN = 1e-4
 VMAX = 1e2
 
 
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3  # raw-gradient starting lr (lr-schedule-calibration sweep median ~1.09e-3
+                       # over tasks 3/5/15); decayed by training.src.lr_schedule
 
 # Import targeted config and task definitions
 from training.src.targeted_task_generator import (

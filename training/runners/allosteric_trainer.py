@@ -64,7 +64,7 @@ K_MIN    = 1e-4
 K_MAX    = 1e1
 ETA      = 1.0
 K_OUTPUT = 1e3
-LEARNING_RATE = 5e-2   # starting lr, decayed by lr_schedule; override with --learning-rate
+LEARNING_RATE = 1.0     # starting lr, decayed by lr_schedule; override with --learning-rate
 
 # Physics backend for evaluate_actuation: 'jax_fire' (default, same
 # differentiable FIRE solver as auxetic training) or 'lammps' (legacy).
@@ -626,7 +626,12 @@ def main():
                         help=f'Realization index (0 to {N_REALIZATIONS-1})')
     parser.add_argument('--training-steps', type=int, default=N_TRAINING_STEPS)
     parser.add_argument('--output-dir',     type=str,
-                        default='/data2/shared/felipetm/allosteric_nets')
+                        # '_aug' keeps the raw-gradient/lr-schedule runs (this
+                        # branch) from writing into the pre-existing
+                        # normalized-gradient results — resume/checkpoint
+                        # logic is unchanged, it just now resumes from
+                        # whatever's under this new path instead.
+                        default='/data2/shared/felipetm/allosteric_nets_aug')
     parser.add_argument('--targeted-ensemble', action='store_true',
                         help='Use TARGETED_ENSEMBLE fixed tasks with a shared fixed geometry')
     parser.add_argument('--solver', choices=['jax_fire', 'lammps'], default=DEFAULT_SOLVER,

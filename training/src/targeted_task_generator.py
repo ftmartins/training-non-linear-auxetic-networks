@@ -28,7 +28,11 @@ from .task_generator import generate_realization_stiffnesses, compute_target_ext
 N_TASKS = 24
 N_REALIZATIONS = 1
 ENSEMBLE_DIR = BASE_DIR
-TARGETED_RESULTS_DIR = Path('/data2/shared/felipetm/auxetic_networks/targeted_results_sqr')
+# '_aug' keeps the raw-gradient/lr-schedule runs (lr-schedule-calibration
+# branch) from writing into the pre-existing normalized-gradient results —
+# resume/checkpoint logic is unchanged, it just now resumes from whatever's
+# under this new path instead.
+TARGETED_RESULTS_DIR = Path('/data2/shared/felipetm/auxetic_networks/targeted_results_sqr_aug')
 
 N_STEPS = 5_000
 N_STRAIN_STEPS = 200    # Same for all targeted tasks
