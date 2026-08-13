@@ -580,7 +580,7 @@ def finish_training_GD_auxetic_batch_jax(
     task_seed=None, realization_seed=None, save_interval=10,
     task_config=None, TARGETED_RESULTS_DIR=None,
     fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE, loss_tol=1e-6,
-    fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2,
+    fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2, momentum=0.0,
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
@@ -619,6 +619,10 @@ def finish_training_GD_auxetic_batch_jax(
             destabilize the integrator (diverges to NaN) — stay well under it;
             these defaults have margin. See docs/jax_solver_speedup.md.
         loss_tol: Early-stopping threshold — training stops once loss drops below this
+        momentum: SGD momentum coefficient in [0, 1). velocity = momentum*velocity +
+            grad; step = current_lr * velocity. momentum=0 (default) makes
+            velocity == grad_np every step, i.e. exactly today's update rule —
+            fully backward compatible, opt-in only.
 
     Returns:
         (history, trained_network)
@@ -627,6 +631,7 @@ def finish_training_GD_auxetic_batch_jax(
     last_relaxed_positions = np.copy(network.positions)
     loss = np.inf
     min_loss = np.inf
+    velocity = np.zeros(len(network.stiffnesses))
 
     # Initialize history
     for key in ('stiffnesses', 'loss', 'positions'):
@@ -715,7 +720,8 @@ def finish_training_GD_auxetic_batch_jax(
         grad_norm = np.linalg.norm(grad_np)
         lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
         current_lr = learning_rate * lr_scale
-        network.stiffnesses = np.array(network.stiffnesses) - current_lr * grad_np
+        velocity = momentum * velocity + grad_np
+        network.stiffnesses = np.array(network.stiffnesses) - current_lr * velocity
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # Check for NaN

@@ -45,6 +45,7 @@ from training.src.run_provenance import (
     save_code_snapshot,
     has_critical_mismatch,
     HyperparameterMismatchError,
+    DEFAULT_CRITICAL_KEYS,
 )
 from training.src import lr_schedule
 
@@ -634,9 +635,8 @@ def main():
                         help="Starting learning rate; scaled down by training.src.lr_schedule "
                              "every 1000 steps on plateau/overshoot (default: %(default)s)")
     parser.add_argument('--overwrite', action='store_true',
-                        help='Allow this run to replace previously recorded solver/gradient_method/'
-                             'learning_rate/k_min/k_max/force_tol in training_meta.json instead of '
-                             'failing on mismatch')
+                        help='Allow this run to replace previously recorded solver/learning_rate/'
+                             'k_min/k_max/eta in training_meta.json instead of failing on mismatch')
     args = parser.parse_args()
 
     gid = args.geometry_id
@@ -675,7 +675,7 @@ def main():
     # commit that produced it, appended on every invocation.
     #
     # Checked against THIS invocation's values BEFORE any resume state is
-    # read — a mismatch on solver/learning_rate/k_min/k_max fails outright
+    # read — a mismatch on solver/learning_rate/k_min/k_max/eta fails outright
     # unless --overwrite is passed. On --overwrite, the realization's saved
     # state (stiffnesses/mse/best-state/geometry/meta) is wiped and restarted
     # from scratch under the new hyperparameters: resuming a trajectory
@@ -683,20 +683,27 @@ def main():
     # with the NEW ones would make it describe a run that never actually
     # happened, defeating the point of tracking it. n_training_steps is
     # exempt: resuming to train for longer is expected and fine.
+    #
+    # eta is the coupled-learning nudge strength (rest_lengths_clamped =
+    # eta*tod + (1-eta)*cod; delta_K is also divided by eta) — silently
+    # changing it mid-run would mix trajectories computed under different
+    # nudge strengths, same risk as changing learning_rate/k_min/k_max.
+    _ALLOSTERIC_CRITICAL_KEYS = DEFAULT_CRITICAL_KEYS | {'eta'}
     current_hparams = {
         'solver': solver,
         'learning_rate': learning_rate,
         'k_min': K_MIN,
         'k_max': K_MAX,
+        'eta': ETA,
         'n_training_steps': training_steps,
     }
-    if has_critical_mismatch(output_path, current_hparams):
+    if has_critical_mismatch(output_path, current_hparams, critical_keys=_ALLOSTERIC_CRITICAL_KEYS):
         if not overwrite:
             os.chdir(original_dir)
             shutil.rmtree(work_dir, ignore_errors=True)
             raise HyperparameterMismatchError(
                 f"{output_path}/training_meta.json already recorded different solver/"
-                f"learning_rate/k_min/k_max than this run's. Resuming would mix incompatible "
+                f"learning_rate/k_min/k_max/eta than this run's. Resuming would mix incompatible "
                 f"settings into one training trajectory. Pass --overwrite to wipe it and "
                 f"restart from scratch under the new hyperparameters."
             )
@@ -706,7 +713,7 @@ def main():
         os.makedirs(output_path, exist_ok=True)
 
     try:
-        save_training_meta(output_path, current_hparams)
+        save_training_meta(output_path, current_hparams, critical_keys=_ALLOSTERIC_CRITICAL_KEYS)
         save_run_provenance(output_path, extra=current_hparams)
         save_code_snapshot(output_path, _CODE_SNAPSHOT_FILES)
     except Exception:
