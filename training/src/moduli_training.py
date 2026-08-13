@@ -31,6 +31,7 @@ from base.elasticity_tensor import (
 )
 from .checkpoint_manager import save_training_results
 from base.config import NETWORK_TYPE
+from . import lr_schedule
 
 
 def _parse_voigt_key(key):
@@ -271,12 +272,15 @@ def finish_training_GD_general_jax(
         history['positions'].append(np.copy(min_pos))
 
         # --- Update stiffnesses ---
+        # lr_scale is a pure function of the loss trajectory so far — no
+        # normalized-gradient step anymore, no separately persisted LR state.
         grad_norm = np.linalg.norm(grad_np)
-        if grad_norm > 0:
-            network.stiffnesses = (
-                np.array(network.stiffnesses)
-                - learning_rate * grad_np / grad_norm
-            )
+        lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
+        current_lr = learning_rate * lr_scale
+        network.stiffnesses = (
+            np.array(network.stiffnesses)
+            - current_lr * grad_np
+        )
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # NaN check
@@ -300,7 +304,7 @@ def finish_training_GD_general_jax(
 
         pbar.set_description(
             f'(loss = {loss:.4e}, min loss={min_loss:.4e}, '
-            f'log mean update = {np.mean(np.log10(np.abs(grad_np / grad_norm + 1e-12))):.2f})'
+            f'grad_norm = {grad_norm:.4e}, lr_scale = {lr_scale:.3g})'
         )
 
         if save_intermediate and step % save_interval == 0:

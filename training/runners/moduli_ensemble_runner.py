@@ -64,14 +64,24 @@ from training.src.checkpoint_manager import (
     get_complete_jobs,
     load_checkpoint,
     remove_checkpoint,
-    has_nan_in_results,
-    get_last_good_step,
-    get_training_result_path,
+    save_run_metadata,
+    save_run_code_snapshot,
+    job_has_critical_mismatch,
+    reset_job,
 )
-import pickle
 
-# Learning-rate reduction factor applied when NaN is detected in saved results
-LR_NAN_REDUCTION = 0.1
+# Code archived alongside each job's results (see save_run_code_snapshot) so
+# the exact code that produced it is recoverable without relying on git
+# history/dirty state alone.
+_CODE_SNAPSHOT_FILES = [
+    Path(__file__),
+    _SRC / 'moduli_task_generator.py',
+    _SRC / 'moduli_training.py',
+    _SRC / 'checkpoint_manager.py',
+    _SRC / 'run_provenance.py',
+    _ROOT / 'base' / 'config.py',
+    _ROOT / 'base' / 'network_utils.py',
+]
 
 # Import moduli training
 try:
@@ -142,7 +152,7 @@ def get_reference_moduli(verbose=False, network_type=NETWORK_TYPE):
 
 
 def run_single_training(task_id, realization_seed=0, verbose=False,
-                        use_checkpoint=True, network_type=NETWORK_TYPE):
+                        use_checkpoint=True, network_type=NETWORK_TYPE, overwrite=False):
     """
     Run a single moduli training job.
 
@@ -152,6 +162,14 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
         verbose: Print detailed progress
         use_checkpoint: Whether to use checkpointing
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+        overwrite: If False (default) and this job's recorded learning_rate/k_min/
+            k_max/force_tol conflict with the current run's values, raises
+            HyperparameterMismatchError instead of continuing (n_steps is exempt —
+            resuming to train longer is fine). If True, the job's saved state
+            (checkpoint, results, meta) is wiped and restarted from scratch under
+            the new hyperparameters — never resumed under a relabeled meta, which
+            would make training_meta.json describe a trajectory that never
+            actually happened.
 
     Returns:
         success: Boolean indicating success
@@ -160,24 +178,40 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
     print(f"Starting Moduli Task {task_id}, Realization {realization_seed}")
     print(f"{'='*80}")
 
-    # Check for NaN in previously saved results (takes priority over completion check)
-    nan_detected = has_nan_in_results(task_id, realization_seed,
-                                      results_dir=MODULI_RESULTS_DIR, network_type=network_type)
-    recovery_mode = None   # None | 'from_last_good' | 'from_scratch'
-    recovery_lr_scale = 1.0
+    # Guard against silently mixing incompatible hyperparameters into one
+    # saved trajectory. Must run BEFORE any NaN/checkpoint/completion check —
+    # resuming a checkpoint trained under OLD hyperparameters and merely
+    # relabeling training_meta.json with the NEW ones would make it describe
+    # a run that never actually happened.
+    critical_hparams = {
+        'learning_rate': LEARNING_RATE,
+        'k_min': VMIN,
+        'k_max': VMAX,
+        'force_tol': FORCE_TOL,
+    }
+    if job_has_critical_mismatch(task_id, realization_seed, critical_hparams,
+                                 results_dir=MODULI_RESULTS_DIR, network_type=network_type):
+        if not overwrite:
+            print(f"\n{'='*80}")
+            print(f"ERROR: Moduli Task {task_id}, Realization {realization_seed}")
+            print(f"Recorded learning_rate/k_min/k_max/force_tol differ from this run's. "
+                  f"Pass overwrite=True (--overwrite) to wipe and restart from scratch "
+                  f"under the new hyperparameters.")
+            print(f"{'='*80}\n")
+            return False
+        print(f"  overwrite=True: recorded hyperparameters differ from this run's — wiping "
+              f"saved state for task {task_id}, realization {realization_seed} and "
+              f"restarting from scratch under the new hyperparameters.")
+        reset_job(task_id, realization_seed, results_dir=MODULI_RESULTS_DIR, network_type=network_type)
 
-    if nan_detected:
-        last_good = get_last_good_step(task_id, realization_seed,
-                                       results_dir=MODULI_RESULTS_DIR, network_type=network_type)
-        if last_good >= 0:
-            recovery_mode = 'from_last_good'
-        else:
-            recovery_mode = 'from_scratch'
-        recovery_lr_scale = LR_NAN_REDUCTION
-        print(f"NaN detected in saved results — recovery_mode={recovery_mode}, "
-              f"LR scale={recovery_lr_scale}")
-    elif is_training_complete(task_id, realization_seed, results_dir=MODULI_RESULTS_DIR,
-                              network_type=network_type):
+    # If a previous attempt left NaN in this job's saved results, this run
+    # will hit the same live NaN check inside the training loop and stop
+    # early with whatever's salvageable — recovering means re-invoking with
+    # a lower --learning-rate and --overwrite, which wipes and restarts
+    # from scratch under the new (lower) nominal rate (job_has_critical_mismatch
+    # above). No automatic retry-at-reduced-LR here anymore.
+    if is_training_complete(task_id, realization_seed, results_dir=MODULI_RESULTS_DIR,
+                            network_type=network_type):
         print(f"Job already completed! Skipping...")
         print(f"{'='*80}\n")
         return True
@@ -219,70 +253,61 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
         print(f"  Network created: {len(network.positions)} nodes, "
               f"{len(network.edges)} edges")
 
-        # 4. Determine initial state based on recovery mode or checkpoint
+        # 4. Determine initial state: resume from checkpoint if present, else fresh start
         history = {}
         start_step = 0
 
-        if recovery_mode == 'from_last_good':
-            last_good = get_last_good_step(task_id, realization_seed,
-                                           results_dir=MODULI_RESULTS_DIR, network_type=network_type)
-            result_path = get_training_result_path(task_id, realization_seed,
-                                                   results_dir=MODULI_RESULTS_DIR, network_type=network_type)
-            with open(result_path / "history.pkl", 'rb') as f:
-                saved_history = pickle.load(f)
-            n_trim = last_good + 1
-            history = {
-                'stiffnesses': list(np.array(saved_history['stiffnesses'])[:n_trim]),
-                'loss':        list(np.array(saved_history['loss'])[:n_trim]),
-                'positions':   list(saved_history['positions'])[:n_trim],
-            }
-            network.stiffnesses = np.array(saved_history['stiffnesses'])[last_good]
-            network.positions = np.array(saved_history['positions'][last_good])
-            start_step = n_trim
-            print(f"  Restored from last good step {last_good} — continuing from step {start_step}")
+        checkpoint = None
+        if use_checkpoint:
+            checkpoint = load_checkpoint(task_id, realization_seed,
+                                         results_dir=MODULI_RESULTS_DIR, network_type=network_type)
+            if checkpoint is not None:
+                print(f"Found checkpoint at step {checkpoint['current_step']}")
+                network.positions = checkpoint['network']['positions']
+                network.stiffnesses = checkpoint['network']['stiffnesses']
+                network.rest_lengths = checkpoint['network']['rest_lengths']
+                network.edges = checkpoint['network']['edges']
+                history = checkpoint['history']
+                start_step = checkpoint['current_step']
+                print(f"  Resuming from step {start_step}/{N_STEPS}")
 
-        elif recovery_mode == 'from_scratch':
+        if checkpoint is None:
+            if verbose:
+                print("Step 4: Initializing random stiffnesses...")
             n_edges = len(network.edges)
             initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
             network.stiffnesses = initial_stiffnesses
             network.save_original_parameters()
-            print(f"  Restarting from scratch with reduced LR "
+            print(f"  Stiffnesses initialized: range "
                   f"[{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
 
-        else:
-            # Normal path: try checkpoint first, else fresh start
-            checkpoint = None
-            if use_checkpoint:
-                checkpoint = load_checkpoint(task_id, realization_seed,
-                                             results_dir=MODULI_RESULTS_DIR, network_type=network_type)
-                if checkpoint is not None:
-                    print(f"Found checkpoint at step {checkpoint['current_step']}")
-                    network.positions = checkpoint['network']['positions']
-                    network.stiffnesses = checkpoint['network']['stiffnesses']
-                    network.rest_lengths = checkpoint['network']['rest_lengths']
-                    network.edges = checkpoint['network']['edges']
-                    history = checkpoint['history']
-                    start_step = checkpoint['current_step']
-                    print(f"  Resuming from step {start_step}/{N_STEPS}")
-
-            if checkpoint is None:
-                if verbose:
-                    print("Step 4: Initializing random stiffnesses...")
-                n_edges = len(network.edges)
-                initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
-                network.stiffnesses = initial_stiffnesses
-                network.save_original_parameters()
-                print(f"  Stiffnesses initialized: range "
-                      f"[{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
-
-        effective_lr = LEARNING_RATE * recovery_lr_scale
         remaining_steps = N_STEPS - start_step
 
         print(f"  Training parameters:")
-        print(f"    Learning rate: {effective_lr} (scale={recovery_lr_scale})")
+        print(f"    Learning rate: {LEARNING_RATE} (starting; see training.src.lr_schedule)")
         print(f"    Steps remaining: {remaining_steps:,} / {N_STEPS:,}")
         print(f"    Strain steps: {N_STRAIN_STEPS}")
         print(f"    Force tolerance: {FORCE_TOL}")
+
+        # Record the nominal learning rate + which code version (git commit)
+        # invoked it. Raises HyperparameterMismatchError (caught below) if
+        # this job was previously recorded with different learning_rate/
+        # k_min/k_max/force_tol and overwrite=False.
+        save_run_metadata(
+            task_id, realization_seed,
+            hyperparams={
+                'learning_rate': LEARNING_RATE,
+                'k_min': VMIN,
+                'k_max': VMAX,
+                'n_steps': N_STEPS,
+                'force_tol': FORCE_TOL,
+            },
+            results_dir=MODULI_RESULTS_DIR,
+            network_type=network_type,
+            overwrite=overwrite,
+        )
+        save_run_code_snapshot(task_id, realization_seed, _CODE_SNAPSHOT_FILES,
+                               results_dir=MODULI_RESULTS_DIR, network_type=network_type)
 
         # 5. Run training
         if verbose:
@@ -313,25 +338,10 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
             )
 
         if remaining_steps > 0:
-            history, trained_network = _run_train(network, history, effective_lr, remaining_steps)
+            history, trained_network = _run_train(network, history, LEARNING_RATE, remaining_steps)
         else:
             trained_network = network
             print("  Training already complete!")
-
-        # 5b. Second NaN recovery
-        if recovery_mode is not None and has_nan_in_results(
-                task_id, realization_seed, results_dir=MODULI_RESULTS_DIR, network_type=network_type):
-            print(f"\n{'!'*60}")
-            print(f"NaN persists after {recovery_mode} recovery.")
-            print(f"Restarting from scratch with LR scale={LR_NAN_REDUCTION}.")
-            print(f"{'!'*60}\n")
-            n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(realization_seed, n_edges)
-            trained_network.stiffnesses = initial_stiffnesses
-            trained_network.save_original_parameters()
-            history = {}
-            history, trained_network = _run_train(
-                trained_network, history, LEARNING_RATE * LR_NAN_REDUCTION, N_STEPS)
 
         # 6. Save final results
         if verbose:
@@ -391,7 +401,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False,
 # ============================================================================
 
 
-def run_all_moduli(resume=True, verbose=False, network_type=NETWORK_TYPE):
+def run_all_moduli(resume=True, verbose=False, network_type=NETWORK_TYPE, overwrite=False):
     """
     Run all moduli training jobs sequentially.
 
@@ -399,6 +409,7 @@ def run_all_moduli(resume=True, verbose=False, network_type=NETWORK_TYPE):
         resume: Skip already completed jobs
         verbose: Print detailed progress
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+        overwrite: Passed through to run_single_training (see there).
     """
     print(f"\n{'#'*80}")
     print(f"# MODULI ENSEMBLE TRAINING: SEQUENTIAL MODE")
@@ -439,7 +450,7 @@ def run_all_moduli(resume=True, verbose=False, network_type=NETWORK_TYPE):
     for idx, (task_id, realization_seed) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
         success = run_single_training(task_id, realization_seed, verbose=verbose,
-                                      network_type=network_type)
+                                      network_type=network_type, overwrite=overwrite)
 
         if success:
             success_count += 1
@@ -591,6 +602,12 @@ Examples:
         help="Network generation method: 'jammed' (packing-derived, default) or "
              "'lattice' (perturbed triangular lattice square)"
     )
+    parser.add_argument(
+        '--overwrite',
+        action='store_true',
+        help='Allow a job to replace previously recorded learning_rate/k_min/k_max/force_tol '
+             'in training_meta.json instead of failing on mismatch'
+    )
 
     args = parser.parse_args()
 
@@ -604,11 +621,13 @@ Examples:
         get_reference_moduli(verbose=args.verbose, network_type=args.network_type)
         print_moduli_tasks_summary()
         success = run_single_training(args.task, args.realization,
-                                      verbose=args.verbose, network_type=args.network_type)
+                                      verbose=args.verbose, network_type=args.network_type,
+                                      overwrite=args.overwrite)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
-        run_all_moduli(resume=args.resume, verbose=args.verbose, network_type=args.network_type)
+        run_all_moduli(resume=args.resume, verbose=args.verbose, network_type=args.network_type,
+                       overwrite=args.overwrite)
 
     elif args.mode == 'status':
         print_moduli_tasks_summary()

@@ -17,6 +17,12 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 from base.config import RESULTS_DIR, N_TASKS, N_REALIZATIONS, NETWORK_TYPE
+from training.src.run_provenance import (
+    save_run_provenance,
+    save_training_meta,
+    save_code_snapshot,
+    has_critical_mismatch,
+)
 
 
 def get_training_result_path(task_seed, realization_seed, results_dir=None):
@@ -161,96 +167,6 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         return False
 
 
-def has_nan_in_results(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
-    """
-    Check if previously saved training results contain NaN values.
-
-    Loads ``stiffness_trajectory.npy`` and ``loss_trajectory.npy`` from the
-    result directory and returns True if either file contains any NaN.
-    Returns False when the files do not exist (no results saved yet).
-
-    Args:
-        task_seed: Task index
-        realization_seed: Realization index
-        results_dir: Results directory (default: from config)
-        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
-
-    Returns:
-        has_nan: True if NaN detected in saved stiffnesses or losses.
-    """
-    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-
-    stiffness_file = result_path / _nt_filename("stiffness_trajectory.npy", network_type)
-    loss_file = result_path / _nt_filename("loss_trajectory.npy", network_type)
-
-    try:
-        if stiffness_file.exists():
-            stiffnesses = np.load(stiffness_file)
-            if np.isnan(stiffnesses).any():
-                return True
-        if loss_file.exists():
-            losses = np.load(loss_file)
-            if np.isnan(losses).any():
-                return True
-    except Exception as e:
-        print(f"Warning: Could not check NaN for task {task_seed}, "
-              f"realization {realization_seed}: {e}")
-
-    return False
-
-
-def get_last_good_step(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
-    """
-    Return the index of the last training step that contains no NaN in either
-    stiffnesses or loss.
-
-    Loads ``stiffness_trajectory.npy`` (n_steps, E) and
-    ``loss_trajectory.npy`` (n_steps,) and finds the last row in which
-    neither array has a NaN.
-
-    Args:
-        task_seed: Task index
-        realization_seed: Realization index
-        results_dir: Results directory (default: from config)
-        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
-
-    Returns:
-        last_good: Index of last clean step, or -1 if no clean step exists
-                   or the trajectory files are missing.
-    """
-    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-
-    stiffness_file = result_path / _nt_filename("stiffness_trajectory.npy", network_type)
-    loss_file = result_path / _nt_filename("loss_trajectory.npy", network_type)
-
-    if not stiffness_file.exists() or not loss_file.exists():
-        return -1
-
-    try:
-        stiffnesses = np.load(stiffness_file)  # (n_steps, E)
-        losses = np.load(loss_file)             # (n_steps,)
-
-        n_steps = min(len(stiffnesses), len(losses))
-        if n_steps == 0:
-            return -1
-
-        stiffnesses = stiffnesses[:n_steps]
-        losses = losses[:n_steps]
-
-        # Good steps: no NaN in stiffnesses row and no NaN in loss
-        stiff_ok = ~np.isnan(stiffnesses).any(axis=1)  # (n_steps,)
-        loss_ok = ~np.isnan(losses)                     # (n_steps,)
-        good_mask = stiff_ok & loss_ok
-
-        good_indices = np.where(good_mask)[0]
-        if len(good_indices) == 0:
-            return -1
-        return int(good_indices[-1])
-
-    except Exception as e:
-        print(f"Warning: Could not find last good step for task {task_seed}, "
-              f"realization {realization_seed}: {e}")
-        return -1
 
 
 def is_training_complete(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
@@ -503,6 +419,124 @@ def remove_checkpoint(task_seed, realization_seed, results_dir=None, network_typ
 
     if checkpoint_file.exists():
         checkpoint_file.unlink()
+
+
+def job_has_critical_mismatch(task_seed, realization_seed, hyperparams, results_dir=None,
+                               network_type=NETWORK_TYPE):
+    """
+    Read-only check: do this job's critical hyperparameters (solver/
+    gradient_method/learning_rate/k_min/k_max/force_tol by default) conflict
+    with what's already recorded in its training_meta.json?
+
+    Call this BEFORE loading any checkpoint or doing NaN/completion checks —
+    if it returns True and the caller wants to proceed anyway (overwrite),
+    the job must be wiped with reset_job() first rather than resumed, or the
+    saved metadata will describe a trajectory that never actually happened
+    under those settings. See training.src.run_provenance.has_critical_mismatch.
+
+    Args:
+        task_seed: Task index
+        realization_seed: Realization index
+        hyperparams: Dict of hyperparameters this run would use.
+        results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+    """
+    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
+    return has_critical_mismatch(result_path, hyperparams,
+                                  filename=_nt_filename("training_meta.json", network_type))
+
+
+def reset_job(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
+    """
+    Delete this job's saved state for `network_type` (checkpoint, results,
+    training_meta, run_provenance — everything whose filename carries the
+    `_<network_type>` suffix from _nt_filename) so it restarts completely
+    from scratch.
+
+    Use this when overwrite=True and job_has_critical_mismatch() is True:
+    resuming a checkpoint trained under the OLD hyperparameters and merely
+    relabeling it with the NEW ones in training_meta.json would silently mix
+    two different settings into one saved trajectory while the metadata
+    claims otherwise — wiping and restarting from scratch is the only way
+    overwrite=True stays honest.
+
+    Only deletes `network_type`-suffixed files, not the whole (task,
+    realization) directory: 'jammed' and 'lattice' runs for the same task/
+    realization coexist side-by-side in one directory (see _nt_filename), so
+    a jammed-only mismatch must not destroy an unrelated lattice run living
+    in the same folder. Code snapshot .gz files (not network_type-suffixed,
+    shared across network_types) are left alone; run_provenance's git-commit
+    trail is the authoritative record regardless.
+
+    Args:
+        task_seed: Task index
+        realization_seed: Realization index
+        results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+    """
+    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
+    if not result_path.exists():
+        return
+    suffix = f"_{network_type}"
+    for f in result_path.iterdir():
+        if f.is_file() and suffix in f.stem:
+            f.unlink()
+
+
+def save_run_metadata(task_seed, realization_seed, hyperparams, results_dir=None, network_type=NETWORK_TYPE,
+                       overwrite=False):
+    """
+    Record run provenance and a quick-check hyperparameter snapshot for a
+    training job, alongside its checkpoint/results.
+
+    Writes two files into the job's result directory (see
+    training.src.run_provenance for details of each):
+      - training_meta[_<network_type>].json: `hyperparams`, written once.
+        Critical keys (solver/gradient_method/learning_rate/k_min/k_max/
+        force_tol) are enforced to match on every subsequent call — a
+        mismatch raises HyperparameterMismatchError unless overwrite=True,
+        so a job can't silently resume under different physics/optimizer
+        settings. n_steps always tracks the current value (training longer
+        is fine).
+      - run_provenance[_<network_type>].json: one entry appended per call,
+        so a job resumed under a different git commit keeps its full
+        code-version history.
+
+    Args:
+        task_seed: Task index
+        realization_seed: Realization index
+        hyperparams: Dict of hyperparameters actually used for this run
+            (e.g. learning_rate, k_min, k_max, n_steps, force_tol,
+            gradient_method)
+        results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+        overwrite: If True, replace conflicting critical hyperparameters
+            instead of raising. See training.src.run_provenance.save_training_meta.
+
+    Raises:
+        HyperparameterMismatchError: A critical hyperparameter conflicts
+            with what's already recorded and overwrite=False.
+    """
+    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
+    save_training_meta(result_path, hyperparams, filename=_nt_filename("training_meta.json", network_type),
+                        overwrite=overwrite)
+    save_run_provenance(result_path, extra=hyperparams, filename=_nt_filename("run_provenance.json", network_type))
+
+
+def save_run_code_snapshot(task_seed, realization_seed, files, results_dir=None, network_type=NETWORK_TYPE):
+    """
+    Gzip-archive `files` (the training script + relevant src/base modules)
+    into the job's result directory. See training.src.run_provenance.save_code_snapshot.
+
+    Args:
+        task_seed: Task index
+        realization_seed: Realization index
+        files: Iterable of file paths to archive.
+        results_dir: Results directory (default: from config)
+        network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+    """
+    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
+    save_code_snapshot(result_path, files)
 
 
 def get_incomplete_jobs(n_tasks=None, n_realizations=None, results_dir=None, network_type=NETWORK_TYPE):

@@ -38,6 +38,7 @@ from .checkpoint_manager import (
     save_training_results,
     save_checkpoint,
 )
+from . import lr_schedule
 
 
 
@@ -397,9 +398,12 @@ def finish_training_GD_auxetic_batch(
             )
 
         # --- Update stiffnesses ---
-        update_norm = np.linalg.norm(update)
-        if update_norm > 0:
-            network.stiffnesses = np.array(network.stiffnesses) + learning_rate * np.array(update) / update_norm
+        # lr_scale is a pure function of the loss trajectory so far (steps
+        # completed before this one) — no normalized-gradient step anymore,
+        # and no separately persisted LR state to keep in sync on resume.
+        lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
+        current_lr = learning_rate * lr_scale
+        network.stiffnesses = np.array(network.stiffnesses) + current_lr * np.array(update)
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # Check for NaN in stiffnesses
@@ -480,7 +484,9 @@ def finish_training_GD_auxetic_batch(
             min_loss = loss
 
         # Update progress bar
-        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}), grad_norm = {np.linalg.norm(update):.4e}')
+        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}), '
+                              f'grad_norm = {np.linalg.norm(update):.4e}, '
+                              f'lr_scale = {lr_scale:.3g}')
 
         # Verbose output
         if verbose and step % 100 == 0:
@@ -520,7 +526,9 @@ def finish_training_GD_auxetic_batch(
                 history=history,
                 network=network,
                 task_config=task_config,
-                current_step=step,
+                current_step=len(history['loss']),  # global step count, not
+                                                      # loop-local `step` — see
+                                                      # module note on resume.
                 results_dir=TARGETED_RESULTS_DIR,
                 network_type=network_type,
             )
@@ -572,7 +580,9 @@ def finish_training_GD_auxetic_batch_jax(
     task_seed=None, realization_seed=None, save_interval=10,
     task_config=None, TARGETED_RESULTS_DIR=None,
     fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE, loss_tol=1e-6,
-    fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2,
+    fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2, momentum=0.0,
+    opt_fire=False, opt_fire_dt_max=None, opt_fire_dt_min=None,
+    opt_fire_alpha_start=0.1, opt_fire_finc=1.1, opt_fire_fdec=0.5, opt_fire_falpha=0.99,
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
@@ -611,6 +621,32 @@ def finish_training_GD_auxetic_batch_jax(
             destabilize the integrator (diverges to NaN) — stay well under it;
             these defaults have margin. See docs/jax_solver_speedup.md.
         loss_tol: Early-stopping threshold — training stops once loss drops below this
+        momentum: SGD momentum coefficient in [0, 1). velocity = momentum*velocity +
+            grad; step = current_lr * velocity. momentum=0 (default) makes
+            velocity == grad_np every step, i.e. exactly today's update rule —
+            fully backward compatible, opt-in only. Ignored if opt_fire=True.
+        opt_fire: If True, replace the learning_rate/lr_schedule/momentum update
+            with a FIRE-style adaptive step on the stiffness "landscape" —
+            same P=vel.f power-criterion algorithm already used for the
+            physics position relaxation (base.simulate.make_compute_response_fire),
+            applied here to (stiffnesses, -grad) instead of (positions, force):
+            velocity is bent toward the downhill direction and dt grows while
+            consecutive steps keep making progress (P>=0); the moment a step
+            would go uphill (P<0), velocity resets to zero and dt collapses.
+            This targets exactly the failure mode plain momentum showed
+            (accumulated velocity carrying through a bad step into a much
+            harder-to-relax configuration) using an already-validated
+            mechanism instead of a new one. Self-adapts every step, so
+            lr_schedule's 1000-step decay is bypassed entirely in this mode.
+            Default off — fully backward compatible, opt-in only.
+        opt_fire_dt_max, opt_fire_dt_min: Step-size bounds for opt_fire.
+            Default to 10*learning_rate and 1e-3*learning_rate (None triggers
+            these defaults) — learning_rate is reused as opt_fire's dt_init,
+            so the calibrated starting LR still sets the initial scale.
+        opt_fire_alpha_start, opt_fire_finc, opt_fire_fdec, opt_fire_falpha:
+            Standard FIRE hyperparameters (velocity-mixing rate, dt growth/
+            shrink factors, alpha decay) — defaults match
+            make_compute_response_fire's own defaults.
 
     Returns:
         (history, trained_network)
@@ -619,6 +655,15 @@ def finish_training_GD_auxetic_batch_jax(
     last_relaxed_positions = np.copy(network.positions)
     loss = np.inf
     min_loss = np.inf
+    velocity = np.zeros(len(network.stiffnesses))
+
+    if opt_fire and momentum != 0.0:
+        raise ValueError("opt_fire and momentum are mutually exclusive — opt_fire "
+                          "manages its own velocity/step-size state.")
+    _opt_dt = learning_rate
+    _opt_alpha = opt_fire_alpha_start
+    _opt_dt_max = opt_fire_dt_max if opt_fire_dt_max is not None else 10 * learning_rate
+    _opt_dt_min = opt_fire_dt_min if opt_fire_dt_min is not None else 1e-3 * learning_rate
 
     # Initialize history
     for key in ('stiffnesses', 'loss', 'positions'):
@@ -703,8 +748,36 @@ def finish_training_GD_auxetic_batch_jax(
 
         # --- Update stiffnesses ---
         grad_norm = np.linalg.norm(grad_np)
-        if grad_norm > 0:
-            network.stiffnesses = np.array(network.stiffnesses) - learning_rate * grad_np / grad_norm
+        if opt_fire:
+            # FIRE power criterion (mirrors make_compute_response_fire's
+            # body_fn): f is the "force" (downhill direction). P>=0 means
+            # this step's velocity still points downhill — bend it toward f
+            # and grow dt; P<0 means it doesn't — reset velocity to zero and
+            # collapse dt, exactly the guard plain momentum was missing.
+            f = -grad_np
+            P = float(np.dot(velocity, f))
+            if P >= 0:
+                vnorm = np.linalg.norm(velocity)
+                fnorm = np.linalg.norm(f)
+                if fnorm > 0:
+                    velocity = (1 - _opt_alpha) * velocity + _opt_alpha * f * (vnorm / fnorm)
+                _opt_dt = min(_opt_dt * opt_fire_finc, _opt_dt_max)
+                _opt_alpha *= opt_fire_falpha
+            else:
+                velocity = np.zeros_like(velocity)
+                _opt_dt = max(_opt_dt * opt_fire_fdec, _opt_dt_min)
+                _opt_alpha = opt_fire_alpha_start
+            velocity = velocity + _opt_dt * f
+            current_lr = _opt_dt
+            lr_scale = _opt_dt / learning_rate
+            network.stiffnesses = np.array(network.stiffnesses) + _opt_dt * velocity
+        else:
+            # lr_scale is a pure function of the loss trajectory so far (see
+            # module note on resume) — no normalized-gradient step anymore.
+            lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
+            current_lr = learning_rate * lr_scale
+            velocity = momentum * velocity + grad_np
+            network.stiffnesses = np.array(network.stiffnesses) - current_lr * velocity
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # Check for NaN
@@ -726,7 +799,8 @@ def finish_training_GD_auxetic_batch_jax(
         if loss < min_loss:
             min_loss = loss
 
-        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}, init loss = {history["loss"][0]:.4e}, log mean update ={np.mean(np.log10(np.abs(grad_np / grad_norm + 1e-12))):.2f})')
+        pbar.set_description(f'(loss = {loss:.4e}, min loss={min_loss:.4e}, init loss = {history["loss"][0]:.4e}, '
+                              f'grad_norm = {grad_norm:.4e}, lr_scale = {lr_scale:.3g})')
 
         if verbose and step % save_interval == 0:
             print(f"\nStep {step}:")
@@ -744,7 +818,7 @@ def finish_training_GD_auxetic_batch_jax(
             save_checkpoint(
                 task_seed=task_seed, realization_seed=realization_seed,
                 history=history, network=network,
-                task_config=task_config, current_step=step,
+                task_config=task_config, current_step=len(history['loss']),
                 results_dir=TARGETED_RESULTS_DIR,
                 network_type=network_type,
             )

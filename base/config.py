@@ -94,7 +94,8 @@ def get_n_nodes(task_seed: int) -> int:
 # Training Hyperparameters
 # ============================================================================
 
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-3  # raw-gradient starting lr (lr-schedule-calibration sweep median ~1.09e-3
+                       # over targeted tasks 3/5/15); decayed by training.src.lr_schedule
 N_STEPS = 10_000  # Number of training iterations
 # Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
 N_STRAIN_STEPS = 300  # Number of steps in quasistatic trajectory (tasks < 20)
@@ -148,7 +149,10 @@ ALLOSTERIC_DATA_DIR = LOCAL_ALLOSTERIC_DIR
 
 # Legacy cluster-style aliases kept for backward compatibility with runners
 ENSEMBLE_DIR  = CLUSTER_ENSEMBLE_DIR
-RESULTS_DIR   = CLUSTER_ENSEMBLE_DIR / 'results_new_sqr'
+# '_aug' keeps the raw-gradient/lr-schedule runs (this branch) from writing
+# into the pre-existing normalized-gradient results — resume/checkpoint
+# logic is unchanged, it just now resumes from whatever's under this new path.
+RESULTS_DIR   = CLUSTER_ENSEMBLE_DIR / 'results_new_sqr_aug'
 CHECKPOINT_DIR = CLUSTER_ENSEMBLE_DIR / 'checkpoints_new_sqr'
 
 # ============================================================================
