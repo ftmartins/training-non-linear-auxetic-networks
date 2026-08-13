@@ -581,6 +581,8 @@ def finish_training_GD_auxetic_batch_jax(
     task_config=None, TARGETED_RESULTS_DIR=None,
     fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE, loss_tol=1e-6,
     fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2, momentum=0.0,
+    opt_fire=False, opt_fire_dt_max=None, opt_fire_dt_min=None,
+    opt_fire_alpha_start=0.1, opt_fire_finc=1.1, opt_fire_fdec=0.5, opt_fire_falpha=0.99,
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
@@ -622,7 +624,29 @@ def finish_training_GD_auxetic_batch_jax(
         momentum: SGD momentum coefficient in [0, 1). velocity = momentum*velocity +
             grad; step = current_lr * velocity. momentum=0 (default) makes
             velocity == grad_np every step, i.e. exactly today's update rule —
-            fully backward compatible, opt-in only.
+            fully backward compatible, opt-in only. Ignored if opt_fire=True.
+        opt_fire: If True, replace the learning_rate/lr_schedule/momentum update
+            with a FIRE-style adaptive step on the stiffness "landscape" —
+            same P=vel.f power-criterion algorithm already used for the
+            physics position relaxation (base.simulate.make_compute_response_fire),
+            applied here to (stiffnesses, -grad) instead of (positions, force):
+            velocity is bent toward the downhill direction and dt grows while
+            consecutive steps keep making progress (P>=0); the moment a step
+            would go uphill (P<0), velocity resets to zero and dt collapses.
+            This targets exactly the failure mode plain momentum showed
+            (accumulated velocity carrying through a bad step into a much
+            harder-to-relax configuration) using an already-validated
+            mechanism instead of a new one. Self-adapts every step, so
+            lr_schedule's 1000-step decay is bypassed entirely in this mode.
+            Default off — fully backward compatible, opt-in only.
+        opt_fire_dt_max, opt_fire_dt_min: Step-size bounds for opt_fire.
+            Default to 10*learning_rate and 1e-3*learning_rate (None triggers
+            these defaults) — learning_rate is reused as opt_fire's dt_init,
+            so the calibrated starting LR still sets the initial scale.
+        opt_fire_alpha_start, opt_fire_finc, opt_fire_fdec, opt_fire_falpha:
+            Standard FIRE hyperparameters (velocity-mixing rate, dt growth/
+            shrink factors, alpha decay) — defaults match
+            make_compute_response_fire's own defaults.
 
     Returns:
         (history, trained_network)
@@ -632,6 +656,14 @@ def finish_training_GD_auxetic_batch_jax(
     loss = np.inf
     min_loss = np.inf
     velocity = np.zeros(len(network.stiffnesses))
+
+    if opt_fire and momentum != 0.0:
+        raise ValueError("opt_fire and momentum are mutually exclusive — opt_fire "
+                          "manages its own velocity/step-size state.")
+    _opt_dt = learning_rate
+    _opt_alpha = opt_fire_alpha_start
+    _opt_dt_max = opt_fire_dt_max if opt_fire_dt_max is not None else 10 * learning_rate
+    _opt_dt_min = opt_fire_dt_min if opt_fire_dt_min is not None else 1e-3 * learning_rate
 
     # Initialize history
     for key in ('stiffnesses', 'loss', 'positions'):
@@ -715,13 +747,37 @@ def finish_training_GD_auxetic_batch_jax(
         history['positions'].append(np.copy(min_pos))
 
         # --- Update stiffnesses ---
-        # lr_scale is a pure function of the loss trajectory so far (see
-        # module note on resume) — no normalized-gradient step anymore.
         grad_norm = np.linalg.norm(grad_np)
-        lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
-        current_lr = learning_rate * lr_scale
-        velocity = momentum * velocity + grad_np
-        network.stiffnesses = np.array(network.stiffnesses) - current_lr * velocity
+        if opt_fire:
+            # FIRE power criterion (mirrors make_compute_response_fire's
+            # body_fn): f is the "force" (downhill direction). P>=0 means
+            # this step's velocity still points downhill — bend it toward f
+            # and grow dt; P<0 means it doesn't — reset velocity to zero and
+            # collapse dt, exactly the guard plain momentum was missing.
+            f = -grad_np
+            P = float(np.dot(velocity, f))
+            if P >= 0:
+                vnorm = np.linalg.norm(velocity)
+                fnorm = np.linalg.norm(f)
+                if fnorm > 0:
+                    velocity = (1 - _opt_alpha) * velocity + _opt_alpha * f * (vnorm / fnorm)
+                _opt_dt = min(_opt_dt * opt_fire_finc, _opt_dt_max)
+                _opt_alpha *= opt_fire_falpha
+            else:
+                velocity = np.zeros_like(velocity)
+                _opt_dt = max(_opt_dt * opt_fire_fdec, _opt_dt_min)
+                _opt_alpha = opt_fire_alpha_start
+            velocity = velocity + _opt_dt * f
+            current_lr = _opt_dt
+            lr_scale = _opt_dt / learning_rate
+            network.stiffnesses = np.array(network.stiffnesses) + _opt_dt * velocity
+        else:
+            # lr_scale is a pure function of the loss trajectory so far (see
+            # module note on resume) — no normalized-gradient step anymore.
+            lr_scale, _ = lr_schedule.lr_scale_for_step(history['loss'])
+            current_lr = learning_rate * lr_scale
+            velocity = momentum * velocity + grad_np
+            network.stiffnesses = np.array(network.stiffnesses) - current_lr * velocity
         network.stiffnesses = np.clip(network.stiffnesses, vmin, vmax)
 
         # Check for NaN
