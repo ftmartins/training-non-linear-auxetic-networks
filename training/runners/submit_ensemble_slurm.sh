@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=20gb
-#SBATCH --array=500-600%200
+#SBATCH --array=0-600%200
 #SBATCH --begin=now
 #SBATCH --job-name=auxetic_ensemble
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/auxetic_training_%A_%a.out
@@ -57,13 +57,13 @@ REALIZATION_SEED=$((SLURM_ARRAY_TASK_ID % 20))
 
 # Network generation method: 'jammed' (default) or 'lattice'.
 # Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_ensemble_slurm.sh
-NETWORK_TYPE="${NETWORK_TYPE:-jammed}"
+NETWORK_TYPE=jammed
 
 # Gradient computation method: 'jax' (default here), 'parallel', 'newton', or 'fire'.
 # Results are partitioned by this value (results_dir/<gradient_method>/task_XX/...),
 # so it must match between training and the post-training analysis scripts below.
 # Override at submission time, e.g.: sbatch --export=GRADIENT_METHOD=parallel submit_ensemble_slurm.sh
-GRADIENT_METHOD="${GRADIENT_METHOD:-jax}"
+GRADIENT_METHOD=newton
 
 echo ""
 echo "Running training:"

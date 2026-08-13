@@ -5,8 +5,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=4gb
-#SBATCH --array=0-23%25
+#SBATCH --mem=20gb
+#SBATCH --begin=now
+#SBATCH --array=15%25
 #SBATCH --job-name=allosteric
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_%A_%a.out
 #SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_%A_%a.err
@@ -40,7 +41,7 @@ echo "Conda env: ${CONDA_DEFAULT_ENV}"
 
 GEOMETRY_ID=$((SLURM_ARRAY_TASK_ID / 25))
 TASK_ID=$(((SLURM_ARRAY_TASK_ID / 5) % 5))
-REALIZATION_ID=$((SLURM_ARRAY_TASK_ID % 10))
+REALIZATION_ID=$((SLURM_ARRAY_TASK_ID % 5))
 
 echo ""
 echo "Geometry ID:    ${GEOMETRY_ID}"
@@ -52,9 +53,9 @@ python allosteric_trainer.py \
     --geometry-id    ${GEOMETRY_ID} \
     --task-id        ${TASK_ID} \
     --realization-id ${REALIZATION_ID} \
-    --training-steps 25000 \
+    --training-steps 5000 \
     --output-dir     /data2/shared/felipetm/allosteric_nets \
-    --targeted-ensemble 
+    --targeted-ensemble
 
 EXIT_CODE=$?
 
@@ -62,11 +63,10 @@ if [ ${EXIT_CODE} -eq 0 ]; then
     echo ""
     echo "Running post-training timestep-sweep analysis..."
     python post_training_sweep.py --task-type allosteric \
-        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID} \
-        --targeted-ensemble
+        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID} --targeted-ensemble
+
     python verify_and_plot_loss.py --task-type allosteric \
-        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID} \
-        --targeted-ensemble
+        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID} --targeted-ensemble
 fi
 
 echo ""

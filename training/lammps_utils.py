@@ -5,9 +5,12 @@ import warnings
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from lammps import lammps
 
 _STOPPING_CRITERION_RE = re.compile(r"Stopping criterion\s*=\s*(.+)")
 
+
+warnings.filterwarnings("ignore")
 
 def incidence_to_edges(incidence):
     edges = []
@@ -84,7 +87,6 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
 
     Returns frames: list of (N, 2) node position arrays, one per step.
     """
-    from lammps import lammps  # deferred: only 'lammps' solver users need this installed
 
     bond_coeffs_free    = "bond_coeffs_free.in"
     bond_coeffs_clamped = "bond_coeffs_clamped.in"
@@ -148,11 +150,11 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
             log_fh.seek(log_pos)
             new_log_text = log_fh.read()
             log_pos = log_fh.tell()
-        if fnorm > 1e-6:
+        if fnorm/3*N > 1e-6:
             reasons = _STOPPING_CRITERION_RE.findall(new_log_text)
             stop_reason = reasons[-1].strip() if reasons else "unknown (log parse failed)"
             warnings.warn(
-                f"LAMMPS minimize did not converge at step {step}: fnorm={fnorm:.3e} > 1e-6 "
+                f"LAMMPS minimize did not converge at step {step}: fnorm={(fnorm/3*N):.3e} > 1e-6 "
                 f"(stopping criterion: {stop_reason})",
                 RuntimeWarning,
             )

@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH -t 2-00:00:00
-#SBATCH --qos=low
-#SBATCH --partition=low
+#SBATCH -t 5-00:00:00
+#SBATCH --qos=liu
+#SBATCH --partition=liu_compute
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=20gb
-#SBATCH --array=0%50
+#SBATCH --array=0-24%50
 #SBATCH --begin=now
 #SBATCH --job-name=targeted_auxetic
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/targeted_%A_%a.out
@@ -39,14 +39,14 @@ conda activate auxetic_nets
 echo "Python: $(which python)"
 echo "Conda env: ${CONDA_DEFAULT_ENV}"
 
-TASK_ID=$((SLURM_ARRAY_TASK_ID / 1))
-REALIZATION=$((SLURM_ARRAY_TASK_ID % 1))
+TASK_ID=$((SLURM_ARRAY_TASK_ID / 5))
+REALIZATION=$((SLURM_ARRAY_TASK_ID % 5))
 
 # Network generation method: 'jammed' (default) or 'lattice'.
 # Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_targeted.sh
 
-NETWORK_TYPE=lattice
-GRADIENT_METHOD=newton
+NETWORK_TYPE=jammed
+GRADIENT_METHOD=jax
 
 # Gradient computation method: 'newton' (default), 'jax', 'fire', or 'parallel'.
 # Results are partitioned by this value (results_dir/<gradient_method>/task_XX/...),
