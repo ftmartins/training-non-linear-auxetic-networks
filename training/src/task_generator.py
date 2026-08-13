@@ -10,8 +10,8 @@ from base.config import (
     get_compression_pool, get_poisson_pool,
     STIFFNESS_LOG_MIN, STIFFNESS_LOG_MAX,
 )
-N_TASKS = 20
-N_REALIZATIONS = 10
+N_TASKS = 30  # matches base.config.N_TASKS, the authoritative value ensemble_runner.py uses
+N_REALIZATIONS = 5  # screened realizations per task — see training/src/good_realizations.py
 
 def generate_task_config(task_seed):
     """

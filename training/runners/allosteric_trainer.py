@@ -48,6 +48,7 @@ from training.src.run_provenance import (
     DEFAULT_CRITICAL_KEYS,
 )
 from training.src import lr_schedule
+from training.src.good_realizations import get_realization_seed
 
 # Code archived alongside each realization's results (see save_code_snapshot)
 # so the exact code that produced it is recoverable without relying on git
@@ -79,7 +80,7 @@ NSTEPS_TASK2   = 20
 
 N_GEOMETRIES   = 5
 N_TASKS        = 5
-N_REALIZATIONS = 10 # 5
+N_REALIZATIONS = 5
 N_TRAINING_STEPS = 1_000
 
 # Non-overlapping seed namespaces
@@ -772,7 +773,12 @@ def main():
             print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]"
                   f"  (resumed from step {start_step})")
         else:
-            rrng = realization_rng(rid)
+            # rid (0..N_REALIZATIONS-1) is a serial index into the screened-good
+            # seeds for this task[, geometry], not a literal RNG seed — see
+            # training/src/good_realizations.py / docs/realization_screening.md.
+            kind = 'allosteric_targeted' if targeted else 'allosteric_general'
+            screened_seed = get_realization_seed(kind, tid, rid, geometry_id=None if targeted else gid)
+            rrng = realization_rng(screened_seed)
             stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
             msearray  = np.array([])
             msearray2 = np.array([])

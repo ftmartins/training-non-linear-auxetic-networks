@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=20gb
-#SBATCH --array=0-600%200
+#SBATCH --array=0-149%50
 #SBATCH --begin=now
 #SBATCH --job-name=auxetic_ensemble
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/auxetic_training_%A_%a.out
@@ -17,18 +17,17 @@
 # ============================================================================
 #
 # This script runs ensemble training with checkpointing support.
-# Total jobs: 500 (10 tasks × 50 realizations)
+# Total jobs: 150 (30 tasks × 5 screened realizations — see
+# training/src/good_realizations.py and docs/realization_screening.md)
 #
-# Array indices 0-499 map to:
-#   task_seed = SLURM_ARRAY_TASK_ID / 50
-#   realization_seed = SLURM_ARRAY_TASK_ID % 50
+# Array indices 0-149 map to:
+#   task_seed = SLURM_ARRAY_TASK_ID / 5
+#   realization_seed = SLURM_ARRAY_TASK_ID % 5
 #
 # Features:
 #   - Automatic checkpoint/resume on failure
 #   - Skips already completed jobs
-#   - 8 CPUs for parallel gradient computation
-#   - 5GB memory per job
-#   - Max 20 jobs running simultaneously (%20)
+#   - Max 50 jobs running simultaneously (%50)
 #
 # ============================================================================
 
@@ -52,8 +51,8 @@ echo "Python: $(which python)"
 echo "Conda env: ${CONDA_DEFAULT_ENV}"
 
 # Calculate task and realization seeds from array index
-TASK_SEED=$((SLURM_ARRAY_TASK_ID / 20))
-REALIZATION_SEED=$((SLURM_ARRAY_TASK_ID % 20))
+TASK_SEED=$((SLURM_ARRAY_TASK_ID / 5))
+REALIZATION_SEED=$((SLURM_ARRAY_TASK_ID % 5))
 
 # Network generation method: 'jammed' (default) or 'lattice'.
 # Override at submission time, e.g.: sbatch --export=NETWORK_TYPE=lattice submit_ensemble_slurm.sh
@@ -63,7 +62,7 @@ NETWORK_TYPE=jammed
 # Results are partitioned by this value (results_dir/<gradient_method>/task_XX/...),
 # so it must match between training and the post-training analysis scripts below.
 # Override at submission time, e.g.: sbatch --export=GRADIENT_METHOD=parallel submit_ensemble_slurm.sh
-GRADIENT_METHOD=newton
+GRADIENT_METHOD=jax
 
 echo ""
 echo "Running training:"

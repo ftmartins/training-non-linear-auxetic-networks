@@ -40,8 +40,19 @@ VMIN = 1e-4
 VMAX = 1e2
 
 
-LEARNING_RATE = 1e-3  # raw-gradient starting lr (lr-schedule-calibration sweep median ~1.09e-3
-                       # over tasks 3/5/15); decayed by training.src.lr_schedule
+LEARNING_RATE = 3e-3  # starting lr / opt_fire dt_init (opt_fire hyperparameter grid sweep,
+                       # tasks 3/15); decayed by training.src.lr_schedule when not using opt_fire
+OPT_FIRE_FINC = 1.05   # opt_fire growth factor (same sweep) — never diverged in the grid
+USE_OPT_FIRE = True    # FIRE-style adaptive optimizer vs plain gradient descent. Short A/B test
+                       # (2026-08-13, tasks 3/15, 200-step budget, lr=3e-3 both): GD's early
+                       # minima were competitive with (task 15: even better than) FIRE's, but GD
+                       # could not sustain progress — it oscillated, then the stiffness update
+                       # went NaN on BOTH tasks (step 5/12, physics solver needing 100-500x longer
+                       # per step beforehand) well short of the step budget. FIRE completed both
+                       # runs to full length with no NaN. Decisive for production use: a run that
+                       # can't finish is worse than one with a middling final loss.
+                       # 'optimizer' is a critical key in training_meta.json, so resuming under a
+                       # different choice crashes rather than silently mixing trajectories.
 
 # Import targeted config and task definitions
 from training.src.targeted_task_generator import (
@@ -54,6 +65,7 @@ from training.src.targeted_task_generator import (
 
 # Import shared utilities
 from training.src.task_generator import generate_realization_stiffnesses, compute_target_extensions
+from training.src.good_realizations import get_realization_seed
 from base.network_utils import create_auxetic_network
 from training.src.checkpoint_manager import (
     is_training_complete,
@@ -134,12 +146,15 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     # resuming a checkpoint trained under OLD hyperparameters and merely
     # relabeling training_meta.json with the NEW ones would make it describe
     # a run that never actually happened.
+    optimizer = 'fire' if (gradient_method == 'jax' and USE_OPT_FIRE) else 'gradient_descent'
     critical_hparams = {
         'learning_rate': LEARNING_RATE,
         'k_min': VMIN,
         'k_max': VMAX,
         'force_tol': FORCE_TOL,
         'gradient_method': gradient_method,
+        'optimizer': optimizer,
+        'opt_fire_finc': OPT_FIRE_FINC,
     }
     if job_has_critical_mismatch(task_id, realization_seed, critical_hparams,
                                  results_dir=results_dir, network_type=network_type):
@@ -230,7 +245,11 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             if verbose:
                 print("Step 3: Initializing random stiffnesses...")
             n_edges = len(network.edges)
-            initial_stiffnesses = generate_realization_stiffnesses(task_id, realization_seed, n_edges)
+            # realization_seed (0..N_REALIZATIONS-1) is a serial index into
+            # the screened-good seeds for this task, not a literal RNG seed
+            # — see training/src/good_realizations.py / docs/realization_screening.md.
+            screened_seed = get_realization_seed('auxetic_targeted', task_id, realization_seed)
+            initial_stiffnesses = generate_realization_stiffnesses(task_id, screened_seed, n_edges)
             network.stiffnesses = initial_stiffnesses
             network.save_original_parameters()
             print(f"  Stiffnesses initialized: range "
@@ -265,6 +284,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 'n_steps': N_STEPS,
                 'force_tol': FORCE_TOL,
                 'gradient_method': gradient_method,
+                'optimizer': optimizer,
+                'opt_fire_finc': OPT_FIRE_FINC,
             },
             results_dir=results_dir,
             network_type=network_type,
@@ -280,7 +301,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         def _run_train(net, hist, lr, n_steps):
             if gradient_method == 'jax':
                 train_fn = finish_training_GD_auxetic_batch_jax
-                method_kwarg = {}
+                method_kwarg = {'opt_fire': USE_OPT_FIRE, 'opt_fire_finc': OPT_FIRE_FINC}
             else:
                 train_fn = finish_training_GD_auxetic_batch
                 method_kwarg = {'method': 'fire' if gradient_method in ('fire', 'parallel') else gradient_method}

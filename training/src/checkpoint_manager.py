@@ -425,7 +425,8 @@ def job_has_critical_mismatch(task_seed, realization_seed, hyperparams, results_
                                network_type=NETWORK_TYPE):
     """
     Read-only check: do this job's critical hyperparameters (solver/
-    gradient_method/learning_rate/k_min/k_max/force_tol by default) conflict
+    gradient_method/learning_rate/k_min/k_max/force_tol/optimizer/
+    opt_fire_finc by default) conflict
     with what's already recorded in its training_meta.json?
 
     Call this BEFORE loading any checkpoint or doing NaN/completion checks —
@@ -493,7 +494,7 @@ def save_run_metadata(task_seed, realization_seed, hyperparams, results_dir=None
     training.src.run_provenance for details of each):
       - training_meta[_<network_type>].json: `hyperparams`, written once.
         Critical keys (solver/gradient_method/learning_rate/k_min/k_max/
-        force_tol) are enforced to match on every subsequent call — a
+        force_tol/optimizer/opt_fire_finc) are enforced to match on every subsequent call — a
         mismatch raises HyperparameterMismatchError unless overwrite=True,
         so a job can't silently resume under different physics/optimizer
         settings. n_steps always tracks the current value (training longer

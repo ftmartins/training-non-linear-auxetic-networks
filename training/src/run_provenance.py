@@ -8,8 +8,9 @@ exactly what ran).
 Files written per run directory:
   - training_meta.json    : single dict, written once. Critical keys
                              (solver/gradient_method/learning_rate/k_min/
-                             k_max/force_tol by default) are enforced to
-                             match on every subsequent call, raising
+                             k_max/force_tol/optimizer/opt_fire_finc by
+                             default) are enforced to match on every
+                             subsequent call, raising
                              HyperparameterMismatchError on conflict unless
                              overwrite=True — resuming a job under different
                              physics/optimizer settings would otherwise
@@ -35,6 +36,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_CRITICAL_KEYS = frozenset({
     'solver', 'gradient_method', 'learning_rate', 'k_min', 'k_max', 'force_tol',
+    'optimizer', 'opt_fire_finc',
 })
 
 

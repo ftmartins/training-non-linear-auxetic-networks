@@ -7,23 +7,22 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=20gb
 #SBATCH --begin=now
-#SBATCH --array=0-124%25
-#SBATCH --job-name=allosteric
-#SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_%A_%a.out
-#SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_%A_%a.err
+#SBATCH --array=0-24%25
+#SBATCH --job-name=allosteric_targeted
+#SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_targeted_%A_%a.out
+#SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/allosteric_targeted_%A_%a.err
 
 # ============================================================================
-# SLURM array for the GENERAL allosteric ensemble: 5 geometries × 5 tasks ×
-# 5 realizations = 125 jobs total (array indices 0-124). Each job gets its
-# own geometry (unlike submit_allosteric_targeted.sh, which shares one fixed
-# geometry across all tasks/realizations).
+# SLURM array for the TARGETED allosteric ensemble: 5 tasks × 5 realizations
+# = 25 jobs total (array indices 0-24), all sharing one fixed geometry
+# (--targeted-ensemble makes allosteric_trainer.py ignore --geometry-id and
+# use TARGETED_ENSEMBLE's fixed shared geometry instead).
 #
 # Index encoding:
-#   geometry_id    = SLURM_ARRAY_TASK_ID / 25        (0-4)
-#   task_id        = (SLURM_ARRAY_TASK_ID / 5) % 5  (0-4)
-#   realization_id = SLURM_ARRAY_TASK_ID % 5         (0-4)
+#   task_id        = SLURM_ARRAY_TASK_ID / 5   (0-4)
+#   realization_id = SLURM_ARRAY_TASK_ID % 5   (0-4)
 #
-# Output: <OUTPUT_DIR>/geometry_<g>/task_<t>/realization_<r>/
+# Output: <OUTPUT_DIR>/geometry_targeted/task_<t>/realization_<r>/
 # ============================================================================
 
 echo "=========================================="
@@ -41,22 +40,20 @@ conda activate auxetic_nets
 echo "Python: $(which python)"
 echo "Conda env: ${CONDA_DEFAULT_ENV}"
 
-GEOMETRY_ID=$((SLURM_ARRAY_TASK_ID / 25))
-TASK_ID=$(((SLURM_ARRAY_TASK_ID / 5) % 5))
+TASK_ID=$((SLURM_ARRAY_TASK_ID / 5))
 REALIZATION_ID=$((SLURM_ARRAY_TASK_ID % 5))
 
 echo ""
-echo "Geometry ID:    ${GEOMETRY_ID}"
 echo "Task ID:        ${TASK_ID}"
 echo "Realization ID: ${REALIZATION_ID}"
 echo ""
 
 python allosteric_trainer.py \
-    --geometry-id    ${GEOMETRY_ID} \
     --task-id        ${TASK_ID} \
     --realization-id ${REALIZATION_ID} \
     --training-steps 5000 \
-    --output-dir     /data2/shared/felipetm/allosteric_nets_aug
+    --output-dir     /data2/shared/felipetm/allosteric_nets_aug \
+    --targeted-ensemble
 
 EXIT_CODE=$?
 
@@ -64,10 +61,10 @@ if [ ${EXIT_CODE} -eq 0 ]; then
     echo ""
     echo "Running post-training timestep-sweep analysis..."
     python post_training_sweep.py --task-type allosteric \
-        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID}
+        --task ${TASK_ID} --realization ${REALIZATION_ID} --targeted-ensemble
 
     python verify_and_plot_loss.py --task-type allosteric \
-        --task ${TASK_ID} --realization ${REALIZATION_ID} --geometry ${GEOMETRY_ID}
+        --task ${TASK_ID} --realization ${REALIZATION_ID} --targeted-ensemble
 fi
 
 echo ""
