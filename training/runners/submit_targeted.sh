@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=20gb
-#SBATCH --array=0-24%50
+#SBATCH --array=0-119%50
 #SBATCH --begin=now
 #SBATCH --job-name=targeted_auxetic
 #SBATCH --output=/home1/felipetm/auxetic_networks/ensemble_training/Logs/targeted_%A_%a.out
@@ -16,11 +16,12 @@
 # SLURM Job Array Script for Targeted Training of Auxetic Networks
 # ============================================================================
 #
-# Total jobs: 300 (30 tasks × 10 realizations)
+# Total jobs: 120 (24 tasks × 5 screened realizations — see
+# training/src/good_realizations.py and docs/realization_screening.md)
 #
-# Array indices 0-299 map to:
-#   task_id        = SLURM_ARRAY_TASK_ID / 10
-#   realization    = SLURM_ARRAY_TASK_ID % 10
+# Array indices 0-119 map to:
+#   task_id        = SLURM_ARRAY_TASK_ID / 5
+#   realization    = SLURM_ARRAY_TASK_ID % 5
 #
 # ============================================================================
 

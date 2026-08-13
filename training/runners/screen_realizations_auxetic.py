@@ -40,9 +40,9 @@ N_STEPS = 150
 POOL_SIZE = 15
 VMIN, VMAX = 1e-4, 1e2
 
-# 5 tasks for targeted (matches submit_targeted.sh's actual production scope);
+# 24 tasks for targeted (matches targeted_task_generator.py's TARGETED_TASKS);
 # 30 tasks for general (matches base.config.N_TASKS).
-N_TARGETED_TASKS = 5
+N_TARGETED_TASKS = len(TARGETED_TASKS)
 
 
 def build_grid(kind):

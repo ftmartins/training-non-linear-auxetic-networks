@@ -533,7 +533,7 @@ Examples:
     parser.add_argument(
         '--task',
         type=int,
-        help='Task ID for single mode (0-4)'
+        help='Task ID for single mode (0 to N_TASKS-1)'
     )
     parser.add_argument(
         '--realization',

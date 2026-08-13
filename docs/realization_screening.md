@@ -57,7 +57,7 @@ is `"<task_id>"` (targeted, and auxetic-general) or `"<geometry_id>_<task_id>"`
 
 | Kind | Tasks | Realizations kept | Screening pool | Real jobs |
 |---|---|---|---|---|
-| Auxetic targeted | 5 (`task_id` 0-4) | 5 | 15/task → 75 trials | 25 |
+| Auxetic targeted | 24 (`task_id` 0-23, `TARGETED_TASKS`) | 5 | 15/task → 360 trials | 120 |
 | Auxetic general | 30 (`task_id` 0-29, `base.config.N_TASKS`) | 5 | 15/task → 450 trials | 150 |
 | Allosteric targeted | 5 (`task_id` 0-4, shared fixed geometry) | 5 | 15/task → 75 trials | 25 |
 | Allosteric general | 5 geometries × 5 tasks = 25 pairs | 5 | 15/pair → 375 trials | 125 |
