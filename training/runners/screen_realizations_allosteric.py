@@ -54,7 +54,14 @@ def run_one(kind, task_id, geometry_id, candidate_idx, results_dir):
     seed = SCREEN_SEED_BASE + task_id * 10_000 + (geometry_id or 0) * 100 + candidate_idx
 
     geom_tag = 'targeted' if targeted else f'g{geometry_id}'
-    geom_dir = os.path.join(results_dir, 'geometry_cache', f'{geom_tag}_t{task_id}')
+    # Private per-candidate dir, not shared across the pool: load_or_create_geometry's
+    # check-then-create isn't atomic, so 15 parallel candidates racing on one shared
+    # geom_dir intermittently crashed with EOFError reading a partially-written
+    # incidence_matrix.npy. Regenerating per-candidate is cheap (geometry generation
+    # is trivial next to the 150-step training loop) and matches how production
+    # itself already does it — each real (task, realization) directory gets its own
+    # geometry.npy, never shared/cached across parallel processes.
+    geom_dir = os.path.join(results_dir, 'geometry_cache', f'{geom_tag}_t{task_id}_c{candidate_idx}')
     os.makedirs(geom_dir, exist_ok=True)
 
     work_dir = f"/tmp/screen_allosteric_{geom_tag}_t{task_id}_c{candidate_idx}_{os.getpid()}"
