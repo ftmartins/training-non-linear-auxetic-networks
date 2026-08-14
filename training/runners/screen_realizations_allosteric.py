@@ -128,15 +128,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--kind', choices=['targeted', 'general'], required=True)
     parser.add_argument('--results-dir', required=True)
+    # For expanding an already-screened pool: --n-candidates covers indices
+    # [candidate-offset, candidate-offset + n-candidates), instead of the
+    # default full [0, POOL_SIZE) pool. Trial result filenames are keyed by
+    # candidate_idx, so a new range never overwrites an existing one unless
+    # it deliberately overlaps (e.g. re-screening 0..14 after a hyperparameter
+    # change that invalidates the old candidates there).
+    parser.add_argument('--n-candidates', type=int, default=POOL_SIZE)
+    parser.add_argument('--candidate-offset', type=int, default=0)
     args = parser.parse_args()
 
     grid = build_grid(args.kind)
     idx = int(os.environ.get('SLURM_ARRAY_TASK_ID', '0'))
-    grid_pos, candidate_idx = divmod(idx, POOL_SIZE)
+    grid_pos, local_idx = divmod(idx, args.n_candidates)
     if grid_pos >= len(grid):
         print(f"idx={idx} -> grid_pos={grid_pos} out of range ({len(grid)} grid cells); nothing to do.")
         return
     task_id, geometry_id = grid[grid_pos]
+    candidate_idx = args.candidate_offset + local_idx
     run_one(args.kind, task_id, geometry_id, candidate_idx, args.results_dir)
 
 

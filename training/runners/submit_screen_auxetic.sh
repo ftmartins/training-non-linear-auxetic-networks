@@ -12,10 +12,13 @@
 #SBATCH --error=/home1/felipetm/auxetic_networks/ensemble_training/Logs/screen_auxetic_%A_%a.err
 
 # Realization screening for auxetic training — see docs/realization_screening.md.
-# Submit with explicit --array (POOL_SIZE * n_tasks - 1) and --export=KIND=targeted|general,
+# Submit with explicit --array (N_CANDIDATES * n_tasks - 1) and
+# --export=KIND=targeted|general,RESULTS_DIR=<dir>[,N_CANDIDATES=<n>,CANDIDATE_OFFSET=<n>],
 # e.g.:
 #   sbatch --array=0-74%50   --export=KIND=targeted,RESULTS_DIR=<dir> submit_screen_auxetic.sh
 #   sbatch --array=0-449%50  --export=KIND=general,RESULTS_DIR=<dir>  submit_screen_auxetic.sh
+#   # expand an existing pool with 25 more candidates (indices 15-39):
+#   sbatch --array=0-599%50 --export=KIND=targeted,RESULTS_DIR=<dir>,N_CANDIDATES=25,CANDIDATE_OFFSET=15 submit_screen_auxetic.sh
 #
 # 8GB is generous headroom post-lax.scan (base/simulate.py's
 # compute_quasistatic_trajectory_auxetic_jax): the same compile that used to
@@ -26,6 +29,10 @@ cd $SLURM_SUBMIT_DIR
 eval "$(conda shell.bash hook)"
 conda activate auxetic_nets
 echo "Python: $(which python)"
-echo "KIND=${KIND} RESULTS_DIR=${RESULTS_DIR} ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID}"
+echo "KIND=${KIND} RESULTS_DIR=${RESULTS_DIR} ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID} N_CANDIDATES=${N_CANDIDATES} CANDIDATE_OFFSET=${CANDIDATE_OFFSET}"
 
-python screen_realizations_auxetic.py --kind "${KIND}" --results-dir "${RESULTS_DIR}"
+EXTRA_ARGS=""
+[ -n "${N_CANDIDATES}" ] && EXTRA_ARGS="${EXTRA_ARGS} --n-candidates ${N_CANDIDATES}"
+[ -n "${CANDIDATE_OFFSET}" ] && EXTRA_ARGS="${EXTRA_ARGS} --candidate-offset ${CANDIDATE_OFFSET}"
+
+python screen_realizations_auxetic.py --kind "${KIND}" --results-dir "${RESULTS_DIR}" ${EXTRA_ARGS}

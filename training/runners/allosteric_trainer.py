@@ -65,7 +65,7 @@ K_MIN    = 1e-4
 K_MAX    = 1e1
 ETA      = 1.0
 K_OUTPUT = 1e3
-LEARNING_RATE = 1.0     # starting lr, decayed by lr_schedule; override with --learning-rate
+LEARNING_RATE = 10.0    # starting lr, decayed by lr_schedule; override with --learning-rate
 
 # Physics backend for evaluate_actuation: 'jax_fire' (default, same
 # differentiable FIRE solver as auxetic training) or 'lammps' (legacy).
