@@ -660,6 +660,16 @@ def main():
     mode_tag = 'targeted' if targeted else f'geometry={gid}'
     print(f"=== Allosteric trainer: {mode_tag}, task={tid}, realization={rid}, solver={solver} ===")
 
+    # rid (0..N_REALIZATIONS-1) is a serial index into the screened-good seeds
+    # for this task[, geometry], not a literal RNG seed — see
+    # training/src/good_realizations.py / docs/realization_screening.md.
+    # Computed here (before the critical-hparams check below) so a mismatch
+    # between this run's screened seed and whatever seed actually produced a
+    # resumed checkpoint is caught the same way as any other critical key,
+    # instead of silently resuming a trajectory screening never selected.
+    _seed_kind = 'allosteric_targeted' if targeted else 'allosteric_general'
+    screened_seed = get_realization_seed(_seed_kind, tid, rid, geometry_id=None if targeted else gid)
+
     # Per-job temp dir so parallel LAMMPS jobs don't share files
     work_dir = f"/tmp/allosteric_{'tgt' if targeted else f'g{gid}'}_t{tid}_r{rid}_{os.getpid()}"
     os.makedirs(work_dir, exist_ok=True)
@@ -702,6 +712,7 @@ def main():
         'k_max': K_MAX,
         'eta': ETA,
         'n_training_steps': training_steps,
+        'realization_seed': screened_seed,
     }
     if has_critical_mismatch(output_path, current_hparams, critical_keys=_ALLOSTERIC_CRITICAL_KEYS):
         if not overwrite:
@@ -709,9 +720,9 @@ def main():
             shutil.rmtree(work_dir, ignore_errors=True)
             raise HyperparameterMismatchError(
                 f"{output_path}/training_meta.json already recorded different solver/"
-                f"learning_rate/k_min/k_max/eta than this run's. Resuming would mix incompatible "
-                f"settings into one training trajectory. Pass --overwrite to wipe it and "
-                f"restart from scratch under the new hyperparameters."
+                f"learning_rate/k_min/k_max/eta/realization_seed than this run's. Resuming would "
+                f"mix incompatible settings into one training trajectory. Pass --overwrite to wipe "
+                f"it and restart from scratch under the new hyperparameters."
             )
         print(f"  --overwrite set: recorded hyperparameters differ from this run's — wiping "
               f"{output_path} and restarting from scratch under the new hyperparameters.")
@@ -773,11 +784,7 @@ def main():
             print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]"
                   f"  (resumed from step {start_step})")
         else:
-            # rid (0..N_REALIZATIONS-1) is a serial index into the screened-good
-            # seeds for this task[, geometry], not a literal RNG seed — see
-            # training/src/good_realizations.py / docs/realization_screening.md.
-            kind = 'allosteric_targeted' if targeted else 'allosteric_general'
-            screened_seed = get_realization_seed(kind, tid, rid, geometry_id=None if targeted else gid)
+            # screened_seed computed earlier, up with current_hparams.
             rrng = realization_rng(screened_seed)
             stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
             msearray  = np.array([])

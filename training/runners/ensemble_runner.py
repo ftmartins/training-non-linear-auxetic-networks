@@ -116,6 +116,15 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
     # checkpoints and results).
     results_dir = results_dir_for_gradient_method(RESULTS_DIR, gradient_method)
 
+    # realization_seed (0..N_REALIZATIONS-1) is a serial index into the
+    # screened-good seeds for this task, not a literal RNG seed — see
+    # training/src/good_realizations.py / docs/realization_screening.md.
+    # Computed here (before critical_hparams below) so a mismatch between
+    # this run's screened seed and whatever seed actually produced a resumed
+    # checkpoint is caught the same way as any other critical key, instead of
+    # silently resuming a trajectory screening never selected.
+    screened_seed = get_realization_seed('auxetic_general', task_seed, realization_seed)
+
     # Guard against silently mixing incompatible hyperparameters into one
     # saved trajectory. Must run BEFORE any checkpoint/completion check —
     # resuming a checkpoint trained under OLD hyperparameters and merely
@@ -130,6 +139,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         'gradient_method': gradient_method,
         'optimizer': optimizer,
         'opt_fire_finc': OPT_FIRE_FINC,
+        'realization_seed': screened_seed,
     }
     if job_has_critical_mismatch(task_seed, realization_seed, critical_hparams,
                                  results_dir=results_dir, network_type=network_type):
@@ -222,10 +232,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
             if verbose:
                 print("Step 3: Initializing random stiffnesses...")
             n_edges = len(network.edges)
-            # realization_seed (0..N_REALIZATIONS-1) is a serial index into
-            # the screened-good seeds for this task, not a literal RNG seed
-            # — see training/src/good_realizations.py / docs/realization_screening.md.
-            screened_seed = get_realization_seed('auxetic_general', task_seed, realization_seed)
+            # screened_seed computed earlier, up with critical_hparams.
             initial_stiffnesses = generate_realization_stiffnesses(
                 task_seed,
                 screened_seed,
@@ -274,6 +281,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
                 'gradient_method': gradient_method,
                 'optimizer': optimizer,
                 'opt_fire_finc': OPT_FIRE_FINC,
+                'realization_seed': screened_seed,
             },
             results_dir=results_dir,
             network_type=network_type,
