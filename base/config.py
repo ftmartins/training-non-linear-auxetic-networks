@@ -107,7 +107,7 @@ USE_OPT_FIRE = True    # FIRE-style adaptive optimizer vs plain gradient descent
                        # can't finish is worse than one with a middling final loss.
                        # 'optimizer' is a critical key in training_meta.json, so resuming under a
                        # different choice crashes rather than silently mixing trajectories.
-N_STEPS = 2_000  # Number of training iterations
+N_STEPS = 5_000  # Number of training iterations
 # Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
 N_STRAIN_STEPS = 200  # Number of steps in quasistatic trajectory (tasks < 20)
 FORCE_TOL = 1e-6  # Force convergence tolerance
