@@ -43,14 +43,15 @@ VMAX = 1e2
 LEARNING_RATE = 3e-3  # starting lr / opt_fire dt_init (opt_fire hyperparameter grid sweep,
                        # tasks 3/15); decayed by training.src.lr_schedule when not using opt_fire
 OPT_FIRE_FINC = 1.05   # opt_fire growth factor (same sweep) — never diverged in the grid
-USE_OPT_FIRE = True    # FIRE-style adaptive optimizer vs plain gradient descent. Short A/B test
-                       # (2026-08-13, tasks 3/15, 200-step budget, lr=3e-3 both): GD's early
-                       # minima were competitive with (task 15: even better than) FIRE's, but GD
-                       # could not sustain progress — it oscillated, then the stiffness update
-                       # went NaN on BOTH tasks (step 5/12, physics solver needing 100-500x longer
-                       # per step beforehand) well short of the step budget. FIRE completed both
-                       # runs to full length with no NaN. Decisive for production use: a run that
-                       # can't finish is worse than one with a middling final loss.
+USE_OPT_FIRE = False   # FIRE-style adaptive optimizer vs plain gradient descent. Reverted
+                       # 2026-08-15: production runs (targeted task_00/realization_02, general
+                       # task idx 2) showed FIRE trapped in an exact repeating limit cycle —
+                       # traced to 1-2 stiffness coordinates pinned at vmin with a genuinely
+                       # ill-conditioned gradient there. Lowering opt_fire_dt_min 100x only
+                       # relocated the same trap to a smaller floor (confirmed on a fresh,
+                       # non-resumed rerun) — a real gradient singularity, not a step-size
+                       # tuning issue. See base/config.py's USE_OPT_FIRE comment for the
+                       # full writeup.
                        # 'optimizer' is a critical key in training_meta.json, so resuming under a
                        # different choice crashes rather than silently mixing trajectories.
 
