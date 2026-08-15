@@ -636,9 +636,19 @@ def finish_training_GD_auxetic_batch_jax(
             new one. Self-adapts every step, so lr_schedule's 1000-step decay
             is bypassed entirely in this mode. Default off — opt-in only.
         opt_fire_dt_max, opt_fire_dt_min: Step-size bounds for opt_fire.
-            Default to 10*learning_rate and 1e-3*learning_rate (None triggers
+            Default to 10*learning_rate and 1e-5*learning_rate (None triggers
             these defaults) — learning_rate is reused as opt_fire's dt_init,
             so the calibrated starting LR still sets the initial scale.
+            dt_min was originally 1e-3*learning_rate but production runs
+            (2026-08-14, targeted task 2 / general task 27) showed FIRE
+            trapped in an exact repeating limit cycle right at that floor:
+            a few finc=1.05 growth steps followed by one P<0 step that resets
+            dt straight back to the floor, forever, with zero net loss
+            progress — the floor itself was too coarse to take a step small
+            enough to get past whatever local discontinuity (stiffness clip
+            or bond activation) triggers the bad step. Lowering the floor
+            100x gives it room to shrink further before being forced to
+            reset, instead of oscillating against a wall.
         opt_fire_alpha_start, opt_fire_finc, opt_fire_fdec, opt_fire_falpha:
             Standard FIRE hyperparameters (velocity-mixing rate, dt growth/
             shrink factors, alpha decay) — defaults match
@@ -656,7 +666,7 @@ def finish_training_GD_auxetic_batch_jax(
     _opt_dt = learning_rate
     _opt_alpha = opt_fire_alpha_start
     _opt_dt_max = opt_fire_dt_max if opt_fire_dt_max is not None else 10 * learning_rate
-    _opt_dt_min = opt_fire_dt_min if opt_fire_dt_min is not None else 1e-3 * learning_rate
+    _opt_dt_min = opt_fire_dt_min if opt_fire_dt_min is not None else 1e-5 * learning_rate
 
     # Initialize history
     for key in ('stiffnesses', 'loss', 'positions'):
