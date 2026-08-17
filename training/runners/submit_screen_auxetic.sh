@@ -29,10 +29,11 @@ cd $SLURM_SUBMIT_DIR
 eval "$(conda shell.bash hook)"
 conda activate auxetic_nets
 echo "Python: $(which python)"
-echo "KIND=${KIND} RESULTS_DIR=${RESULTS_DIR} ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID} N_CANDIDATES=${N_CANDIDATES} CANDIDATE_OFFSET=${CANDIDATE_OFFSET}"
+echo "KIND=${KIND} RESULTS_DIR=${RESULTS_DIR} ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID} N_CANDIDATES=${N_CANDIDATES} CANDIDATE_OFFSET=${CANDIDATE_OFFSET} LR_SCALE=${LR_SCALE}"
 
 EXTRA_ARGS=""
 [ -n "${N_CANDIDATES}" ] && EXTRA_ARGS="${EXTRA_ARGS} --n-candidates ${N_CANDIDATES}"
 [ -n "${CANDIDATE_OFFSET}" ] && EXTRA_ARGS="${EXTRA_ARGS} --candidate-offset ${CANDIDATE_OFFSET}"
+[ -n "${LR_SCALE}" ] && EXTRA_ARGS="${EXTRA_ARGS} --lr-scale ${LR_SCALE}"
 
 python screen_realizations_auxetic.py --kind "${KIND}" --results-dir "${RESULTS_DIR}" ${EXTRA_ARGS}

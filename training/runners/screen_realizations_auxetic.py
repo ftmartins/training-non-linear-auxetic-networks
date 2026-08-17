@@ -64,9 +64,10 @@ def _optimizer_kwargs(kind):
     return runner.LEARNING_RATE, dict(opt_fire=runner.USE_OPT_FIRE, opt_fire_finc=runner.OPT_FIRE_FINC)
 
 
-def run_one(kind, task_id, candidate_idx, results_dir):
+def run_one(kind, task_id, candidate_idx, results_dir, lr_scale=1.0):
     seed = SCREEN_SEED_BASE + task_id * 10_000 + candidate_idx
     learning_rate, opt_kwargs = _optimizer_kwargs(kind)
+    learning_rate *= lr_scale
 
     if kind == 'targeted':
         task_config = get_targeted_task_config(task_id)
@@ -108,13 +109,13 @@ def run_one(kind, task_id, candidate_idx, results_dir):
         'kind': kind, 'task_id': task_id, 'candidate_idx': candidate_idx, 'seed': seed,
         'final_loss': None if is_nan else float(losses[-1]),
         'min_loss': None if is_nan else float(losses.min()),
-        'n_steps': len(losses), 'time_s': dt, 'nan': is_nan,
+        'n_steps': len(losses), 'time_s': dt, 'nan': is_nan, 'lr_scale': lr_scale,
     }
     result_dir = os.path.join(results_dir, 'trial_results')
     os.makedirs(result_dir, exist_ok=True)
     with open(os.path.join(result_dir, f'{kind}_{task_id}_c{candidate_idx}.json'), 'w') as f:
         json.dump(result, f)
-    print(f"[{kind} task={task_id} cand={candidate_idx} seed={seed}] "
+    print(f"[{kind} task={task_id} cand={candidate_idx} seed={seed} lr_scale={lr_scale}] "
           f"final={result['final_loss']} nan={is_nan} time={dt:.1f}s")
 
 
@@ -130,6 +131,11 @@ def main():
     # change that invalidates the old candidates there).
     parser.add_argument('--n-candidates', type=int, default=POOL_SIZE)
     parser.add_argument('--candidate-offset', type=int, default=0)
+    # Retry a NaN'd candidate at a fraction of the production learning rate
+    # (e.g. --lr-scale 0.2 for 5x lower) without touching the production
+    # default — reuses the same candidate_idx/seed, so a successful rerun
+    # simply overwrites that candidate's NaN result in place.
+    parser.add_argument('--lr-scale', type=float, default=1.0)
     args = parser.parse_args()
 
     grid = build_grid(args.kind)
@@ -140,7 +146,7 @@ def main():
         return
     task_id = grid[task_pos]
     candidate_idx = args.candidate_offset + local_idx
-    run_one(args.kind, task_id, candidate_idx, args.results_dir)
+    run_one(args.kind, task_id, candidate_idx, args.results_dir, lr_scale=args.lr_scale)
 
 
 if __name__ == '__main__':
