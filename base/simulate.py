@@ -786,7 +786,17 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
                                              -K00, -K01, -K01, -K11, -K00, -K01, -K01, -K11])
                 data = (jnp.zeros(_sparse_struct["nnz"], dtype=pos_final.dtype)
                         .at[_sparse_struct["mapping_idx"]].add(raw_vals * _sparse_struct["mask_cols_for_raw"]))
-                data = data.at[_sparse_struct["diag_slot"]].add(1e-8)  # same regularizer as dense path
+                # Regularizer scaled to the matrix's own diagonal magnitude
+                # (same scheme as the dense path below) instead of a fixed
+                # 1e-8 — a node whose edges are all near vmin has diagonal
+                # entries ~1e-4 or smaller, which a fixed 1e-8 bump barely
+                # perturbs, so the adjoint solve still hits an (near-)exactly
+                # singular matrix. Scaling to max(|diag|) keeps the bump
+                # proportionate to whatever stiffness range this network is
+                # actually at.
+                diag_vals = data[_sparse_struct["diag_slot"]]
+                eps = jnp.maximum(1e-6 * jnp.max(jnp.abs(diag_vals)), 1e-8)
+                data = data.at[_sparse_struct["diag_slot"]].add(eps)
                 w = jsl_spsolve(data, _sparse_struct["indices"], _sparse_struct["indptr"],
                                  cot_pos_flat, tol=1e-12)
             else:
@@ -800,7 +810,9 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
                 H = H.at[rj, ri].add(-K00); H = H.at[rj, ri + 1].add(-K01)
                 H = H.at[rj + 1, ri].add(-K01); H = H.at[rj + 1, ri + 1].add(-K11)
                 J = H * mask[:, None]  # zero constrained ROWS only, matching R's masking
-                J_reg = J + 1e-8 * jnp.eye(n_dof, dtype=J.dtype)
+                # Same diagonal-scaled regularizer as the sparse path above.
+                eps = jnp.maximum(1e-6 * jnp.max(jnp.abs(jnp.diag(J))), 1e-8)
+                J_reg = J + eps * jnp.eye(n_dof, dtype=J.dtype)
                 w = jsp_linalg.solve(J_reg.T, cot_pos_flat)
 
             # dR_dk's rows are zero at constrained dof (R is identically zero
@@ -823,7 +835,9 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
 
         J = jax.jacobian(R, argnums=0)(pos_final, stiffnesses)
         dR_dk = jax.jacobian(R, argnums=1)(pos_final, stiffnesses)
-        J_reg = J + 1e-8 * jnp.eye(J.shape[0], dtype=J.dtype)
+        # Same diagonal-scaled regularizer as the closed-form IFT path above.
+        eps = jnp.maximum(1e-6 * jnp.max(jnp.abs(jnp.diag(J))), 1e-8)
+        J_reg = J + eps * jnp.eye(J.shape[0], dtype=J.dtype)
         w = jsp_linalg.solve(J_reg.T, cot_pos_flat)
         return (-jnp.dot(dR_dk.T, w), None, None, None, None, None)
 
