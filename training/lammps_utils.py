@@ -167,6 +167,258 @@ def strain_network(datafile, id_fixed, id_pull, clamped=False, dx=0.025, nsteps=
     return frames
 
 
+def strain_network_auxetic(datafile, top_nodes, bottom_nodes, compression_strain,
+                           n_steps=100, tol=1e-8, work_dir=None):
+    """
+    Quasi-static boundary-displacement compression of a 2D network via LAMMPS.
+
+    Ramps the y-coordinate of `top_nodes` from its initial value to
+    initial_height * (1 + compression_strain) over n_steps, holding each
+    node's x-coordinate and its offset from the group's mean y fixed;
+    `bottom_nodes` stay clamped at their initial (x, y) throughout. Both
+    node sets are held completely fixed (force zeroed) at every quasistatic
+    sub-step. This is the LAMMPS analogue of the boundary condition used by
+    base.simulate.compute_quasistatic_trajectory_auxetic /
+    compute_quasistatic_trajectory_auxetic_jax — the network-pulling
+    counterpart of strain_network() above, generalized from a single
+    fixed/pull node pair to two clamped boundary groups.
+
+    tol : convergence tolerance in base.simulate's JAX-FIRE convention —
+        ||F||_2 / n_dof < tol, where n_dof = 2*N (in-plane DOFs; z is
+        always pinned to 0 here). LAMMPS's own `minimize` ftol argument is
+        an *unnormalized* global force 2-norm threshold (per LAMMPS docs),
+        so it is derived here as ftol = tol * n_dof rather than passed
+        through directly — otherwise the two solvers would be minimizing
+        to different absolute force thresholds despite passing the same
+        `tol` value.
+
+    Returns frames: list of (N, 2) node position arrays, one per step.
+    """
+    bond_coeffs_free = "bond_coeffs_free.in"
+    if work_dir is not None:
+        datafile          = os.path.join(work_dir, datafile)
+        bond_coeffs_free = os.path.join(work_dir, bond_coeffs_free)
+
+    log_dir = work_dir if work_dir is not None else tempfile.mkdtemp(prefix="strain_network_auxetic_")
+    log_path = os.path.join(log_dir, "auxetic.log")
+
+    args = ["-screen", "none", "-log", log_path]
+    lmp = lammps(cmdargs=args)
+    lmp.command("units lj")
+    lmp.command("atom_style bond")
+    lmp.command("dimension 3")
+    lmp.command("boundary s s s")
+    lmp.command(f"read_data {datafile}")
+    lmp.command("bond_style harmonic")
+    lmp.command("pair_style none")
+    lmp.command(f"include {bond_coeffs_free}")
+
+    N = lmp.get_natoms()
+
+    lmp.command("comm_modify mode single cutoff 10.0")
+    lmp.command("neighbor 3.0 bin")
+    lmp.command("neigh_modify every 1 delay 0 check yes")
+
+    lmp.command("fix freeze_z all setforce NULL NULL 0.0")
+    lmp.command("velocity all set 0.0 0.0 0.0")
+
+    top_idx = np.asarray(top_nodes, dtype=int)
+    bottom_idx = np.asarray(bottom_nodes, dtype=int)
+    boundary_ids = " ".join(str(i) for i in np.concatenate([top_idx, bottom_idx]) + 1)
+    lmp.command(f"group boundary id {boundary_ids}")
+    lmp.command("fix hold boundary setforce 0.0 0.0 0.0")
+
+    coords = np.array(lmp.gather_atoms("x", 1, 3)).reshape(N, 3)
+    x_top_init = coords[top_idx, 0].copy()
+    y_top_init = coords[top_idx, 1].copy()
+    x_bottom_init = coords[bottom_idx, 0].copy()
+    y_bottom = coords[bottom_idx, 1].copy()
+    top_offsets = y_top_init - y_top_init.mean()
+    initial_height = y_top_init.mean() - y_bottom.mean()
+    target_height = initial_height * (1 + compression_strain)
+
+    n_dof = 2 * N
+    ftol = tol * n_dof
+
+    def _pin_boundary(y_top_new):
+        for i, nid in enumerate(top_idx):
+            lmp.command(f"set atom {nid+1} x {x_top_init[i]:.6f} y {y_top_new[i]:.6f} z 0.0")
+        for i, nid in enumerate(bottom_idx):
+            lmp.command(f"set atom {nid+1} x {x_bottom_init[i]:.6f} y {y_bottom[i]:.6f} z 0.0")
+
+    frames = []
+    log_pos = 0
+
+    for step in range(n_steps):
+        frac = step / (n_steps - 1) if n_steps > 1 else 1.0
+        height = initial_height + frac * (target_height - initial_height)
+        y_top_new = (y_bottom.mean() + height) + top_offsets
+
+        _pin_boundary(y_top_new)
+        lmp.command("run 0 post no")
+        lmp.command("min_style fire")
+        # etol=0.0: see strain_network() above — near-isostatic networks can
+        # satisfy an energy tolerance long before force actually vanishes.
+        lmp.command(f"minimize 0.0 {ftol:.6e} 1000000 10000000")
+        fnorm = lmp.get_thermo("fnorm")
+        with open(log_path) as log_fh:
+            log_fh.seek(log_pos)
+            new_log_text = log_fh.read()
+            log_pos = log_fh.tell()
+        if fnorm / n_dof > tol:
+            reasons = _STOPPING_CRITERION_RE.findall(new_log_text)
+            stop_reason = reasons[-1].strip() if reasons else "unknown (log parse failed)"
+            warnings.warn(
+                f"LAMMPS minimize did not converge at step {step}: "
+                f"fnorm/n_dof={(fnorm/n_dof):.3e} > tol={tol:.3e} "
+                f"(stopping criterion: {stop_reason})",
+                RuntimeWarning,
+            )
+        _pin_boundary(y_top_new)
+        lmp.command("run 0 post no")
+        coords = np.array(lmp.gather_atoms("x", 1, 3)).reshape(N, 3)
+        frames.append(coords[:, :2].copy())
+
+    return frames
+
+
+def strain_network_auxetic_clamped(datafile, top_nodes, bottom_nodes, left_nodes,
+                                   right_nodes, compression_strain, width_target,
+                                   n_steps=100, tol=1e-8, work_dir=None):
+    """
+    LAMMPS analogue of strain_network_auxetic(), extended with a second clamped
+    boundary pair (left/right) for coupled-learning's "clamped" run — see
+    training/lammps_auxetic.py's docstring for the free/clamped scheme this
+    supports.
+
+    Symmetric to top/bottom: top/bottom control height by ramping y (x fixed
+    per-node at its initial value); left/right here control width by ramping
+    x (y fixed per-node at its initial value) from the network's own initial
+    width to `width_target` — a single final value (already blended between
+    the free run's observed width and the fully-desired target-Poisson-ratio
+    width by the caller) rather than a compression_strain, since there's no
+    independent "left/right strain" concept — reached via the *same*
+    fractional schedule (`frac = step/(n_steps-1)`) as the top/bottom ramp,
+    so both boundary pairs move quasistatically in lockstep. The width change
+    is split symmetrically: left and right each move by half of
+    (width_target - width_initial) in opposite directions about the
+    network's initial centroid, each node keeping its own offset from its
+    group's initial mean x (mirroring top_offsets/bottom's fixed x below).
+
+    All four boundary groups share one `setforce 0 0 0` fix — same mechanism
+    as strain_network_auxetic, just widened to four node sets.
+
+    Returns frames: list of (N, 2) node position arrays, one per step.
+    """
+    bond_coeffs_free = "bond_coeffs_free.in"
+    if work_dir is not None:
+        datafile          = os.path.join(work_dir, datafile)
+        bond_coeffs_free = os.path.join(work_dir, bond_coeffs_free)
+
+    log_dir = work_dir if work_dir is not None else tempfile.mkdtemp(prefix="strain_network_auxetic_clamped_")
+    log_path = os.path.join(log_dir, "auxetic_clamped.log")
+
+    args = ["-screen", "none", "-log", log_path]
+    lmp = lammps(cmdargs=args)
+    lmp.command("units lj")
+    lmp.command("atom_style bond")
+    lmp.command("dimension 3")
+    lmp.command("boundary s s s")
+    lmp.command(f"read_data {datafile}")
+    lmp.command("bond_style harmonic")
+    lmp.command("pair_style none")
+    lmp.command(f"include {bond_coeffs_free}")
+
+    N = lmp.get_natoms()
+
+    lmp.command("comm_modify mode single cutoff 10.0")
+    lmp.command("neighbor 3.0 bin")
+    lmp.command("neigh_modify every 1 delay 0 check yes")
+
+    lmp.command("fix freeze_z all setforce NULL NULL 0.0")
+    lmp.command("velocity all set 0.0 0.0 0.0")
+
+    top_idx = np.asarray(top_nodes, dtype=int)
+    bottom_idx = np.asarray(bottom_nodes, dtype=int)
+    left_idx = np.asarray(left_nodes, dtype=int)
+    right_idx = np.asarray(right_nodes, dtype=int)
+    boundary_ids = " ".join(
+        str(i) for i in np.concatenate([top_idx, bottom_idx, left_idx, right_idx]) + 1
+    )
+    lmp.command(f"group boundary id {boundary_ids}")
+    lmp.command("fix hold boundary setforce 0.0 0.0 0.0")
+
+    coords = np.array(lmp.gather_atoms("x", 1, 3)).reshape(N, 3)
+    x_top_init = coords[top_idx, 0].copy()
+    y_top_init = coords[top_idx, 1].copy()
+    x_bottom_init = coords[bottom_idx, 0].copy()
+    y_bottom = coords[bottom_idx, 1].copy()
+    top_offsets = y_top_init - y_top_init.mean()
+    initial_height = y_top_init.mean() - y_bottom.mean()
+    target_height = initial_height * (1 + compression_strain)
+
+    x_left_init = coords[left_idx, 0].copy()
+    y_left_init = coords[left_idx, 1].copy()
+    x_right_init = coords[right_idx, 0].copy()
+    y_right_init = coords[right_idx, 1].copy()
+    left_offsets = x_left_init - x_left_init.mean()
+    right_offsets = x_right_init - x_right_init.mean()
+    centroid_x = (x_left_init.mean() + x_right_init.mean()) / 2.0
+    width_initial = x_right_init.mean() - x_left_init.mean()
+
+    n_dof = 2 * N
+    ftol = tol * n_dof
+
+    def _pin_boundary(y_top_new, half_width_new):
+        for i, nid in enumerate(top_idx):
+            lmp.command(f"set atom {nid+1} x {x_top_init[i]:.6f} y {y_top_new[i]:.6f} z 0.0")
+        for i, nid in enumerate(bottom_idx):
+            lmp.command(f"set atom {nid+1} x {x_bottom_init[i]:.6f} y {y_bottom[i]:.6f} z 0.0")
+        for i, nid in enumerate(left_idx):
+            x_new = (centroid_x - half_width_new) + left_offsets[i]
+            lmp.command(f"set atom {nid+1} x {x_new:.6f} y {y_left_init[i]:.6f} z 0.0")
+        for i, nid in enumerate(right_idx):
+            x_new = (centroid_x + half_width_new) + right_offsets[i]
+            lmp.command(f"set atom {nid+1} x {x_new:.6f} y {y_right_init[i]:.6f} z 0.0")
+
+    frames = []
+    log_pos = 0
+
+    for step in range(n_steps):
+        frac = step / (n_steps - 1) if n_steps > 1 else 1.0
+        height = initial_height + frac * (target_height - initial_height)
+        y_top_new = (y_bottom.mean() + height) + top_offsets
+        width = width_initial + frac * (width_target - width_initial)
+        half_width_new = width / 2.0
+
+        _pin_boundary(y_top_new, half_width_new)
+        lmp.command("run 0 post no")
+        lmp.command("min_style fire")
+        # etol=0.0: see strain_network() above — near-isostatic networks can
+        # satisfy an energy tolerance long before force actually vanishes.
+        lmp.command(f"minimize 0.0 {ftol:.6e} 1000000 10000000")
+        fnorm = lmp.get_thermo("fnorm")
+        with open(log_path) as log_fh:
+            log_fh.seek(log_pos)
+            new_log_text = log_fh.read()
+            log_pos = log_fh.tell()
+        if fnorm / n_dof > tol:
+            reasons = _STOPPING_CRITERION_RE.findall(new_log_text)
+            stop_reason = reasons[-1].strip() if reasons else "unknown (log parse failed)"
+            warnings.warn(
+                f"LAMMPS minimize did not converge at step {step}: "
+                f"fnorm/n_dof={(fnorm/n_dof):.3e} > tol={tol:.3e} "
+                f"(stopping criterion: {stop_reason})",
+                RuntimeWarning,
+            )
+        _pin_boundary(y_top_new, half_width_new)
+        lmp.command("run 0 post no")
+        coords = np.array(lmp.gather_atoms("x", 1, 3)).reshape(N, 3)
+        frames.append(coords[:, :2].copy())
+
+    return frames
+
+
 def make_video(frames, incidence, stiffnesses,
                id_fixed, id_pull,
                id_outA=None, id_outB=None,
