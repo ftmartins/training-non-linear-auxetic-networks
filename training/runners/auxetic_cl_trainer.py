@@ -57,7 +57,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from base.config import FORCE_TYPE, BOUNDARY_MARGIN, FORCE_TOL, PACKING_PARAMS, NETWORK_TYPE
+from base.config import FORCE_TYPE, BOUNDARY_MARGIN, PACKING_PARAMS, NETWORK_TYPE
 from base.network_utils import create_auxetic_network
 from training.src.task_generator import (
     generate_task_config, compute_target_extensions, get_n_nodes, get_n_strain_steps,
@@ -92,6 +92,11 @@ K_MAX = 1e2
 ETA = 1.0
 LEARNING_RATE = 10.0
 SOLVER = 'lammps'  # only backend implemented for Phase 1
+# NOT base.config.FORCE_TOL (1e-6) — verified (training/runners/
+# verify_lammps_auxetic.py, and project memory feedback_trajectory.md)
+# that 1e-6 terminates FIRE early and gives nu~=0 for auxetic tasks; 1e-8
+# is needed for accurate Poisson ratios.
+FORCE_TOL = 1e-8
 
 N_TARGETED_TASKS = len(TARGETED_TASKS)
 N_REALIZATIONS = 5
