@@ -57,11 +57,11 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from base.config import FORCE_TYPE, BOUNDARY_MARGIN, PACKING_PARAMS, NETWORK_TYPE
-from base.network_utils import create_auxetic_network
-from training.src.task_generator import (
-    generate_task_config, compute_target_extensions, get_n_nodes, get_n_strain_steps,
+from base.config import (
+    FORCE_TYPE, BOUNDARY_MARGIN, PACKING_PARAMS, NETWORK_TYPE, get_n_nodes, get_n_strain_steps,
 )
+from base.network_utils import create_auxetic_network
+from training.src.task_generator import generate_task_config
 from training.src.targeted_task_generator import get_targeted_task_config, TARGETED_TASKS
 import base.config as _base_config
 import training.lammps_auxetic as la
