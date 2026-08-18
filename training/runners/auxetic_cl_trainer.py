@@ -304,6 +304,12 @@ def main():
     parser.add_argument('--eta', type=float, default=ETA,
                         help='Coupled-learning nudge strength (default: %(default)s)')
     parser.add_argument('--learning-rate', type=float, default=LEARNING_RATE)
+    parser.add_argument('--n-strain-steps', type=int, default=None,
+                        help="Override the task's own quasistatic-ramp sub-step count (coarser "
+                             "ramp = cheaper per training step, but changes what's being "
+                             "measured, not just speed — for fast hyperparameter search, not "
+                             "assumed equivalent to the task's default). Defaults to the task's "
+                             "own n_strain_steps.")
     parser.add_argument('--overwrite', action='store_true',
                         help='Allow this run to replace previously recorded solver/learning_rate/'
                              'k_min/k_max/eta in training_meta.json instead of failing on mismatch')
@@ -316,6 +322,7 @@ def main():
     targeted = args.targeted_ensemble
     eta = args.eta
     learning_rate = args.learning_rate
+    n_strain_steps_override = args.n_strain_steps
     overwrite = args.overwrite
 
     mode_tag = 'targeted' if targeted else 'general'
@@ -327,7 +334,7 @@ def main():
     output_path = os.path.join(output_dir, mode_tag, f'task_{tid}', f'realization_{rid}')
     os.makedirs(output_path, exist_ok=True)
 
-    _CRITICAL_KEYS = DEFAULT_CRITICAL_KEYS | {'eta'}
+    _CRITICAL_KEYS = DEFAULT_CRITICAL_KEYS | {'eta', 'n_strain_steps_override'}
     current_hparams = {
         'solver': SOLVER,
         'learning_rate': learning_rate,
@@ -336,6 +343,7 @@ def main():
         'eta': eta,
         'n_training_steps': training_steps,
         'realization_seed': screened_seed,
+        'n_strain_steps_override': n_strain_steps_override,
     }
     if has_critical_mismatch(output_path, current_hparams, critical_keys=_CRITICAL_KEYS):
         if not overwrite:
@@ -355,6 +363,10 @@ def main():
     save_code_snapshot(output_path, _CODE_SNAPSHOT_FILES)
 
     network, boundary_dict, task_config = build_network_and_task(tid, targeted)
+    if n_strain_steps_override is not None:
+        task_config = dict(task_config)
+        print(f"  n_strain_steps override: {task_config['n_strain_steps']} -> {n_strain_steps_override}")
+        task_config['n_strain_steps'] = n_strain_steps_override
     with open(os.path.join(output_path, 'task_config.json'), 'w') as fh:
         json.dump({k: (v if not isinstance(v, np.ndarray) else v.tolist())
                    for k, v in task_config.items()}, fh, indent=2)
