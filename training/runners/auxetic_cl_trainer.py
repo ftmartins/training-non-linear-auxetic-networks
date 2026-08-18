@@ -229,7 +229,14 @@ def _run_training_loop(network, boundary_dict, task_config, eta, learning_rate, 
         current_lr = learning_rate * lr_scale
         measured_stiffnesses = stiffnesses
         new_stiffnesses = np.clip(stiffnesses + current_lr * total_delta_K, K_MIN, K_MAX)
-        update_mag = np.mean(np.log10(np.abs(current_lr * total_delta_K) + 1e-300))
+        # log10 of the LARGEST per-edge update, not the mean across edges —
+        # most edges barely participate in a given boundary response (their
+        # dV_free/dV_clamped are near zero), so a per-edge mean-of-log is
+        # dominated by those near-zero entries and looks catastrophically
+        # small even when the consequential edges are updating at a
+        # perfectly ordinary rate. max is the representative "leading edge"
+        # magnitude a human would actually want to watch.
+        update_mag = np.log10(np.max(np.abs(current_lr * total_delta_K)) + 1e-300)
         network.stiffnesses = new_stiffnesses
 
         loss_history = np.append(loss_history, total_loss)
