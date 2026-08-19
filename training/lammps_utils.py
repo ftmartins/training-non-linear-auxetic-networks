@@ -284,29 +284,49 @@ def strain_network_auxetic(datafile, top_nodes, bottom_nodes, compression_strain
 
 def strain_network_auxetic_clamped(datafile, top_nodes, bottom_nodes, left_nodes,
                                    right_nodes, compression_strain, width_target,
-                                   n_steps=100, tol=1e-8, work_dir=None):
+                                   k_output=1e4, n_steps=100, tol=1e-8, work_dir=None):
     """
-    LAMMPS analogue of strain_network_auxetic(), extended with a second clamped
-    boundary pair (left/right) for coupled-learning's "clamped" run — see
-    training/lammps_auxetic.py's docstring for the free/clamped scheme this
-    supports.
+    LAMMPS analogue of strain_network_auxetic(), extended with a *soft*
+    coupling toward a target width for coupled-learning's "clamped" run —
+    see training/lammps_auxetic.py's docstring for the free/clamped scheme
+    this supports.
 
-    Symmetric to top/bottom: top/bottom control height by ramping y (x fixed
-    per-node at its initial value); left/right here control width by ramping
-    x (y fixed per-node at its initial value) from the network's own initial
-    width to `width_target` — a single final value (already blended between
-    the free run's observed width and the fully-desired target-Poisson-ratio
-    width by the caller) rather than a compression_strain, since there's no
-    independent "left/right strain" concept — reached via the *same*
-    fractional schedule (`frac = step/(n_steps-1)`) as the top/bottom ramp,
-    so both boundary pairs move quasistatically in lockstep. The width change
-    is split symmetrically: left and right each move by half of
-    (width_target - width_initial) in opposite directions about the
-    network's initial centroid, each node keeping its own offset from its
-    group's initial mean x (mirroring top_offsets/bottom's fixed x below).
+    top/bottom stay exactly as strain_network_auxetic(): hard-driven
+    (force-zeroed + explicitly positioned every sub-step) at the imposed
+    compression strain — these represent the externally-imposed input, same
+    role as allosteric's id_fixed/id_pull.
 
-    All four boundary groups share one `setforce 0 0 0` fix — same mechanism
-    as strain_network_auxetic, just widened to four node sets.
+    left/right are the *output* side and are NOT hard-pinned (unlike the
+    first version of this function, which force-zeroed and hard-positioned
+    every individual left/right node — that mechanism was found to train
+    unstably across a 12-point eta/learning_rate grid: loss would improve
+    briefly then systematically diverge, the same qualitative failure at
+    every setting, pointing at the mechanism rather than the tuning). Left
+    and right are instead left completely free, each node responding only
+    to the network's own elasticity, plus a single soft coupling force per
+    group applied via LAMMPS's `fix spring tether`: a spring of constant
+    `k_output` pulling that group's center-of-mass x-coordinate toward a
+    target (y left NULL/unconstrained), y0=z0=NULL so only x is coupled.
+    This exactly mirrors allosteric_trainer.py's actual clamped mechanism —
+    an added spring pulling toward the target, whose real effect on the
+    output is a compromise between the coupling spring's pull and the rest
+    of the network's own elastic resistance — generalized from allosteric's
+    single output-node-pair spring to a group center-of-mass tether, since
+    the auxetic observable (mean left/right position) is a group average,
+    not a single pairwise distance.
+
+    Both the height ramp (top/bottom) and the width tether target (left/
+    right) advance on the same fractional schedule (`frac = step/(n_steps-1)`),
+    so the two move quasistatically in lockstep — the tether's target is
+    itself only ramped, never a hard position, so this stays close to the
+    network's own natural response until the last few steps.
+
+    k_output : spring constant for the left/right center-of-mass tether.
+        Needs to be large relative to the network's own stiffness scale to
+        act as a meaningful pull (mirrors allosteric's K_OUTPUT being ~100x
+        K_MAX), but not so large it degenerates back into a near-rigid
+        constraint — an empirical tuning knob, flagged as such rather than
+        assumed correct at this default.
 
     Returns frames: list of (N, 2) node position arrays, one per step.
     """
@@ -342,11 +362,16 @@ def strain_network_auxetic_clamped(datafile, top_nodes, bottom_nodes, left_nodes
     bottom_idx = np.asarray(bottom_nodes, dtype=int)
     left_idx = np.asarray(left_nodes, dtype=int)
     right_idx = np.asarray(right_nodes, dtype=int)
-    boundary_ids = " ".join(
-        str(i) for i in np.concatenate([top_idx, bottom_idx, left_idx, right_idx]) + 1
-    )
-    lmp.command(f"group boundary id {boundary_ids}")
-    lmp.command("fix hold boundary setforce 0.0 0.0 0.0")
+
+    # Only top/bottom are hard-driven (force-zeroed) — left/right are free,
+    # coupled only via the soft tether springs set up in the step loop below.
+    driven_ids = " ".join(str(i) for i in np.concatenate([top_idx, bottom_idx]) + 1)
+    lmp.command(f"group driven id {driven_ids}")
+    lmp.command("fix hold driven setforce 0.0 0.0 0.0")
+    left_ids = " ".join(str(i) for i in left_idx + 1)
+    right_ids = " ".join(str(i) for i in right_idx + 1)
+    lmp.command(f"group left_grp id {left_ids}")
+    lmp.command(f"group right_grp id {right_ids}")
 
     coords = np.array(lmp.gather_atoms("x", 1, 3)).reshape(N, 3)
     x_top_init = coords[top_idx, 0].copy()
@@ -358,31 +383,22 @@ def strain_network_auxetic_clamped(datafile, top_nodes, bottom_nodes, left_nodes
     target_height = initial_height * (1 + compression_strain)
 
     x_left_init = coords[left_idx, 0].copy()
-    y_left_init = coords[left_idx, 1].copy()
     x_right_init = coords[right_idx, 0].copy()
-    y_right_init = coords[right_idx, 1].copy()
-    left_offsets = x_left_init - x_left_init.mean()
-    right_offsets = x_right_init - x_right_init.mean()
     centroid_x = (x_left_init.mean() + x_right_init.mean()) / 2.0
     width_initial = x_right_init.mean() - x_left_init.mean()
 
     n_dof = 2 * N
     ftol = tol * n_dof
 
-    def _pin_boundary(y_top_new, half_width_new):
+    def _pin_driven(y_top_new):
         for i, nid in enumerate(top_idx):
             lmp.command(f"set atom {nid+1} x {x_top_init[i]:.6f} y {y_top_new[i]:.6f} z 0.0")
         for i, nid in enumerate(bottom_idx):
             lmp.command(f"set atom {nid+1} x {x_bottom_init[i]:.6f} y {y_bottom[i]:.6f} z 0.0")
-        for i, nid in enumerate(left_idx):
-            x_new = (centroid_x - half_width_new) + left_offsets[i]
-            lmp.command(f"set atom {nid+1} x {x_new:.6f} y {y_left_init[i]:.6f} z 0.0")
-        for i, nid in enumerate(right_idx):
-            x_new = (centroid_x + half_width_new) + right_offsets[i]
-            lmp.command(f"set atom {nid+1} x {x_new:.6f} y {y_right_init[i]:.6f} z 0.0")
 
     frames = []
     log_pos = 0
+    tethers_defined = False
 
     for step in range(n_steps):
         frac = step / (n_steps - 1) if n_steps > 1 else 1.0
@@ -390,8 +406,18 @@ def strain_network_auxetic_clamped(datafile, top_nodes, bottom_nodes, left_nodes
         y_top_new = (y_bottom.mean() + height) + top_offsets
         width = width_initial + frac * (width_target - width_initial)
         half_width_new = width / 2.0
+        x_left_target = centroid_x - half_width_new
+        x_right_target = centroid_x + half_width_new
 
-        _pin_boundary(y_top_new, half_width_new)
+        _pin_driven(y_top_new)
+        if tethers_defined:
+            lmp.command("unfix left_tether")
+            lmp.command("unfix right_tether")
+        lmp.command(f"fix left_tether left_grp spring tether {k_output:.6f} "
+                    f"{x_left_target:.6f} NULL NULL 0.0")
+        lmp.command(f"fix right_tether right_grp spring tether {k_output:.6f} "
+                    f"{x_right_target:.6f} NULL NULL 0.0")
+        tethers_defined = True
         lmp.command("run 0 post no")
         lmp.command("min_style fire")
         # etol=0.0: see strain_network() above — near-isostatic networks can
@@ -411,7 +437,7 @@ def strain_network_auxetic_clamped(datafile, top_nodes, bottom_nodes, left_nodes
                 f"(stopping criterion: {stop_reason})",
                 RuntimeWarning,
             )
-        _pin_boundary(y_top_new, half_width_new)
+        _pin_driven(y_top_new)
         lmp.command("run 0 post no")
         coords = np.array(lmp.gather_atoms("x", 1, 3)).reshape(N, 3)
         frames.append(coords[:, :2].copy())

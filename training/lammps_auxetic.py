@@ -99,7 +99,8 @@ def compute_poisson_ratio_lammps(positions, edges, stiffnesses, top_nodes, botto
 def compute_free_and_clamped_auxetic_lammps(positions, edges, stiffnesses, top_nodes,
                                              bottom_nodes, left_nodes, right_nodes,
                                              compression_strain, target_poisson_ratio,
-                                             eta, n_steps=100, tol=1e-8, work_dir=None):
+                                             eta, k_output=1e4, n_steps=100, tol=1e-8,
+                                             work_dir=None):
     """
     Coupled-learning free+clamped pair for one (compression_strain,
     target_poisson_ratio) pair of an auxetic task — the LAMMPS analogue of
@@ -113,9 +114,9 @@ def compute_free_and_clamped_auxetic_lammps(positions, edges, stiffnesses, top_n
     2. Nudge target: blend the free run's own observed width with the width
        that would give EXACTLY target_poisson_ratio at this compression,
        weighted by eta (same role as allosteric's `eta*tod + (1-eta)*cod`).
-    3. Clamped run: same top/bottom ramp, plus left/right pinned
-       symmetrically (strain_network_auxetic_clamped) to the nudged width
-       -> nodes_clamped.
+    3. Clamped run: same top/bottom ramp, plus left/right *softly* coupled
+       (strain_network_auxetic_clamped's spring-tether mechanism, spring
+       constant k_output) toward the nudged width -> nodes_clamped.
 
     Both runs start from the same `positions`/`stiffnesses` (the network's
     current training-step state) via a single shared LAMMPS data file, same
@@ -153,7 +154,8 @@ def compute_free_and_clamped_auxetic_lammps(positions, edges, stiffnesses, top_n
 
         traj_clamped = strain_network_auxetic_clamped(
             "data_auxetic.network", top_nodes, bottom_nodes, left_idx, right_idx,
-            compression_strain, width_nudged, n_steps=n_steps, tol=tol, work_dir=work_dir)
+            compression_strain, width_nudged, k_output=k_output, n_steps=n_steps, tol=tol,
+            work_dir=work_dir)
         nodes_clamped = traj_clamped[-1]
     finally:
         if own_work_dir:
