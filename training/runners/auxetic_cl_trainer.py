@@ -92,12 +92,6 @@ K_MAX = 1e2
 ETA = 1.0
 LEARNING_RATE = 10.0
 SOLVER = 'lammps'  # only backend implemented for Phase 1
-# Spring constant for the clamped run's left/right center-of-mass tether
-# (training.lammps_utils.strain_network_auxetic_clamped) — mirrors
-# allosteric's K_OUTPUT being ~100x its own K_MAX; K_MAX here is 100 (vs
-# allosteric's 10), so this starts at the same ~100x ratio. Empirical
-# tuning knob, not assumed correct at this default — see --k-output.
-K_OUTPUT_AUX = 1e4
 # NOT base.config.FORCE_TOL (1e-6) — verified (training/runners/
 # verify_lammps_auxetic.py, and project memory feedback_trajectory.md)
 # that 1e-6 terminates FIRE early and gives nu~=0 for auxetic tasks; 1e-8
@@ -192,7 +186,7 @@ def load_resume_state(output_path):
 
 def _run_training_loop(network, boundary_dict, task_config, eta, learning_rate, n_steps,
                         output_path, loss_history=None, step_offset=0,
-                        best_stiffnesses=None, best_loss=np.inf, k_output=K_OUTPUT_AUX):
+                        best_stiffnesses=None, best_loss=np.inf):
     if loss_history is None:
         loss_history = np.array([])
     if best_stiffnesses is None:
@@ -224,7 +218,7 @@ def _run_training_loop(network, boundary_dict, task_config, eta, learning_rate, 
         for cs, target_nu in zip(compression_strains, target_poisson_ratios):
             nodes_free, nodes_clamped, observed_nu_free = la.compute_free_and_clamped_auxetic_lammps(
                 positions, edges, stiffnesses, top_nodes, bottom_nodes, left_nodes, right_nodes,
-                cs, target_nu, eta, k_output=k_output, n_steps=n_strain_steps, tol=FORCE_TOL,
+                cs, target_nu, eta, n_steps=n_strain_steps, tol=FORCE_TOL,
             )
             total_delta_K = total_delta_K + learning_update_auxetic(
                 nodes_free, nodes_clamped, edges, rest_lengths, stiffnesses, eta)
@@ -310,9 +304,6 @@ def main():
     parser.add_argument('--eta', type=float, default=ETA,
                         help='Coupled-learning nudge strength (default: %(default)s)')
     parser.add_argument('--learning-rate', type=float, default=LEARNING_RATE)
-    parser.add_argument('--k-output', type=float, default=K_OUTPUT_AUX,
-                        help='Spring constant for the clamped run\'s left/right center-of-mass '
-                             'tether (default: %(default)s)')
     parser.add_argument('--n-strain-steps', type=int, default=None,
                         help="Override the task's own quasistatic-ramp sub-step count (coarser "
                              "ramp = cheaper per training step, but changes what's being "
@@ -331,7 +322,6 @@ def main():
     targeted = args.targeted_ensemble
     eta = args.eta
     learning_rate = args.learning_rate
-    k_output = args.k_output
     n_strain_steps_override = args.n_strain_steps
     overwrite = args.overwrite
 
@@ -344,14 +334,13 @@ def main():
     output_path = os.path.join(output_dir, mode_tag, f'task_{tid}', f'realization_{rid}')
     os.makedirs(output_path, exist_ok=True)
 
-    _CRITICAL_KEYS = DEFAULT_CRITICAL_KEYS | {'eta', 'n_strain_steps_override', 'k_output'}
+    _CRITICAL_KEYS = DEFAULT_CRITICAL_KEYS | {'eta', 'n_strain_steps_override'}
     current_hparams = {
         'solver': SOLVER,
         'learning_rate': learning_rate,
         'k_min': K_MIN,
         'k_max': K_MAX,
         'eta': eta,
-        'k_output': k_output,
         'n_training_steps': training_steps,
         'realization_seed': screened_seed,
         'n_strain_steps_override': n_strain_steps_override,
@@ -411,7 +400,7 @@ def main():
         loss_history, stiffnesses, best_stiffnesses, best_loss = _run_training_loop(
             network, boundary_dict, task_config, eta, learning_rate, remaining_steps,
             output_path, loss_history=loss_history, step_offset=start_step,
-            best_stiffnesses=best_stiffnesses, best_loss=best_loss, k_output=k_output,
+            best_stiffnesses=best_stiffnesses, best_loss=best_loss,
         )
         network.stiffnesses = stiffnesses
 
