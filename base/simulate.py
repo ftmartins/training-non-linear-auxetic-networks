@@ -6,6 +6,8 @@ computation (both Cython-FIRE and JAX-differentiable variants), and the
 JAX-differentiable Poisson-ratio observable.
 """
 
+import os
+import time
 import warnings
 import functools
 import numpy as np
@@ -606,10 +608,33 @@ def _build_adjoint_csr_structure(edges_np, n_dof, mask_np):
     )
 
 
+def _save_nan_debug_snapshot(debug_dir, debug_label, tag, **arrays):
+    """
+    Dump a .npz snapshot (stiffnesses/positions/edges/etc, whatever the
+    caller passes as **arrays) plus a small .txt with the same summary that
+    already went to the log, so a crashed cluster run leaves enough on disk
+    to reconstruct exactly what the solver saw -- without needing to catch
+    it live in a still-running job's stdout. Filename carries `debug_label`
+    (e.g. "task00_real00_step0483") and a timestamp so concurrent SLURM
+    array tasks writing into the same debug_dir never collide.
+    """
+    try:
+        os.makedirs(debug_dir, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        fname = f"nandebug_{tag}_{debug_label or 'run'}_{stamp}_{os.getpid()}.npz"
+        np.savez(os.path.join(debug_dir, fname),
+                 **{k: np.asarray(v) for k, v in arrays.items()})
+        return os.path.join(debug_dir, fname)
+    except Exception as e:  # snapshotting must never itself crash training
+        warnings.warn(f"nan-debug snapshot failed to save: {e}", RuntimeWarning, stacklevel=3)
+        return None
+
+
 def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
                                 alpha_start=0.1, finc=1.1, fdec=0.5, falpha=0.99,
                                 max_steps=1_000_000, tol=1e-6, force_type="quadratic",
-                                edges_np=None, n_dof_np=None, source_nodes_dof_np=None):
+                                edges_np=None, n_dof_np=None, source_nodes_dof_np=None,
+                                debug_dir=None, debug_label=""):
     """
     Returns a JAX-differentiable FIRE solver (custom VJP).
 
@@ -627,7 +652,31 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
         while the matrix *values* stay fully JAX-traced/dynamic per call. If
         omitted, falls back to the dense analytic path (still exact, just
         without the sparse speedup).
+    debug_dir, debug_label: opt-in deeper NaN/non-convergence logging. When a
+        forward FIRE call returns a non-finite position/force-norm, or the
+        backward adjoint solve returns a non-finite gradient, a RuntimeWarning
+        is always raised with a diagnostic summary (min/max stiffness, the 5
+        smallest-stiffness edges — the ones nearest the vmin floor, since
+        that's the known floppy-mode failure mode; see project notes on the
+        adjoint-solve singularity). If `debug_dir` is also given, a full
+        snapshot (stiffnesses, positions, edges, rest_lengths, source dof,
+        imposed positions, cotangent) is additionally written there as a
+        timestamped .npz, named using `debug_label` (e.g.
+        f"task{tid:02d}_real{rid:02d}_step{step}") — so a crash on the
+        cluster leaves the exact solver inputs on disk for a standalone
+        closer look afterward, without needing to catch it live.
+
+        `debug_label` may be a plain string (fixed for this solver's whole
+        lifetime) or a zero-arg callable. This solver is normally built ONCE
+        per training run (not once per step), so a callable is how the
+        caller keeps the label current — e.g. a training loop can do
+        `_label = {'s': -1}; debug_label=lambda: f"task00_real00_step{_label['s']}"`
+        and set `_label['s'] = step` each iteration; because the callback
+        below runs on the host at call time (not at JIT trace time), it
+        always reads the CURRENT value even though the compiled graph was
+        only traced once.
     """
+    _get_label = debug_label if callable(debug_label) else (lambda: debug_label)
     _sparse_struct = None
     if edges_np is not None and n_dof_np is not None and d == 2 and force_type == "quadratic":
         mask_np_static = np.ones(n_dof_np, dtype=bool)
@@ -721,12 +770,35 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
         pos_final, _, _, _, _, final_gnorm, _ = final_state
         return pos_final, final_gnorm
 
+    def _stiffness_summary(k_np):
+        """min/max plus the 5 smallest-stiffness edges (closest to vmin, the
+        known floppy-mode failure mode) — the actionable part of any NaN report."""
+        order = np.argsort(k_np)[:5]
+        smallest = ", ".join(f"edge{int(i)}={k_np[i]:.3e}" for i in order)
+        return f"min(k)={k_np.min():.3e} max(k)={k_np.max():.3e} smallest 5: [{smallest}]"
+
     def _warn_check(n_dof):
-        def _warn(gnorm):
-            if float(gnorm) / n_dof >= tol:
+        def _warn(gnorm, pos_final, stiffnesses):
+            gnorm_f = float(gnorm)
+            pos_np = np.asarray(pos_final)
+            k_np = np.asarray(stiffnesses)
+            label = _get_label()
+            if not np.isfinite(gnorm_f) or not np.all(np.isfinite(pos_np)):
+                msg = (f"FIRE FORWARD produced a non-finite result "
+                       f"[{label}]: gnorm={gnorm_f}, "
+                       f"any_nan_pos={not np.all(np.isfinite(pos_np))}. "
+                       f"{_stiffness_summary(k_np)}")
+                warnings.warn(msg, RuntimeWarning, stacklevel=6)
+                if debug_dir is not None:
+                    path = _save_nan_debug_snapshot(
+                        debug_dir, label, "forward",
+                        stiffnesses=k_np, pos_final=pos_np, gnorm=gnorm_f)
+                    if path:
+                        warnings.warn(f"  saved forward-NaN snapshot -> {path}", RuntimeWarning, stacklevel=6)
+            elif gnorm_f / n_dof >= tol:
                 warnings.warn(
-                    f"FIRE did not converge after {max_steps} steps: "
-                    f"gnorm/n_dof={float(gnorm)/n_dof:.2e}, tol={tol:.2e}.",
+                    f"FIRE did not converge after {max_steps} steps [{label}]: "
+                    f"gnorm/n_dof={gnorm_f/n_dof:.2e}, tol={tol:.2e}. {_stiffness_summary(k_np)}",
                     RuntimeWarning, stacklevel=6,
                 )
         return _warn
@@ -736,16 +808,42 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
                                source_nodes_dof, imposed_positions):
         pos_final, gnorm = _fire_forward(stiffnesses, edges, rest_lengths,
                                          positions0, source_nodes_dof, imposed_positions)
-        jax.debug.callback(_warn_check(positions0.flatten().shape[0]), gnorm)
+        jax.debug.callback(_warn_check(positions0.flatten().shape[0]), gnorm, pos_final, stiffnesses)
         return pos_final
 
     def crf_fwd(stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions):
         pos_final, gnorm = _fire_forward(stiffnesses, edges, rest_lengths,
                                          positions0, source_nodes_dof, imposed_positions)
-        jax.debug.callback(_warn_check(positions0.flatten().shape[0]), gnorm)
+        jax.debug.callback(_warn_check(positions0.flatten().shape[0]), gnorm, pos_final, stiffnesses)
         saved = (pos_final, stiffnesses, edges, rest_lengths,
                  positions0, source_nodes_dof, imposed_positions)
         return pos_final, saved
+
+    def _bwd_warn_check(grad_k, stiffnesses, pos_final, positions0, edges, rest_lengths,
+                        source_nodes_dof, imposed_positions, cot_pos_flat):
+        grad_np = np.asarray(grad_k)
+        if np.all(np.isfinite(grad_np)):
+            return
+        k_np = np.asarray(stiffnesses)
+        label = _get_label()
+        msg = (f"FIRE BACKWARD (adjoint solve) produced a non-finite gradient "
+               f"[{label}]: n_nonfinite={int((~np.isfinite(grad_np)).sum())}/{grad_np.size}. "
+               f"{_stiffness_summary(k_np)}")
+        warnings.warn(msg, RuntimeWarning, stacklevel=6)
+        if debug_dir is not None:
+            path = _save_nan_debug_snapshot(
+                debug_dir, label, "backward",
+                stiffnesses=k_np, pos_final=np.asarray(pos_final), positions0=np.asarray(positions0),
+                edges=np.asarray(edges), rest_lengths=np.asarray(rest_lengths),
+                source_nodes_dof=np.asarray(source_nodes_dof), imposed_positions=np.asarray(imposed_positions),
+                cot_pos_flat=np.asarray(cot_pos_flat), grad_k=grad_np)
+            if path:
+                warnings.warn(
+                    f"  saved backward-NaN snapshot -> {path} "
+                    f"(stiffnesses/pos_final/positions0/edges/rest_lengths/source_nodes_dof/"
+                    f"imposed_positions/cot_pos_flat/grad_k -- enough to rerun just this crf_fn "
+                    f"call standalone for a closer look)",
+                    RuntimeWarning, stacklevel=6)
 
     def crf_bwd(saved, cot_pos_flat):
         pos_final, stiffnesses, edges, rest_lengths, positions0, source_nodes_dof, imposed_positions = saved
@@ -813,6 +911,8 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
             wi_x, wi_y = w[ri], w[ri + 1]
             wj_x, wj_y = w[rj], w[rj + 1]
             grad_k = stretch * (dxh * (wi_x - wj_x) + dyh * (wi_y - wj_y))
+            jax.debug.callback(_bwd_warn_check, grad_k, stiffnesses, pos_final, positions0,
+                               edges, rest_lengths, source_nodes_dof, imposed_positions, cot_pos_flat)
             return (grad_k, None, None, None, None, None)
 
         def energy_fn(p_flat, k):
@@ -825,7 +925,10 @@ def make_compute_response_fire(*, d=2, dt_init=1e-2, dt_max=1e-1, dt_min=1e-4,
         dR_dk = jax.jacobian(R, argnums=1)(pos_final, stiffnesses)
         J_reg = J + 1e-8 * jnp.eye(J.shape[0], dtype=J.dtype)
         w = jsp_linalg.solve(J_reg.T, cot_pos_flat)
-        return (-jnp.dot(dR_dk.T, w), None, None, None, None, None)
+        grad_k = -jnp.dot(dR_dk.T, w)
+        jax.debug.callback(_bwd_warn_check, grad_k, stiffnesses, pos_final, positions0,
+                           edges, rest_lengths, source_nodes_dof, imposed_positions, cot_pos_flat)
+        return (grad_k, None, None, None, None, None)
 
     compute_response_fire.defvjp(crf_fwd, crf_bwd)
     return compute_response_fire

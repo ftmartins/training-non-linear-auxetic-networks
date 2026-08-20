@@ -37,6 +37,13 @@ Output layout:
                          task_config saved via task_config.json instead)
     stiffnesses.npy, loss.npy, stiffnesses_traj*.npy, best_*
 
+  Note on stiffnesses.npy vs. loss.npy: stiffnesses.npy is the POST-update
+  network state (what training resumes from at step len(loss.npy)) — it does
+  NOT correspond to loss.npy[-1], which was measured one update earlier, at
+  stiffnesses_at_last_loss.npy. Use best_stiffnesses.npy/best_loss.txt or
+  stiffnesses_traj.npy/stiffnesses_traj_steps.npy (both pre-update-aligned)
+  for anything that recomputes/verifies loss from a saved stiffness snapshot.
+
 Training runs for `training_steps` (see --training-steps); to train longer,
 re-invoke with a larger --training-steps (resumes from the existing
 checkpoint). Learning rate starts at --learning-rate and is scaled down by
@@ -92,11 +99,15 @@ K_MAX = 1e2
 ETA = 1.0
 LEARNING_RATE = 10.0
 SOLVER = 'lammps'  # only backend implemented for Phase 1
-# NOT base.config.FORCE_TOL (1e-6) — verified (training/runners/
-# verify_lammps_auxetic.py, and project memory feedback_trajectory.md)
-# that 1e-6 terminates FIRE early and gives nu~=0 for auxetic tasks; 1e-8
-# is needed for accurate Poisson ratios.
-FORCE_TOL = 1e-8
+# Tightened 1e-8 -> 1e-10 (2026-08-20), matching base.config.FORCE_TOL's own
+# tightening: verified (training/runners/verify_lammps_auxetic.py, and
+# project memory feedback_trajectory.md) that 1e-6 terminates FIRE early and
+# gives nu~=0 for auxetic tasks, and separately that even 1e-8 was not
+# always tight enough for solver-independent reproducibility (needed 1e-10).
+# Kept as this file's own constant (not base.config.FORCE_TOL) so the
+# LAMMPS coupled-learning path's tolerance can be tuned independently of the
+# JAX-FIRE path's.
+FORCE_TOL = 1e-10
 
 N_TARGETED_TASKS = len(TARGETED_TASKS)
 N_REALIZATIONS = 5
@@ -252,7 +263,19 @@ def _run_training_loop(network, boundary_dict, task_config, eta, learning_rate, 
         global_step = step_offset + j + 1
         if global_step % 50 == 0:
             print(f"  step {global_step}: loss={total_loss:.4e}  best={best_loss:.4e}")
+            # 'stiffnesses.npy' is intentionally the POST-update value (the
+            # state load_resume_state() should hand back to the network to
+            # continue training from step `len(loss_history)` without
+            # repeating or skipping a step) — it does NOT correspond to
+            # loss_history[-1], which was measured at the PRE-update
+            # `measured_stiffnesses`. Saving that PRE-update pairing
+            # separately so a diagnostic/verification recompute of the loss
+            # from a saved stiffness snapshot doesn't silently compare
+            # against the wrong step's loss (a real bug found in production
+            # results — see project_auxetic_backprop_crash memory / the
+            # loss-reconstruction investigation this fixes).
             np.save(os.path.join(output_path, 'stiffnesses.npy'), new_stiffnesses)
+            np.save(os.path.join(output_path, 'stiffnesses_at_last_loss.npy'), measured_stiffnesses)
             np.save(os.path.join(output_path, 'loss.npy'), loss_history)
             if not np.any(np.isnan(new_stiffnesses)):
                 np.save(os.path.join(output_path, 'stiffnesses_ckpt.npy'), new_stiffnesses)

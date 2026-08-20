@@ -583,6 +583,7 @@ def finish_training_GD_auxetic_batch_jax(
     fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2,
     opt_fire=False, opt_fire_dt_max=None, opt_fire_dt_min=None,
     opt_fire_alpha_start=0.1, opt_fire_finc=1.05, opt_fire_fdec=0.5, opt_fire_falpha=0.99,
+    nan_debug_dir=None,
 ):
     """
     Train the network for auxetic response using JAX autodiff gradients.
@@ -653,6 +654,22 @@ def finish_training_GD_auxetic_batch_jax(
             Standard FIRE hyperparameters (velocity-mixing rate, dt growth/
             shrink factors, alpha decay) — defaults match
             make_compute_response_fire's own defaults.
+        nan_debug_dir: Directory for deeper NaN/non-convergence diagnostics
+            (see base.simulate.make_compute_response_fire's debug_dir/
+            debug_label). On a non-finite forward or backward FIRE result, a
+            RuntimeWarning with a stiffness summary (min/max, 5 smallest —
+            closest to vmin, the known floppy-mode failure mode) is always
+            raised; if this is set, a full .npz snapshot of that exact
+            solver call's inputs (stiffnesses, positions, edges, cotangent,
+            etc.) is also written there, named with the current task/
+            realization/step — so a crash on the cluster leaves enough on
+            disk to rerun just that one failing step standalone afterward.
+            Defaults to f"{TARGETED_RESULTS_DIR}/nan_debug" when
+            TARGETED_RESULTS_DIR is set (so it's on by default for any real
+            training run — it only ever writes on an actual failure, so
+            there's no cost when nothing goes wrong); pass explicitly to
+            override, or pass False to disable even when
+            TARGETED_RESULTS_DIR is set.
 
     Returns:
         (history, trained_network)
@@ -691,11 +708,27 @@ def finish_training_GD_auxetic_batch_jax(
     _n_dof_np = 2 * len(network.positions)
     _boundary_np = np.concatenate([np.asarray(top_nodes), np.asarray(bottom_nodes)])
     _source_dof_np = np.concatenate([_boundary_np * 2, _boundary_np * 2 + 1])
+
+    # Resolve the NaN-debug snapshot directory (see docstring). `_nan_debug_step`
+    # is a mutable holder, not a plain string: make_compute_response_fire is
+    # built ONCE here (not once per step), but its debug-logging callback runs
+    # on the host at CALL time, so a callable label that reads this holder
+    # always reports the CURRENT step even though the JIT-compiled graph
+    # itself was only traced once — see make_compute_response_fire's
+    # debug_label docstring for why this pattern is needed.
+    if nan_debug_dir is None and TARGETED_RESULTS_DIR is not None:
+        nan_debug_dir = Path(TARGETED_RESULTS_DIR) / 'nan_debug'
+    elif nan_debug_dir is False:
+        nan_debug_dir = None
+    _nan_debug_step = {'step': -1}
+    _nan_debug_label = lambda: f"task{task_seed}_real{realization_seed}_step{_nan_debug_step['step']}"
+
     crf_local = make_compute_response_fire(
         d=2, force_type=force_type,
         max_steps=fire_max_steps, tol=fire_tol,
         dt_max=fire_dt_max, finc=fire_finc, dt_init=fire_dt_init,
         edges_np=_edges_np, n_dof_np=_n_dof_np, source_nodes_dof_np=_source_dof_np,
+        debug_dir=nan_debug_dir, debug_label=_nan_debug_label,
     )
 
     # Pre-convert static arrays to JAX
@@ -721,6 +754,8 @@ def finish_training_GD_auxetic_batch_jax(
     pbar = tqdm(range(n_steps), desc=f'(loss = {loss:.4e}, min loss={min_loss:.4e})')
 
     for step in pbar:
+        _nan_debug_step['step'] = step
+
         # --- Free-minimize positions at current stiffnesses (Cython FIRE) ---
         network.update_positions(last_relaxed_positions)
         min_pos, force_norm = fire_minimize_network(

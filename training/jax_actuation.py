@@ -92,19 +92,44 @@ def _make_jit_ramp(crf_fn, id_fixed, id_pull, nsteps):
         def ramp(stiffnesses, edges, rest_lengths, positions0_flat, dx):
             x_fixed = positions0_flat[id_fixed * 2]
             y_fixed = positions0_flat[id_fixed * 2 + 1]
-            x_pull  = positions0_flat[id_pull * 2]
+            x_pull0 = positions0_flat[id_pull * 2]
             y_pull  = positions0_flat[id_pull * 2 + 1]
             source_dof = jnp.array(
                 [id_fixed * 2, id_pull * 2, id_fixed * 2 + 1, id_pull * 2 + 1],
                 dtype=jnp.int32,
             )
-            current_pos = positions0_flat
-            for _ in range(nsteps):
+
+            # jax.lax.scan instead of a Python for-loop, same reasoning as
+            # base.simulate.compute_quasistatic_trajectory_auxetic_jax: the
+            # unrolled loop traces nsteps separate copies of crf_fn's
+            # custom_vjp into the compiled graph, and this ramp gets
+            # differentiated (jax.grad, and forward-over-reverse
+            # jax.jvp(jax.grad(...)) for analysis/timestep_sweep.py's
+            # cost-Hessian) so each unrolled copy's backward/double-backward
+            # rule was paying to compile too. Measured on the production
+            # geometry_targeted/task_0/realization_0 network (n_edges=253,
+            # nsteps=40): compile time drops ~3x for the forward-only ramp,
+            # ~4.5x for jax.grad, ~6x for the jax.jvp(jax.grad(...)) HVP
+            # (25s -> 4s). Verified bit-identical to the old unrolled version
+            # (forward position, jax.grad, and the HVP all match to 0.0 abs
+            # diff) using that same network's real trained stiffnesses;
+            # mean per-step wall time is unchanged (this only cuts compile
+            # cost, as with the auxetic conversion). x_pull is carried
+            # through scan's carry (cumulative += dx, not step*dx) so the
+            # floating-point arithmetic matches the eager loop exactly
+            # rather than merely approximately.
+            def scan_body(carry, _):
+                current_pos, x_pull = carry
                 x_pull = x_pull + dx
                 imposed = jnp.array([x_fixed, x_pull, y_fixed, y_pull], dtype=jnp.float64)
-                current_pos = crf_fn(stiffnesses, edges, rest_lengths, current_pos,
-                                     source_dof, imposed)
-            return current_pos
+                new_pos = crf_fn(stiffnesses, edges, rest_lengths, current_pos,
+                                 source_dof, imposed)
+                return (new_pos, x_pull), None
+
+            (final_pos, _), _ = jax.lax.scan(
+                scan_body, (positions0_flat, x_pull0), None, length=nsteps
+            )
+            return final_pos
 
         _JIT_RAMP_CACHE[key] = ramp
     return ramp

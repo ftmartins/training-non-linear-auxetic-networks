@@ -116,7 +116,15 @@ USE_OPT_FIRE = False   # FIRE-style adaptive optimizer vs plain gradient descent
 N_STEPS = 5_000  # Number of training iterations
 # Legacy scalar — use get_n_strain_steps(task_seed) for task-aware code.
 N_STRAIN_STEPS = 200  # Number of steps in quasistatic trajectory (tasks < 20)
-FORCE_TOL = 1e-6  # Force convergence tolerance
+FORCE_TOL = 1e-10  # Force convergence tolerance -- tightened from 1e-6 (2026-08-20):
+# at 1e-6 the JAX-FIRE production auxetic path could not reproduce its own
+# saved losses on reload (fresh-JIT recompute mismatched stored loss by up to
+# ~10^13 relative at the best/min-loss checkpoint); 1e-9/1e-11 spot checks on
+# a real trained network showed reconstruction error dropping to <2% at
+# ordinary steps once tol was tightened below ~1e-9. See feedback_trajectory
+# memory (1e-10 needed for solver-independent Poisson-ratio reproducibility)
+# and project_auxetic_backprop_crash memory (chaotic sensitivity near the
+# network's floppy-mode/soft-mode configurations).
 VMIN = 1e-4  # Minimum stiffness value
 VMAX = 1e2  # Maximum stiffness value
 ETA = 0.1  # Coupling factor (from notebook)
