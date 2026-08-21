@@ -580,7 +580,7 @@ def finish_training_GD_auxetic_batch_jax(
     task_seed=None, realization_seed=None, save_interval=10,
     task_config=None, TARGETED_RESULTS_DIR=None,
     fire_max_steps=100_000, fire_tol=FORCE_TOL, network_type=NETWORK_TYPE, loss_tol=1e-6,
-    fire_dt_max=1.0, fire_finc=1.3, fire_dt_init=1e-2,
+    fire_dt_max=0.2, fire_finc=1.3, fire_dt_init=1e-2,
     opt_fire=False, opt_fire_dt_max=None, opt_fire_dt_min=None,
     opt_fire_alpha_start=0.1, opt_fire_finc=1.05, opt_fire_fdec=0.5, opt_fire_falpha=0.99,
     nan_debug_dir=None,
@@ -613,14 +613,19 @@ def finish_training_GD_auxetic_batch_jax(
             strain step of every quasistatic trajectory. No step is
             under-converged.
         fire_dt_max, fire_finc, fire_dt_init: FIRE step-size hyperparameters
-            (default max step 0.1, growth factor 1.1, initial step 0.01).
-            Tuned defaults here (1.0, 1.3, 0.01) reach the *same* force-tol
-            equilibrium in far fewer leapfrog iterations — validated (on the
-            real targeted-auxetic networks) to converge to the same trajectory
-            branch as the untuned defaults (identical final geometry/edge
-            topology), just ~6-9x faster. dt_max=2.0 was tested and found to
-            destabilize the integrator (diverges to NaN) — stay well under it;
-            these defaults have margin. See docs/jax_solver_speedup.md.
+            (untuned defaults: max step 0.1, growth factor 1.1, initial step
+            0.01). jax_solver_speedup.md's dt_max=1.0/finc=1.3 tuning reaches
+            the same force-tol equilibrium ~6-9x faster, but that speedup was
+            validated on an already-trained network (spread-out stiffnesses);
+            it was NOT re-validated against the random log-uniform stiffness
+            every real training run actually starts from. dt_max=2.0 clearly
+            destabilizes (diverges to NaN); no problem was ever confirmed at
+            1.0 with real initial conditions either, but default backed off
+            to 0.2 (2026-08-21) as a margin-of-safety hedge pending the
+            deeper NaN-origin logging (see debug_dir/debug_label in
+            base.simulate.make_compute_response_fire) actually catching a
+            real crash and pointing at dt as the cause. See
+            docs/jax_solver_speedup.md.
         loss_tol: Early-stopping threshold — training stops once loss drops below this
         opt_fire: If True, replace the learning_rate/lr_schedule gradient-descent
             update with a FIRE-style adaptive step on the stiffness "landscape" —
