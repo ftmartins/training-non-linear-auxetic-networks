@@ -161,7 +161,7 @@ def main():
     parser.add_argument('--results-dir', type=str, default=None,
                         help='auxetic only; override the default results directory')
     parser.add_argument('--output-dir', type=str,
-                        default='/data2/shared/felipetm/allosteric_nets',
+                        default='/data2/shared/felipetm/allosteric_nets_aug',
                         help='allosteric only')
     parser.add_argument('--n-thresh-steps', type=int, default=50)
     parser.add_argument('--eps-min', type=float, default=1e-8)

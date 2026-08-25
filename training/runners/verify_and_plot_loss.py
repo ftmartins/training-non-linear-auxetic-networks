@@ -152,7 +152,7 @@ def main():
     parser.add_argument('--targeted-ensemble', action='store_true', help='allosteric only')
     parser.add_argument('--results-dir', type=str, default=None, help='auxetic only')
     parser.add_argument('--output-dir', type=str,
-                        default='/data2/shared/felipetm/allosteric_nets', help='allosteric only')
+                        default='/data2/shared/felipetm/allosteric_nets_aug', help='allosteric only')
     parser.add_argument('--force-type', type=str, default='quadratic', help='auxetic only')
     parser.add_argument('--network-type', choices=['jammed', 'lattice'], default=None,
                         help="auxetic only; 'jammed' or 'lattice' (default: from config). "
