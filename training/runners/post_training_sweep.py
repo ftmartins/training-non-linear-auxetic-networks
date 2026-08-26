@@ -95,7 +95,8 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
 
 
 def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
-                    n_thresh_steps, eps_min, k_eigs, n_hessian_traj_steps):
+                    n_thresh_steps, eps_min, k_eigs, n_hessian_traj_steps,
+                    cost_hessian_solver='match'):
     from training.runners.allosteric_trainer import (
         STRAIN_INPUT, STRAIN_INPUT2, NSTEPS_TASK1, NSTEPS_TASK2, TARGETED_ENSEMBLE,
     )
@@ -141,11 +142,37 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
               f"{DEFAULT_SOLVER!r}), which may not match what actually trained "
               f"this realization.")
 
+    # Cost-Hessian backend. By default (`match`) the cost Hessian is computed
+    # with the SAME physics the run trained with: a LAMMPS-trained realization
+    # gets the finite-difference LAMMPS cost Hessian (_compute_cost_hessian_lammps),
+    # not the JAX-FIRE autodiff one. This matters because near "best loss" the
+    # LAMMPS and JAX-FIRE equilibria differ slightly, so the JAX-FIRE loss is not
+    # stationary at a LAMMPS-trained K* — its cost-Hessian eigenvectors (esp. the
+    # near-flat directions the figures care about) can misrepresent the true
+    # LAMMPS landscape at that point. `jax_fire` forces the (cheap, autodiff)
+    # JAX path regardless; `lammps` forces the FD-LAMMPS path regardless.
+    # NOTE: the FD-LAMMPS cost Hessian is O(n_edges) LAMMPS actuations per
+    # gradient, one gradient per Lanczos matvec -> hours per realization. Keep
+    # --k-eigs modest and expect this to dominate the sweep's wall time.
+    import functools
+    from analysis.timestep_sweep import _compute_cost_hessian_lammps
+
+    if cost_hessian_solver == 'jax_fire':
+        cost_hessian_fn = None                       # sweep default (_compute_cost_hessian_jax)
+    elif cost_hessian_solver == 'lammps' or (cost_hessian_solver == 'match' and solver == 'lammps'):
+        cost_hessian_fn = functools.partial(_compute_cost_hessian_lammps, solver='lammps')
+    else:                                            # match & solver != 'lammps' (or None)
+        cost_hessian_fn = None
+    print(f"  cost-Hessian backend: "
+          f"{'FD-LAMMPS (solver-matched)' if cost_hessian_fn is not None else 'JAX-FIRE autodiff'} "
+          f"(--cost-hessian-solver={cost_hessian_solver}, training solver={solver!r})", flush=True)
+
     results = sweep_allosteric(
         nodes, incidence_matrix, eq_lengths, task_config,
         stiffness_traj, steps, mse1, mse2,
         n_thresh_steps=n_thresh_steps, eps_min=eps_min, k_eigs=k_eigs,
         n_hessian_traj_steps=n_hessian_traj_steps, solver=solver,
+        cost_hessian_fn=cost_hessian_fn,
     )
     return result_path, results
 
@@ -174,6 +201,12 @@ def main():
                         help="number of top (largest positive) cost-Hessian eigenpairs to "
                              "compute; does not affect the elastic Hessian, which always "
                              "returns its full spectrum")
+    parser.add_argument('--cost-hessian-solver', choices=['match', 'jax_fire', 'lammps'],
+                        default='match', help='allosteric only; which physics backend to build '
+                             'the cost Hessian with. "match" (default): FD-LAMMPS when the run '
+                             'trained with LAMMPS (per training_meta.json), JAX-FIRE autodiff '
+                             'otherwise. "jax_fire"/"lammps": force that backend. FD-LAMMPS is '
+                             'much slower but is stationary-consistent with a LAMMPS-trained K*.')
     parser.add_argument('--force-type', type=str, default='quadratic', help='auxetic only')
     parser.add_argument('--network-type', choices=['jammed', 'lattice'], default=None,
                         help="auxetic only; 'jammed' or 'lattice' (default: from config). "
@@ -199,7 +232,7 @@ def main():
         result_path, results = _run_allosteric(
                 args.task, args.realization, args.geometry, args.targeted_ensemble,
                 args.output_dir, args.n_thresh_steps, args.eps_min, args.k_eigs,
-                args.n_hessian_traj_steps,
+                args.n_hessian_traj_steps, cost_hessian_solver=args.cost_hessian_solver,
             )
     #except Exception as e:
     #    print(f"post_training_sweep FAILED: {e!r}", file=sys.stderr)
