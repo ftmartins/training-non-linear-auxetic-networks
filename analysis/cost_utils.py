@@ -191,3 +191,82 @@ def compute_cost_hessian(network, compression_strain, target_poisson, boundary,
 
     order = np.argsort(eigenvalues)
     return eigenvalues[order], eigenvectors[:, order]
+
+
+def compute_cost_hessian_multi(network, subtasks, boundary,
+                               k_eigs=None, hvp_epsilon=1e-4, force_type='quadratic',
+                               n_strain_steps=100, verbose=True):
+    """
+    Top-k eigenpairs of the *combined* (mean-over-subtasks) loss Hessian w.r.t. K.
+
+    Combined loss = mean_s (attained_poisson_s(K) - target_poisson_s)^2
+
+    Same machinery as `compute_cost_hessian` (JAX autodiff gradient + FD HVP +
+    Lanczos), just a multi-term loss so the whole thing is one operator rather
+    than one per subtask. `subtasks` is an iterable of `(compression_strain,
+    target_poisson)` pairs. With a single pair this is identical to
+    `compute_cost_hessian(network, cs, tp, ...)` (callers should special-case
+    that and skip the extra solve).
+
+    Returns
+    -------
+    eigenvalues  : (k,) sorted ascending — the k largest algebraic eigenvalues.
+    eigenvectors : (n_edges, k)
+    """
+    subtasks = list(subtasks)
+    n_edges = len(network.stiffnesses)
+    base_k  = np.array(network.stiffnesses, dtype=float)
+
+    edges_jax        = jnp.asarray(np.array(network.edges,        dtype=np.int32))
+    rest_lengths_jax = jnp.asarray(np.array(network.rest_lengths, dtype=np.float64))
+    positions_jax    = jnp.asarray(np.array(network.positions,    dtype=np.float64).flatten())
+    top    = boundary['top']
+    bottom = boundary['bottom']
+    left   = boundary['left']
+    right  = boundary['right']
+
+    def loss_jax(k_jax):
+        def one(cs, tp):
+            pr = compute_poisson_ratio_single_jax(
+                _crf, k_jax, edges_jax, rest_lengths_jax, positions_jax,
+                top, bottom, left, right,
+                cs, n_strain_steps,
+            )
+            return (pr - tp) ** 2
+        # python loop over the (small, static) subtask list — keeps each
+        # compute_poisson_ratio_single_jax call traced exactly as in the
+        # single-subtask path.
+        terms = [one(float(cs), float(tp)) for cs, tp in subtasks]
+        return sum(terms) / len(terms)
+
+    grad_loss = jax.jit(jax.grad(loss_jax))
+
+    if verbose:
+        print(f"  Computing base gradient ({n_edges} edges, {len(subtasks)} subtasks) ...", flush=True)
+    t0 = time.time()
+    g0 = np.array(grad_loss(jnp.asarray(base_k)))
+    if verbose:
+        print(f"  Base gradient done in {time.time()-t0:.1f}s", flush=True)
+
+    hvp_count = [0]
+
+    def hvp(v):
+        v = np.asarray(v, dtype=float)
+        norm_v = np.linalg.norm(v)
+        if norm_v < 1e-14:
+            return np.zeros_like(v)
+        hvp_count[0] += 1
+        g_fwd = np.array(grad_loss(jnp.asarray(base_k + hvp_epsilon * v / norm_v)))
+        return norm_v * (g_fwd - g0) / hvp_epsilon
+
+    k = (n_edges - 1) if k_eigs is None else min(k_eigs, n_edges - 1)
+    H_op = LinearOperator((n_edges, n_edges), matvec=hvp, dtype=float)
+    if verbose:
+        print(f"  Starting eigsh (k={k}) ...", flush=True)
+    t_eig = time.time()
+    eigenvalues, eigenvectors = eigsh(H_op, k=k, which='LA')
+    if verbose:
+        print(f"  eigsh done in {time.time()-t_eig:.1f}s ({hvp_count[0]} HVPs)", flush=True)
+
+    order = np.argsort(eigenvalues)
+    return eigenvalues[order], eigenvectors[:, order]
