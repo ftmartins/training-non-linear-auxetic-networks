@@ -10,11 +10,13 @@ Pipeline (per selected training step):
 
 Cost Hessian (eigenpairs of the loss w.r.t. stiffnesses) is only evaluated at
 the first and last selected step (before/after training), since it is much
-more expensive than the elastic Hessian. Both sweeps save it two ways: one
-Hessian per subtask (`cost_hessian_{before,after}_eig{vals,vecs}`, stacked on a
-leading subtask axis) and one for the combined mean-over-subtasks loss
-(`..._combined`). With a single subtask the combined loss is identical to that
-subtask's, so the combined arrays are aliased from it rather than recomputed.
+more expensive than the elastic Hessian. Both sweeps save it *per subtask*
+only (`cost_hessian_{before,after}_eig{vals,vecs}`, stacked on a leading
+subtask axis). The combined mean-over-subtasks cost Hessian is no longer
+computed — for the FD-LAMMPS allosteric backend it was ~2x a single subtask
+solve (its loss touches both actuation tasks) and made the sweep infeasible
+within cluster wall limits; downstream consumers that need it recompute it
+locally. `k_eigs` defaults to 4 for the same wall-time reason.
 
 The full per-subtask/per-task trajectory (all frames, not just the
 `n_hessian_traj_steps` sparse points the elastic Hessian is evaluated at) is
@@ -39,7 +41,6 @@ import numpy as np
 
 from .cost_utils import (
     compute_trajectory, loss_from_trajectory, compute_cost_hessian,
-    compute_cost_hessian_multi,
 )
 from .hessian import compute_hessian_spectrum
 
@@ -139,7 +140,7 @@ def recompute_stiffness_loss(net, target_poisson_ratios, top, bottom, left, righ
 
 
 def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj, loss_traj,
-                  n_thresh_steps=50, eps_min=1e-8, n_traj_steps=100, k_eigs=10,
+                  n_thresh_steps=50, eps_min=1e-8, n_traj_steps=100, k_eigs=4,
                   n_hessian_traj_steps=20,
                   force_type='quadratic', n_strain_steps=100, tol=1e-10,
                   gradient_method='newton', verbose=True):
@@ -278,10 +279,8 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
     trajectory_positions    = np.stack(traj_positions_list)    # (n_t, n_sub, n_strain_steps, N, 2) — full trajectory, all selected steps
 
     # Cost Hessian only before (first selected step) and after (last selected
-    # step). Per subtask always; plus the combined (mean-over-subtasks) loss
-    # Hessian — but only actually solved when n_sub > 1, since with a single
-    # subtask the combined loss IS that subtask's loss, so we alias instead of
-    # paying for a second identical Lanczos solve.
+    # step), per subtask. The combined (mean-over-subtasks) loss Hessian is no
+    # longer computed here — recompute it locally from these frames if needed.
     subtasks_list = list(zip(compression_strains, target_poisson_ratios))
 
     def _cost_at(t, tag):
@@ -297,18 +296,10 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
                 force_type=force_type, n_strain_steps=n_strain_steps, verbose=verbose)
             sub_vals.append(vals)
             sub_vecs.append(vecs)
-        if n_sub > 1:
-            if verbose:
-                print(f"  [auxetic sweep] cost Hessian ({tag}, combined) ...", flush=True)
-            comb_vals, comb_vecs = compute_cost_hessian_multi(
-                net, subtasks_list, boundary, k_eigs=k_eigs,
-                force_type=force_type, n_strain_steps=n_strain_steps, verbose=verbose)
-        else:
-            comb_vals, comb_vecs = sub_vals[0].copy(), sub_vecs[0].copy()
-        return np.stack(sub_vals), np.stack(sub_vecs), comb_vals, comb_vecs
+        return np.stack(sub_vals), np.stack(sub_vecs)
 
-    cb_sub_vals, cb_sub_vecs, cb_comb_vals, cb_comb_vecs = _cost_at(t_indices[0],  'before')
-    ca_sub_vals, ca_sub_vecs, ca_comb_vals, ca_comb_vecs = _cost_at(t_indices[-1], 'after')
+    cb_sub_vals, cb_sub_vecs = _cost_at(t_indices[0],  'before')
+    ca_sub_vals, ca_sub_vecs = _cost_at(t_indices[-1], 'after')
 
     return {
         't_indices': t_indices,
@@ -328,10 +319,6 @@ def sweep_auxetic(network, task_config, boundary, stiffness_traj, positions_traj
         'cost_hessian_before_eigvecs': cb_sub_vecs,   # (n_sub, n_edges, k)
         'cost_hessian_after_eigvals': ca_sub_vals,
         'cost_hessian_after_eigvecs': ca_sub_vecs,
-        'cost_hessian_before_eigvals_combined': cb_comb_vals,   # (k,)
-        'cost_hessian_before_eigvecs_combined': cb_comb_vecs,   # (n_edges, k)
-        'cost_hessian_after_eigvals_combined': ca_comb_vals,
-        'cost_hessian_after_eigvecs_combined': ca_comb_vecs,
         'compression_strains': np.asarray(compression_strains, dtype=float),
         'target_poisson_ratios': np.asarray(target_poisson_ratios, dtype=float),
     }
@@ -373,7 +360,7 @@ def _select_local_threshold_indices(steps, mse1, mse2, n_thresh_steps, eps_min):
 
 def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                      stiffness_traj, steps, mse1, mse2,
-                     n_thresh_steps=50, eps_min=1e-8, k_eigs=10,
+                     n_thresh_steps=50, eps_min=1e-8, k_eigs=4,
                      n_hessian_traj_steps=20, use_clamped_trajectory=True,
                      cost_hessian_fn=None, solver=None, verbose=True):
     """
@@ -415,11 +402,12 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                                      (eigenvalues, eigenvectors). `which` is one of
                                      'task1' / 'task2' / 'combined' and selects which
                                      scalar loss the Hessian is taken of; this sweep
-                                     calls the fn once per subtask ('task1', and
-                                     'task2' when task_config has a second task) plus
-                                     once for 'combined' (the mean of the two) — the
-                                     'combined' call is skipped and aliased from the
-                                     sole subtask when there is only one.
+                                     calls the fn once per subtask ('task1' and
+                                     'task2'). The combined (mean-over-subtasks)
+                                     Hessian is no longer computed here — for the
+                                     FD-LAMMPS backend it was ~2x a single subtask
+                                     solve and blew the sweep's wall-time budget;
+                                     recompute it from these frames locally if needed.
                                      Defaults to _compute_cost_hessian_jax: exact
                                      autodiff (jax.grad for the base gradient,
                                      forward-over-reverse jax.jvp(jax.grad(...)) for
@@ -470,12 +458,10 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
     downstream analyses that need displacement between arbitrary frames (e.g.
     participation ratio) can index into it directly instead of recomputing it.
 
-    Cost-Hessian eigenpairs are saved both per subtask, stacked on a leading
+    Cost-Hessian eigenpairs are saved per subtask only, stacked on a leading
     subtask axis (`cost_hessian_{before,after}_eigvals` -> (2, k),
-    `..._eigvecs` -> (2, n_edges, k) for [task1, task2]), and for the combined
-    mean-over-subtasks loss (`cost_hessian_{before,after}_eigvals_combined` ->
-    (k,), `..._eigvecs_combined` -> (n_edges, k)). All three are always computed
-    (allosteric configs always have two actuation tasks).
+    `..._eigvecs` -> (2, n_edges, k) for [task1, task2]). The combined
+    mean-over-subtasks cost Hessian is no longer computed (see cost_hessian_fn).
     """
     from training.runners.allosteric_trainer import evaluate_actuation
 
@@ -574,13 +560,13 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
     if cost_hessian_fn is None:
         cost_hessian_fn = _compute_cost_hessian_jax
 
-    # Cost Hessian, per subtask and for the combined (mean-over-subtasks) loss.
-    # Allosteric task configs always carry two coupled actuation tasks (task1 +
-    # task2), so both per-subtask Hessians and a distinct combined one are always
-    # computed here. (The auxetic sweep, whose subtask count really can be 1,
-    # aliases the combined arrays from the sole subtask instead of recomputing;
-    # _compute_cost_hessian_{jax,lammps} likewise accept a single-task config for
-    # any other caller, treating 'combined' as that one task.)
+    # Cost Hessian, per subtask only (task1 + task2). The combined
+    # (mean-over-subtasks) loss Hessian is no longer computed: with the
+    # FD-LAMMPS backend its loss_fn touches both actuation tasks, so it cost
+    # ~2x a single-subtask Lanczos solve and made the sweep miss cluster wall
+    # limits. Recompute it locally from the saved before/after frames if a
+    # downstream consumer needs it. _compute_cost_hessian_{jax,lammps} still
+    # accept which='combined' for that purpose.
     subtask_whichs = ['task1', 'task2']
 
     def _cost_at(t):
@@ -591,13 +577,10 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                 k_eigs=k_eigs, which=w, verbose=verbose)
             sub_vals.append(v)
             sub_vecs.append(vec)
-        comb_vals, comb_vecs = cost_hessian_fn(
-            nodes, incidence_matrix, task_config, t, stiffness_traj,
-            k_eigs=k_eigs, which='combined', verbose=verbose)
-        return np.stack(sub_vals), np.stack(sub_vecs), comb_vals, comb_vecs
+        return np.stack(sub_vals), np.stack(sub_vecs)
 
-    cb_sub_vals, cb_sub_vecs, cb_comb_vals, cb_comb_vecs = _cost_at(t_indices[0])
-    ca_sub_vals, ca_sub_vecs, ca_comb_vals, ca_comb_vecs = _cost_at(t_indices[-1])
+    cb_sub_vals, cb_sub_vecs = _cost_at(t_indices[0])
+    ca_sub_vals, ca_sub_vecs = _cost_at(t_indices[-1])
 
     return {
         't_indices': t_indices,
@@ -618,10 +601,6 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
         'cost_hessian_before_eigvecs': cb_sub_vecs,   # (n_sub, n_edges, k)
         'cost_hessian_after_eigvals': ca_sub_vals,
         'cost_hessian_after_eigvecs': ca_sub_vecs,
-        'cost_hessian_before_eigvals_combined': cb_comb_vals,   # (k,)
-        'cost_hessian_before_eigvecs_combined': cb_comb_vecs,   # (n_edges, k)
-        'cost_hessian_after_eigvals_combined': ca_comb_vals,
-        'cost_hessian_after_eigvecs_combined': ca_comb_vecs,
     }
 
 
@@ -631,7 +610,7 @@ def _incidence_to_edges(incidence_matrix):
 
 
 def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffness_traj,
-                                 k_eigs=10, hvp_epsilon=1e-3, grad_epsilon=1e-4,
+                                 k_eigs=4, hvp_epsilon=1e-3, grad_epsilon=1e-4,
                                  solver=None, which='combined', verbose=True):
     """
     Top-k eigenpairs of an allosteric LAMMPS loss Hessian w.r.t. stiffnesses,
@@ -721,7 +700,7 @@ def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffn
 
 
 def _compute_cost_hessian_jax(nodes, incidence_matrix, task_config, t, stiffness_traj,
-                              k_eigs=10, which='combined', verbose=True):
+                              k_eigs=4, which='combined', verbose=True):
     """
     Top-k eigenpairs of an allosteric loss Hessian w.r.t. stiffnesses, via exact
     JAX autodiff instead of _compute_cost_hessian_lammps's finite differences.

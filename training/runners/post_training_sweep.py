@@ -152,8 +152,10 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
     # LAMMPS landscape at that point. `jax_fire` forces the (cheap, autodiff)
     # JAX path regardless; `lammps` forces the FD-LAMMPS path regardless.
     # NOTE: the FD-LAMMPS cost Hessian is O(n_edges) LAMMPS actuations per
-    # gradient, one gradient per Lanczos matvec -> hours per realization. Keep
-    # --k-eigs modest and expect this to dominate the sweep's wall time.
+    # gradient, one gradient per Lanczos matvec -> hours per realization, and it
+    # dominates the sweep's wall time. --k-eigs defaults to 4 and the sweep no
+    # longer computes the combined (mean-over-subtasks) Hessian (only per-subtask
+    # task1/task2) for this reason.
     import functools
     from analysis.timestep_sweep import _compute_cost_hessian_lammps
 
@@ -197,10 +199,12 @@ def main():
                         help='number of linearly-spaced points along each recomputed '
                              'compression/actuation trajectory at which the elastic Hessian '
                              'spectrum is evaluated (auxetic and allosteric)')
-    parser.add_argument('--k-eigs', type=int, default=10,
+    parser.add_argument('--k-eigs', type=int, default=4,
                         help="number of top (largest positive) cost-Hessian eigenpairs to "
                              "compute; does not affect the elastic Hessian, which always "
-                             "returns its full spectrum")
+                             "returns its full spectrum. Kept small (default 4) because the "
+                             "FD-LAMMPS cost Hessian costs one O(n_edges)-actuation gradient "
+                             "per Lanczos matvec.")
     parser.add_argument('--cost-hessian-solver', choices=['match', 'jax_fire', 'lammps'],
                         default='match', help='allosteric only; which physics backend to build '
                              'the cost Hessian with. "match" (default): FD-LAMMPS when the run '
@@ -256,9 +260,13 @@ def main():
         'n_thresh_steps': args.n_thresh_steps,
         'eps_min': args.eps_min,
         'n_timesteps_selected': int(len(results['t_indices'])),
+        'k_eigs': args.k_eigs,
+        'cost_hessian_combined': False,   # combined mean-over-subtasks Hessian no longer computed
     }
     if args.task_type in ('targeted', 'ensemble'):
         meta['network_type'] = args.network_type
+    else:
+        meta['cost_hessian_solver'] = args.cost_hessian_solver
     with open(result_path / meta_filename, 'w') as fh:
         json.dump(meta, fh, indent=2)
 
