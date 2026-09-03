@@ -330,8 +330,9 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
         signal (learning_update). Callers that only need `mse` (e.g. a
         gradient-descent loss, or the cost-Hessian finite-difference recipe
         in analysis/timestep_sweep.py) can pass False to skip that extra,
-        smaller-timestep FIRE ramp entirely. Ignored by the 'lammps' solver,
-        which always computes both runs.
+        smaller-timestep FIRE ramp entirely. Honoured by both solvers: with
+        compute_clamped=False the clamped run is not performed and, when
+        return_trajectory=True, the *free* run's frames are returned.
 
     Returns
     -------
@@ -350,7 +351,8 @@ def evaluate_actuation(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, et
                                        compute_clamped=compute_clamped)
     elif solver == 'lammps':
         return _evaluate_actuation_lammps(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps,
-                                          eta=eta, return_trajectory=return_trajectory)
+                                          eta=eta, return_trajectory=return_trajectory,
+                                          compute_clamped=compute_clamped)
     raise ValueError(f"Unknown solver: {solver!r} (expected 'jax_fire' or 'lammps')")
 
 
@@ -400,7 +402,7 @@ def _evaluate_actuation_jax(nodes, incidence_matrix, stiffnesses, tod, dx, nstep
 
 
 def _evaluate_actuation_lammps(nodes, incidence_matrix, stiffnesses, tod, dx, nsteps, eta=ETA,
-                               return_trajectory=False):
+                               return_trajectory=False, compute_clamped=True):
     # Each call gets its own scratch dir: evaluate_actuation is invoked both
     # from the training loop (already cwd-isolated per SLURM array task) and
     # from post_training_sweep.py (runs in the shared $SLURM_SUBMIT_DIR), so
@@ -410,8 +412,18 @@ def _evaluate_actuation_lammps(nodes, incidence_matrix, stiffnesses, tod, dx, ns
     try:
         f.write_lammps_data("data_free.network", nodes, incidence_matrix, stiffnesses,
                             work_dir=work_dir)
-        nodes_free = f.strain_network("data_free.network", 0, 1, clamped=False,
-                                      dx=dx, nsteps=nsteps, work_dir=work_dir)[nsteps - 1]
+        frames_free = f.strain_network("data_free.network", 0, 1, clamped=False,
+                                       dx=dx, nsteps=nsteps, work_dir=work_dir)
+        nodes_free = frames_free[nsteps - 1]
+        mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
+
+        # mse never depends on the clamped run; callers that only need the free
+        # trajectory (analysis wrappers, gd trainers) pass compute_clamped=False.
+        if not compute_clamped:
+            if return_trajectory:
+                return mse, nodes_free, None, frames_free
+            return mse, nodes_free, None
+
         cod = np.linalg.norm(nodes_free[3] - nodes_free[2])
         f.write_lammps_data("data_clamped.network", nodes, incidence_matrix, stiffnesses,
                             id_outA=2, id_outB=3,
@@ -422,7 +434,6 @@ def _evaluate_actuation_lammps(nodes, incidence_matrix, stiffnesses, tod, dx, ns
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
     nodes_clamped = frames_clamped[nsteps - 1]
-    mse = (np.linalg.norm(nodes_free[2] - nodes_free[3]) - tod) ** 2
     if return_trajectory:
         return mse, nodes_free, nodes_clamped, frames_clamped
     return mse, nodes_free, nodes_clamped
