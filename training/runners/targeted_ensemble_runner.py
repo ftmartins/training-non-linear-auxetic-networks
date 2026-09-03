@@ -106,7 +106,8 @@ from training.src.training_functions import (
 TRAINING_FUNCTIONS_AVAILABLE = True
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
-                        gradient_method='newton', network_type=NETWORK_TYPE, overwrite=False):
+                        gradient_method='newton', network_type=NETWORK_TYPE, overwrite=False,
+                        lr_override=None, steps_override=None):
     """
     Run a single targeted training job with checkpoint support.
 
@@ -129,6 +130,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     Returns:
         success: Boolean indicating success
     """
+    _LR = LEARNING_RATE if lr_override is None else lr_override
+    _NSTEPS = N_STEPS if steps_override is None else steps_override
     print(f"\n{'='*80}")
     print(f"Starting Targeted Task {task_id}, Realization {realization_seed}")
     print(f"{'='*80}")
@@ -158,7 +161,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     # a run that never actually happened.
     optimizer = 'fire' if (gradient_method == 'jax' and USE_OPT_FIRE) else 'gradient_descent'
     critical_hparams = {
-        'learning_rate': LEARNING_RATE,
+        'learning_rate': _LR,
         'k_min': VMIN,
         'k_max': VMAX,
         'force_tol': FORCE_TOL,
@@ -250,7 +253,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 network.edges = checkpoint['network']['edges']
                 history = checkpoint['history']
                 start_step = checkpoint['current_step']
-                print(f"  Resuming from step {start_step}/{N_STEPS}")
+                print(f"  Resuming from step {start_step}/{_NSTEPS}")
 
         if checkpoint is None:
             if verbose:
@@ -270,11 +273,11 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         if verbose:
             print(f"  Target extensions: {target_extensions}")
 
-        remaining_steps = N_STEPS - start_step
+        remaining_steps = _NSTEPS - start_step
 
         print(f"  Training parameters:")
-        print(f"    Learning rate: {LEARNING_RATE} (starting; see training.src.lr_schedule)")
-        print(f"    Steps remaining: {remaining_steps:,} / {N_STEPS:,}")
+        print(f"    Learning rate: {_LR} (starting; see training.src.lr_schedule)")
+        print(f"    Steps remaining: {remaining_steps:,} / {_NSTEPS:,}")
         print(f"    Strain steps: {N_STRAIN_STEPS}")
         print(f"    Force tolerance: {FORCE_TOL}")
 
@@ -286,10 +289,10 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         save_run_metadata(
             task_id, realization_seed,
             hyperparams={
-                'learning_rate': LEARNING_RATE,
+                'learning_rate': _LR,
                 'k_min': VMIN,
                 'k_max': VMAX,
-                'n_steps': N_STEPS,
+                'n_steps': _NSTEPS,
                 'force_tol': FORCE_TOL,
                 'gradient_method': gradient_method,
                 'optimizer': optimizer,
@@ -340,7 +343,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             )
 
         if remaining_steps > 0:
-            history, trained_network = _run_train(network, history, LEARNING_RATE, remaining_steps)
+            history, trained_network = _run_train(network, history, _LR, remaining_steps)
         else:
             trained_network = network
             print("  Training already complete!")
@@ -588,6 +591,17 @@ Examples:
              'k_min/k_max/force_tol in training_meta.json instead of failing on mismatch'
     )
 
+    parser.add_argument(
+        '--learning-rate', type=float, default=None,
+        help='Override the nominal LEARNING_RATE from config for this run '
+             '(single mode). Use with --overwrite to restart a diverged run at a lower LR.'
+    )
+    parser.add_argument(
+        '--steps', type=int, default=None,
+        help='Override N_STEPS from config for this run (single mode). n_steps is exempt '
+             'from the hyperparameter-mismatch guard, so this works on a plain resume.'
+    )
+
     args = parser.parse_args()
 
     if args.mode == 'single':
@@ -600,7 +614,9 @@ Examples:
         success = run_single_training(args.task, args.realization, verbose=args.verbose,
                                       gradient_method=args.gradient_method,
                                       network_type=args.network_type,
-                                      overwrite=args.overwrite)
+                                      overwrite=args.overwrite,
+                                      lr_override=args.learning_rate,
+                                      steps_override=args.steps)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':
