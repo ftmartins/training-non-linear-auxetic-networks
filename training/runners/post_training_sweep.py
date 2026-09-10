@@ -112,6 +112,20 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
     mse1              = np.load(result_path / 'mse1.npy')
     mse2              = np.load(result_path / 'mse2.npy')
 
+    # Evaluate the 'after' cost Hessian at the trainer's true lowest-loss K*
+    # (best_stiffnesses.npy) rather than the coarse checkpoint-grid argmin
+    # stiffness_traj[t_indices[-1]] -- they differ for ~23% of converged
+    # realizations (best_stiffnesses_audit.md). Absent (older runs) -> None ->
+    # sweep_allosteric keeps the old checkpoint-grid behavior.
+    best_stiffnesses = None
+    _bpath = result_path / 'best_stiffnesses.npy'
+    if _bpath.exists():
+        best_stiffnesses = np.load(_bpath)
+        print(f"  cost_hessian_after: at best_stiffnesses.npy (lowest-loss K*)", flush=True)
+    else:
+        print(f"  cost_hessian_after: best_stiffnesses.npy absent -> "
+              f"stiffness_traj[t_indices[-1]] (checkpoint-grid argmin)", flush=True)
+
     gseed, strain_output2, strain_output = np.loadtxt(result_path / 'tasks.txt')
     tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
     tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
@@ -174,7 +188,7 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
         stiffness_traj, steps, mse1, mse2,
         n_thresh_steps=n_thresh_steps, eps_min=eps_min, k_eigs=k_eigs,
         n_hessian_traj_steps=n_hessian_traj_steps, solver=solver,
-        cost_hessian_fn=cost_hessian_fn,
+        cost_hessian_fn=cost_hessian_fn, best_stiffnesses=best_stiffnesses,
     )
     return result_path, results
 

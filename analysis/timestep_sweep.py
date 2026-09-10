@@ -362,7 +362,8 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                      stiffness_traj, steps, mse1, mse2,
                      n_thresh_steps=50, eps_min=1e-8, k_eigs=4,
                      n_hessian_traj_steps=20, use_clamped_trajectory=True,
-                     cost_hessian_fn=None, solver=None, verbose=True):
+                     cost_hessian_fn=None, solver=None, best_stiffnesses=None,
+                     verbose=True):
     """
     Run the full timestep-sweep analysis for one allosteric training result.
 
@@ -442,6 +443,19 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
                                      that hasn't changed since this realization was
                                      trained, which isn't guaranteed (DEFAULT_SOLVER
                                      has already changed once, lammps -> jax_fire).
+    best_stiffnesses : (E,) array or None
+                                     If given, the *after* cost Hessian is
+                                     evaluated here (the trainer's per-step
+                                     argmin-loss K*, from `best_stiffnesses.npy`)
+                                     instead of at `stiffness_traj[t_indices[-1]]`
+                                     (the coarse checkpoint-grid argmin). The two
+                                     differ for ~23% of converged realizations
+                                     (see best_stiffnesses_audit.md); the figures
+                                     need the cost-Hessian eigenvectors at the
+                                     same K* the susceptibilities use. The
+                                     *before* Hessian is unaffected. Recorded as
+                                     `cost_hessian_after_stiffness` /
+                                     `cost_hessian_after_at_best_stiffnesses`.
     k_eigs : int                    number of top (largest positive / algebraic)
                                      cost-Hessian eigenpairs to compute. Does NOT
                                      affect the elastic Hessian, which always
@@ -569,18 +583,27 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
     # accept which='combined' for that purpose.
     subtask_whichs = ['task1', 'task2']
 
-    def _cost_at(t):
+    def _cost_at(t, k_override=None):
         sub_vals, sub_vecs = [], []
         for w in subtask_whichs:
             v, vec = cost_hessian_fn(
                 nodes, incidence_matrix, task_config, t, stiffness_traj,
-                k_eigs=k_eigs, which=w, verbose=verbose)
+                k_eigs=k_eigs, which=w, verbose=verbose, k_override=k_override)
             sub_vals.append(v)
             sub_vecs.append(vec)
         return np.stack(sub_vals), np.stack(sub_vecs)
 
+    # 'after' cost Hessian: at ``best_stiffnesses`` (the trainer's per-step
+    # argmin-loss snapshot) when supplied, otherwise at the coarse
+    # checkpoint-grid argmin ``stiffness_traj[t_indices[-1]]``. The two differ
+    # for ~23% of converged realizations (see best_stiffnesses_audit.md); the
+    # figures need the cost-Hessian eigenvectors at the same operating point the
+    # susceptibilities are evaluated at, which is the lowest-loss stiffness.
+    _best_k = None if best_stiffnesses is None else np.asarray(best_stiffnesses, dtype=float)
     cb_sub_vals, cb_sub_vecs = _cost_at(t_indices[0])
-    ca_sub_vals, ca_sub_vecs = _cost_at(t_indices[-1])
+    ca_sub_vals, ca_sub_vecs = _cost_at(t_indices[-1], k_override=_best_k)
+    cost_hessian_after_stiffness = (np.asarray(stiffness_traj[t_indices[-1]], dtype=float)
+                                    if _best_k is None else _best_k)
 
     return {
         't_indices': t_indices,
@@ -601,6 +624,8 @@ def sweep_allosteric(nodes, incidence_matrix, eq_lengths, task_config,
         'cost_hessian_before_eigvecs': cb_sub_vecs,   # (n_sub, n_edges, k)
         'cost_hessian_after_eigvals': ca_sub_vals,
         'cost_hessian_after_eigvecs': ca_sub_vecs,
+        'cost_hessian_after_stiffness': cost_hessian_after_stiffness,          # (E,) the K* actually used
+        'cost_hessian_after_at_best_stiffnesses': np.asarray(_best_k is not None),
     }
 
 
@@ -611,7 +636,7 @@ def _incidence_to_edges(incidence_matrix):
 
 def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffness_traj,
                                  k_eigs=4, hvp_epsilon=1e-3, grad_epsilon=1e-4,
-                                 solver=None, which='combined', verbose=True):
+                                 solver=None, which='combined', verbose=True, k_override=None):
     """
     Top-k eigenpairs of an allosteric LAMMPS loss Hessian w.r.t. stiffnesses,
     via finite-difference gradient + finite-difference HVP + Lanczos.
@@ -647,7 +672,8 @@ def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffn
     want1 = which in ('combined', 'task1')
     want2 = which in ('combined', 'task2') and tod2 is not None
 
-    base_k = np.asarray(stiffness_traj[t], dtype=float)
+    base_k = np.asarray(stiffness_traj[t] if k_override is None else k_override,
+                        dtype=float)   # k_override -> 'after' at best_stiffnesses (see sweep_allosteric)
     n_edges = len(base_k)
 
     def loss_fn(k):
@@ -700,7 +726,7 @@ def _compute_cost_hessian_lammps(nodes, incidence_matrix, task_config, t, stiffn
 
 
 def _compute_cost_hessian_jax(nodes, incidence_matrix, task_config, t, stiffness_traj,
-                              k_eigs=4, which='combined', verbose=True):
+                              k_eigs=4, which='combined', verbose=True, k_override=None):
     """
     Top-k eigenpairs of an allosteric loss Hessian w.r.t. stiffnesses, via exact
     JAX autodiff instead of _compute_cost_hessian_lammps's finite differences.
@@ -756,7 +782,8 @@ def _compute_cost_hessian_jax(nodes, incidence_matrix, task_config, t, stiffness
     want1 = which in ('combined', 'task1')
     want2 = which in ('combined', 'task2') and tod2 is not None
 
-    base_k = np.asarray(stiffness_traj[t], dtype=float)
+    base_k = np.asarray(stiffness_traj[t] if k_override is None else k_override,
+                        dtype=float)   # k_override -> 'after' at best_stiffnesses (see sweep_allosteric)
     n_edges = len(base_k)
     edges = _incidence_to_edges(incidence_matrix)
     rest_lengths = np.linalg.norm(nodes[edges[:, 1]] - nodes[edges[:, 0]], axis=1)
