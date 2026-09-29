@@ -11,7 +11,8 @@ compute_susceptibilities(positions, edges, stiffnesses, rest_lengths,
 
 compute_s_shift(positions, edges, stiffnesses, rest_lengths,
                 constrained_nodes=np.array([]))
-    → s_shift  (E,)   Frobenius norm of per-edge Jacobian block
+    → s_shift  (E,)   L2 norm of the per-edge equilibrium-position response
+                      dx/dk_i  (vanishes at an unprestressed reference config)
 
 Lower-level functions from generalized_susceptibility are also exported
 for notebooks that call them directly:
@@ -266,14 +267,30 @@ def compute_susceptibilities(positions, edges, stiffnesses, rest_lengths,
 def compute_s_shift(positions, edges, stiffnesses, rest_lengths,
                     constrained_nodes=None):
     """
-    Per-edge response norm: Frobenius norm of the full Jacobian block.
+    Per-edge equilibrium-position response norm.
 
-    s_shift[e] = ||Hjac[e]||_F = ||dH^{-1}/dk_e||_F
+    For a network at mechanical equilibrium, perturbing the stiffness of edge i
+    shifts every node's equilibrium position by
+
+        dx_a^mu / dk_i = - f_i * sum_{b,nu} (H^{-1})_{a mu, b nu} B_{i b} d_i^nu
+
+    where H is the physical (elastic) Hessian at ``positions``, B is the signed
+    edge-node incidence matrix, d_i = (B @ positions)_i is edge i's vector, and
+    ``f_i = 1 - rest_lengths_i / |d_i|`` is edge i's fractional extension
+    (``fs`` in ``_geometry``). The scalar force-per-unit-stiffness that drives
+    the shift is dF_b^nu/dk_i = f_i * d_i^nu * B_{i b}, i.e. d/dx of the
+    per-edge energy term's k-derivative (1/2)(|d_i| - L0_i)^2.
+
+    s_shift[i] = || dx/dk_i ||_2   (L2 norm over all node DOFs)
+
+    Note this vanishes identically at an unprestressed reference configuration
+    (f_i == 0 for every edge) -- evaluate it at a strained/actuated state.
 
     Parameters
     ----------
     constrained_nodes : array-like or None
-        Empty / None → unconstrained inverse.
+        Node indices whose DOFs are pinned when building H^{-1}. Empty / None
+        -> unconstrained inverse.
 
     Returns
     -------
@@ -281,14 +298,20 @@ def compute_s_shift(positions, edges, stiffnesses, rest_lengths,
     """
     if constrained_nodes is None:
         constrained_nodes = np.array([], dtype=int)
+    positions    = np.asarray(positions,    dtype=float)
+    edges        = np.asarray(edges,        dtype=int)
+    rest_lengths = np.asarray(rest_lengths, dtype=float)
+    n_nodes      = positions.shape[0]
+
+    B = _build_incidence_matrix(edges, n_nodes)          # (E, N)
+    disps, ells, _nhats, fs = _geometry(positions, B, rest_lengths)   # disps (E,2), fs (E,)
+
     Hinv = compute_constrained_hessian_inverse(
         positions, edges, stiffnesses, rest_lengths,
         constrained_nodes=constrained_nodes,
-    )
-    Hjac, _, _ = compute_full_jacobian_matrixwise(
-        positions, edges, stiffnesses, rest_lengths,
-        H_ff_inv=None, H_full_inv=Hinv,
-    )
-    E      = len(edges)
-    Hjac_np = np.array(Hjac).reshape(E, -1)
-    return np.linalg.norm(Hjac_np, axis=1)
+    )                                                    # (N, 2, N, 2) = (a, mu, b, nu)
+
+    # dx_a^mu / dk_i = - f_i * sum_{b,nu} Hinv[a,mu,b,nu] * B[i,b] * disps[i,nu]
+    dxdk = -np.einsum('e,ambn,eb,en->eam', fs, Hinv, B, disps, optimize=True)  # (E, N, 2)
+    E = len(edges)
+    return np.linalg.norm(dxdk.reshape(E, -1), axis=1)

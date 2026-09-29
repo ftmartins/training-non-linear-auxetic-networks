@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
 import sys
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -334,25 +336,33 @@ def _auxfile(d: Path, stem: str, ext: str) -> Path:
     return j if j.exists() else d / f"{stem}.{ext}"
 
 
-def load_auxetic(task_id, real_id) -> dict | None:
+def load_auxetic(task_id, real_id, family: str | None = None) -> dict | None:
     """Load one auxetic realization.
 
     Wraps ``analysis.data_io.load_auxetic_network`` (network + boundary) and
     adds the trajectories + task_config the calc notebook needs. Returns
     ``None`` when the realization is missing.
+
+    ``family``: ``"targeted"`` | ``"general"`` | ``None`` (default -> module
+    ``AUX_FAMILY``). Lets callers pull from the other geometry family without
+    touching the module-level default the rest of the notebook relies on.
     """
-    d = AUX_DATA_DIR / f"task_{task_id:02d}" / f"realization_{real_id:02d}"
+    data_dir = AUX_DATA_DIR if family is None else REPO_ROOT / "data" / "auxetic_nets_aug" / family
+    d = data_dir / f"task_{task_id:02d}" / f"realization_{real_id:02d}"
     if not d.is_dir() or not _auxfile(d, "final_network", "pkl").exists():
         return None
     from analysis.data_io import load_auxetic_network
 
     network, boundary = load_auxetic_network(
-        task_id, real_id, data_dir=AUX_DATA_DIR, network_type=AUX_NETWORK_TYPE)
+        task_id, real_id, data_dir=data_dir, network_type=AUX_NETWORK_TYPE)
 
     task_config = {}
     tc_path = _auxfile(d, "task_config", "json")
     if tc_path.exists():
-        task_config = json.loads(tc_path.read_text())
+        # Some general-family task_config_jammed.json files on disk are a bare
+        # `null` (found 2026-09-05, 14/677 general realizations) -- treat that
+        # the same as "file missing" rather than propagating None downstream.
+        task_config = json.loads(tc_path.read_text()) or {}
 
     lt_path = _auxfile(d, "loss_trajectory", "npy")
     st_path = _auxfile(d, "stiffness_trajectory", "npy")
@@ -375,17 +385,81 @@ def load_auxetic(task_id, real_id) -> dict | None:
     )
 
 
+def aux_best_loss_state(aa, load_positions: bool = True) -> tuple:
+    """``(positions, stiffnesses, best_idx)`` at the auxetic realization's
+    minimum-loss training step.
+
+    ``load_positions=False`` skips the (Box-cold) ``history.pkl`` read and
+    returns the final-network positions unchanged -- for callers that only need
+    ``stiffnesses`` / ``best_idx`` (e.g. a per-subtask s_shift that rebuilds its
+    own compressed frame from the undeformed reference).
+
+    This is the SAME operating point the post-training sweep evaluates
+    ``cost_hessian_after_*`` at: ``select_loss_threshold_steps`` puts
+    ``argmin`` over the full ``loss_trajectory`` last in ``t_indices``, and the
+    sweep's ``_cost_at(t_indices[-1], 'after')`` sets both ``net.stiffnesses =
+    stiffness_traj[b]`` and ``net.positions = positions_traj[b]``. Anything that
+    correlates a per-edge quantity against ``cost_hessian_after_eigvecs`` (Fig 3c
+    / 3d) must be evaluated here too -- ``final_network.pkl`` holds the *last*
+    step, not the best one, and for auxetic runs that ended above their own
+    minimum (resume rounds, post-backprop-crash restarts) the two differ.
+
+    ``stiffnesses`` come from ``stiffness_trajectory.npy`` (``aa['stiff_traj']``);
+    ``positions`` from ``history.pkl`` (the only per-step positions record --
+    each entry is the strain-relaxed config that step's loss was measured at).
+    Falls back to the ``final_network`` state (with a warning) when a per-step
+    record is missing or length-misaligned.
+    """
+    net = aa["network"]
+    pos_final = np.asarray(net.positions, float)
+    k_final = np.asarray(net.stiffnesses, float)
+    loss_traj = aa.get("loss_traj")
+    stiff_traj = aa.get("stiff_traj")
+    tag = f"auxetic {aa.get('task_id')}/{aa.get('real_id')}"
+    if loss_traj is None or stiff_traj is None or len(np.asarray(loss_traj)) == 0:
+        warnings.warn(f"{tag}: no loss/stiffness trajectory -> best-loss state "
+                      "falls back to final_network")
+        return pos_final, k_final, None
+    loss_traj = np.asarray(loss_traj, float)
+    if not np.isfinite(loss_traj).any():
+        warnings.warn(f"{tag}: loss trajectory all-NaN -> best-loss state falls "
+                      "back to final_network")
+        return pos_final, k_final, None
+    b = int(np.nanargmin(loss_traj))
+    stiff_traj = np.asarray(stiff_traj, float)
+    k_best = np.asarray(stiff_traj[b], float) if b < len(stiff_traj) else k_final
+    pos_best = pos_final
+    if not load_positions:
+        return pos_best, k_best, b
+    hist_path = _auxfile(Path(aa["dir"]), "history", "pkl")
+    if hist_path.exists():
+        with open(hist_path, "rb") as f:
+            positions = pickle.load(f).get("positions")
+        if positions is not None and len(positions) == len(loss_traj):
+            pos_best = np.asarray(positions[b], float)
+        else:
+            warnings.warn(f"{tag}: history positions missing/misaligned "
+                          f"({0 if positions is None else len(positions)} vs "
+                          f"{len(loss_traj)}) -> best-loss k with final positions")
+    else:
+        warnings.warn(f"{tag}: no history.pkl -> best-loss k with final positions")
+    return pos_best, k_best, b
+
+
 def discover_auxetic(max_per_task: int | None = None, require_converged: bool = True,
-                     min_success_ratio: float = 1e-4) -> list[tuple]:
+                     min_success_ratio: float = 1e-4, family: str | None = None) -> list[tuple]:
     """List ``(task_id, real_id)`` pairs under the auxetic ``<family>`` tree.
 
     Convergence bar defaults to 1e-4 (min loss / initial loss), matching the
     allosteric bar; pass ``min_success_ratio=1e-2`` for the older 2-decade bar.
+    ``family``: ``"targeted"`` | ``"general"`` | ``None`` (default -> module
+    ``AUX_FAMILY``), same override as ``load_auxetic``.
     """
+    data_dir = AUX_DATA_DIR if family is None else REPO_ROOT / "data" / "auxetic_nets_aug" / family
     found = []
-    if not AUX_DATA_DIR.is_dir():
+    if not data_dir.is_dir():
         return found
-    for task_dir in sorted(AUX_DATA_DIR.glob("task_*"), key=lambda p: int(p.name.split("_")[1])):
+    for task_dir in sorted(data_dir.glob("task_*"), key=lambda p: int(p.name.split("_")[1])):
         tid = int(task_dir.name.split("_")[1])
         reals = sorted(task_dir.glob("realization_*"), key=lambda p: int(p.name.split("_")[1]))
         if max_per_task is not None:
@@ -402,6 +476,69 @@ def discover_auxetic(max_per_task: int | None = None, require_converged: bool = 
                     continue
             found.append((tid, rid))
     return found
+
+
+# --------------------------------------------------------------------------- #
+# Canonical figure ensemble (2026-09-21)                                      #
+# --------------------------------------------------------------------------- #
+# ONE pool for every ensemble panel / average in the Aug26 figures:
+#   allosteric : for each (geometry in {targeted, 0..4}, task 0..4) the
+#                ENSEMBLE_N_ALLO best-trained converged realizations
+#                (5 x 6 x 5 = 150 when every cell has >= 5).
+#   auxetic    : TARGETED family only, tasks 0..19, the ENSEMBLE_N_AUX best-trained
+#                converged realizations per task (20 x 15 = 300).
+# "Best trained" = lowest (min loss / initial loss); ties broken by lower real_id.
+# Converged still means ratio <= MIN_SUCCESS_RATIO (allo) / 1e-4 (aux).
+ENSEMBLE_N_ALLO = 5
+ENSEMBLE_N_AUX = 15
+ENSEMBLE_AUX_TASKS = tuple(range(20))
+ENSEMBLE_AUX_FAMILY = "targeted"
+
+
+def _allo_ratio(gid, tid, rid) -> float:
+    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
+    if not (d / "mse1.npy").exists() or not (d / "mse2.npy").exists():
+        return np.inf
+    return convergence_ratio(np.load(d / "mse1.npy"), np.load(d / "mse2.npy"))
+
+
+def _aux_ratio(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> float:
+    d = REPO_ROOT / "data" / "auxetic_nets_aug" / family / f"task_{tid:02d}" / f"realization_{rid:02d}"
+    lt = _auxfile(d, "loss_trajectory", "npy")
+    if not lt.exists():
+        return np.inf
+    loss = np.asarray(np.load(lt), dtype=float)
+    s = loss.mean(axis=1) if loss.ndim > 1 else loss
+    return float(np.nanmin(s) / s[0]) if len(s) and s[0] > 0 else np.inf
+
+
+def figure_ensemble_allosteric(n_best: int = ENSEMBLE_N_ALLO) -> list[tuple]:
+    """Canonical allosteric ensemble: ``(geometry_id, task_id, real_id)`` triples,
+    the ``n_best`` lowest-ratio converged realizations of every (geometry, task)."""
+    by_cell: dict = {}
+    for gid, tid, rid in discover_allosteric("all", None):
+        by_cell.setdefault((gid, tid), []).append((_allo_ratio(gid, tid, rid), rid))
+    out = []
+    for gid in ALLO_GEOMETRIES:
+        for tid in sorted(t for g, t in by_cell if g == gid):
+            best = sorted(by_cell[(gid, tid)])[:n_best]
+            out.extend((gid, tid, rid) for _, rid in sorted(best, key=lambda x: x[1]))
+    return out
+
+
+def figure_ensemble_auxetic(n_best: int = ENSEMBLE_N_AUX, tasks=ENSEMBLE_AUX_TASKS,
+                            family: str = ENSEMBLE_AUX_FAMILY) -> list[tuple]:
+    """Canonical auxetic ensemble: ``(family, task_id, real_id)`` triples (same
+    triple shape as ``FIG2_AUX_POOL``), targeted tasks 0..19, ``n_best`` per task."""
+    by_task: dict = {}
+    for tid, rid in discover_auxetic(None, family=family):
+        if tid in tasks:
+            by_task.setdefault(tid, []).append((_aux_ratio(tid, rid, family), rid))
+    out = []
+    for tid in sorted(by_task):
+        best = sorted(by_task[tid])[:n_best]
+        out.extend((family, tid, rid) for _, rid in sorted(best, key=lambda x: x[1]))
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -469,15 +606,26 @@ def allo_elastic_spectrum(frame_positions, edges, stiffnesses, eq_lengths,
     return vals, vecs
 
 
-def lowest_nontrivial(vals, constrained: bool) -> float:
-    """Lowest *non-trivial* eigenvalue from an ascending elastic spectrum.
+def lowest_nontrivial(vals, constrained: bool = False, tol: float = 1e-12) -> float:
+    """Softest *genuine* (non-null) eigenvalue of an elastic spectrum: the
+    smallest ``lambda > tol``.
 
-    The constrained (pinned-node) Hessian has no rigid-body nullspace -> take
-    ``vals[0]``. The unconstrained Hessian keeps the 3 rigid modes of a 2-D
-    network (2 translations + 1 rotation) at ~0 -> take ``vals[3]``.
+    A fixed nullity index (``vals[0]`` pinned / ``vals[3]`` for the 2-D
+    unconstrained rigid trio) is wrong for the near-isostatic auxetic
+    networks -- at zero prestress they carry extra floppy zero modes
+    (unconstrained nullity 6, not 3), so ``vals[3]`` landed *inside* the
+    nullspace and returned a ~1e-17 round-off value whose sign was noise.
+    Scanning for the first eigenvalue above ``tol`` picks the real softest
+    mode per network, independently before/after training, regardless of how
+    many trivial/floppy modes precede it.
+
+    ``constrained`` is kept for call-site compatibility and no longer affects
+    the result (a pinned Hessian's ``vals[0]`` already clears ``tol``).
+    Returns ``nan`` when every eigenvalue is <= ``tol`` (caller drops the ratio).
     """
-    vals = np.asarray(vals, float)
-    return float(vals[0] if constrained else vals[min(3, len(vals) - 1)])
+    vals = np.sort(np.asarray(vals, float))
+    above = vals[vals > tol]
+    return float(above[0]) if above.size else float("nan")
 
 
 def allo_per_task_cost_hessian(nodes, incidence_matrix, task_config, stiffnesses,
@@ -594,6 +742,30 @@ def _sweep_checkpoint_stiffness(d, end):
     return st[idx] if 0 <= idx < len(st) else None
 
 
+def allo_best_loss_stiffness(d) -> np.ndarray:
+    """Lowest-loss stiffness vector for an allosteric realization.
+
+    Prefers ``best_stiffnesses.npy`` -- the trainer's per-logged-step
+    argmin-``0.5*(mse1+mse2)`` snapshot (verified against ``best_combined_mse.txt``
+    for every targeted+general realization). Falls back to the coarse
+    checkpoint-grid proxy ``stiff_traj[argmin(mse1+mse2 at checkpoints)]`` (==
+    ``select_steps(...)[0][-1]``, since ``select_loss_threshold_steps`` always
+    puts the checkpoint argmin last) only when ``best_stiffnesses`` is absent.
+
+    NOTE this is deliberately NOT ``allo_operating_point``: for ~23% of converged
+    sweep-having realizations the sweep's after-checkpoint stiffness lands one
+    coarse checkpoint away from the true argmin (loss up to ~40x worse), so a
+    susceptibility / cost Hessian built there is not "at the best stiffness".
+    Passing this vector to ``allo_cost_hessian_at`` still sweep-serves the cost
+    Hessian for the ~77% where the two coincide (exact array match) and only
+    recomputes locally for the rest.
+    """
+    if d.get("best_stiffnesses") is not None:
+        return np.asarray(d["best_stiffnesses"], float)
+    ti, _ = select_steps(d["mse1"], d["mse2"], d["stiff_traj_steps"])
+    return np.asarray(d["stiff_traj"][ti[-1]], float)
+
+
 def allo_operating_point(d, at="best"):
     """``(k_vec, tag)`` for the allosteric cost-Hessian operating point.
 
@@ -614,6 +786,29 @@ def allo_operating_point(d, at="best"):
     if at in ("best", "after") and d.get("best_stiffnesses") is not None:
         return d["best_stiffnesses"], "best"
     return d["stiff_traj"][ti[-1] if end == "after" else ti[0]], at
+
+
+_ALLO_REALIZATION_BASE = 3_000_000   # training/runners/allosteric_trainer.py::_REALIZATION_BASE
+
+
+def allo_initial_stiffnesses(d):
+    """True step-0 stiffnesses of an allosteric realization.
+
+    Runs that predate the step-0 checkpoint only saved ``stiffnesses_traj`` from
+    step 49 on (the first ``global_step % 50 == 0``), so the initial draw is
+    regenerated exactly as the trainer makes it:
+    ``RandomState(_REALIZATION_BASE + realization_seed).uniform(k_min, k_max, n_edges)``
+    with ``realization_seed`` / ``k_min`` / ``k_max`` from ``training_meta.json``
+    (the *recorded* seed -- the screened-seed table's realization_id -> seed
+    mapping has been reordered since some runs, so never re-derive it from ids).
+    Newer runs store step 0 as checkpoint 0 (``stiff_traj_steps[0] == 0``) and it
+    is returned directly.
+    """
+    if int(d["stiff_traj_steps"][0]) == 0:
+        return d["stiff_traj"][0]
+    meta = json.loads((Path(d["dir"]) / "training_meta.json").read_text())
+    return np.random.RandomState(_ALLO_REALIZATION_BASE + int(meta["realization_seed"])).uniform(
+        meta["k_min"], meta["k_max"], size=len(d["edges"]))
 
 
 def allo_cost_hessian_at(d, k_vec, k_eigs=CFG.k_cost_eigs, verbose=False):
@@ -670,24 +865,77 @@ def aux_cost_hessian_at(aa, subtask_idx, compression_strain, target_poisson,
                     return got["per_subtask"][int(raw_order[subtask_idx])]
     return aux_cost_hessian(aa["network"], aa["boundary"],
                             compression_strain, target_poisson,
-                            k_eigs=k_eigs, verbose=verbose)
+                            k_eigs=k_eigs, verbose=verbose,
+                            n_strain_steps=(aa.get("task_config") or {}).get("n_strain_steps", 100))
+
+
+def top_positive_eigvec(evals, evecs, atol: float = 0.0) -> np.ndarray:
+    """``|eigenvector|`` of the **largest strictly-positive** eigenvalue.
+
+    ``evecs`` columns are paired with ``evals`` in any order; this is the
+    canonical "``|v_top|``" used across Fig 3 / Fig 5 -- the highest positive
+    eigenvalue eigenmode of a cost Hessian evaluated at the best stiffness.
+    At a genuine loss minimum the top cost-Hessian eigenvalue is positive, so
+    this normally just returns ``|evecs[:, argmax(evals)]|``; the positivity
+    filter guards the pathological case (best step still above its own minimum,
+    a near-flat direction sorted first, ...). Raises ``ValueError`` when no
+    eigenvalue in the computed set exceeds ``atol``.
+    """
+    evals = np.asarray(evals, float).ravel()
+    evecs = np.asarray(evecs, float)
+    pos = np.where(evals > atol)[0]
+    if pos.size == 0:
+        raise ValueError(
+            f"cost Hessian has no eigenvalue > {atol:g} in the computed "
+            f"top-{evals.size} set (max={evals.max():.3e}); |v_top| is undefined")
+    j = int(pos[np.argmax(evals[pos])])
+    return np.abs(evecs[:, j])
 
 
 # --------------------------------------------------------------------------- #
 # Susceptibilities & bond quantities                                          #
 # --------------------------------------------------------------------------- #
 def edge_susceptibilities(positions, edges, stiffnesses, rest_lengths,
-                          constrained_nodes=ALLO_CONSTRAINED_NODES) -> dict:
+                          constrained_nodes=ALLO_CONSTRAINED_NODES,
+                          source_nodes="constrained_nodes") -> dict:
     """Per-edge susceptibility decomposition + shift susceptibility at one config.
 
     Returns ``dict(s_par, s_perp, s_eq, s_tot, s_shift)`` -- each ``(E,)``.
+
+    ``source_nodes`` -- node indices to treat as boundary/"source" nodes for
+    MASKING purposes (independent of ``constrained_nodes``, which only controls
+    the Hessian-inverse boundary condition the susceptibility math itself uses).
+    Any edge with BOTH endpoints in this set connects two source nodes directly
+    -- e.g. the allosteric output-pair bond, or a bond lying entirely inside the
+    auxetic compression boundary -- and never appears in the free-DOF Hessian
+    block a *constrained* susceptibility is built from, so it is either an exact
+    (or near machine-precision) structural zero there, or -- when the underlying
+    call used an *unconstrained* inverse -- not the kind of "how does bond e
+    reshape the network's free response" question this decomposition answers.
+    Either way it's masked to NaN in every returned array here so it can't be
+    mistaken for a genuine near-zero susceptibility downstream (`spearman`
+    already drops NaN pairs; `draw_network` already ignores NaN via
+    ``np.nanpercentile`` and renders NaN edges transparent). The sentinel default
+    ``"constrained_nodes"`` reuses whatever was passed as ``constrained_nodes``;
+    pass an explicit node list (e.g. auxetic's compression-boundary nodes) when
+    the susceptibility call itself used ``constrained_nodes=None``; pass ``None``
+    to disable masking entirely.
     """
     from analysis.susceptibility import compute_susceptibilities, compute_s_shift
     cn = None if constrained_nodes is None else np.asarray(constrained_nodes, int)
     s_par, s_perp, s_eq, s_tot = compute_susceptibilities(
         positions, edges, stiffnesses, rest_lengths, constrained_nodes=cn)
     s_shift = compute_s_shift(positions, edges, stiffnesses, rest_lengths, constrained_nodes=cn)
-    return dict(s_par=s_par, s_perp=s_perp, s_eq=s_eq, s_tot=s_tot, s_shift=s_shift)
+    out = dict(s_par=s_par, s_perp=s_perp, s_eq=s_eq, s_tot=s_tot, s_shift=s_shift)
+
+    src = constrained_nodes if isinstance(source_nodes, str) else source_nodes
+    if src is not None and len(src) > 0:
+        src_set = set(int(n) for n in src)
+        mask = np.array([(int(a) in src_set) and (int(b) in src_set) for a, b in edges])
+        if mask.any():
+            for k in out:
+                out[k] = np.where(mask, np.nan, out[k])
+    return out
 
 
 def bond_quantities(positions, edges, stiffnesses, rest_lengths) -> dict:
@@ -788,8 +1036,15 @@ def spearman(x, y) -> float:
 # Plotting helpers                                                            #
 # --------------------------------------------------------------------------- #
 def draw_network(ax, positions, edges, values, cmap="magma", log_color=True,
-                 vmin=None, vmax=None, lw=1.6, alpha=0.95):
+                 vmin=None, vmax=None, lw=1.6, alpha=0.95, pad_frac=0.05):
     """Draw a 2-D spring network, edges colored by ``values`` (e.g. stiffness).
+
+    The view is cropped to the network's own bounding box plus a margin of
+    ``pad_frac`` * (bbox size) on each side -- a *fraction* of the network's
+    own extent, not an absolute data-unit margin. That way networks from
+    families with very different native coordinate scales (e.g. allosteric
+    vs. auxetic, which differ by ~25x here) still fill the same fraction of
+    their panel, so they render at the same visual size across panels.
 
     Returns the ``LineCollection`` so the caller can attach a colorbar.
     """
@@ -798,7 +1053,8 @@ def draw_network(ax, positions, edges, values, cmap="magma", log_color=True,
     from matplotlib.colors import Normalize
 
     positions = np.asarray(positions, float)
-    v = np.log10(np.abs(values) + 1e-14) if log_color else np.asarray(values, float)
+    values = np.asarray(values, float)
+    v = np.log10(np.abs(values) + 1e-14) if log_color else values
     if vmin is None:
         vmin = np.nanpercentile(v, 2)
     if vmax is None:
@@ -806,10 +1062,21 @@ def draw_network(ax, positions, edges, values, cmap="magma", log_color=True,
     norm = Normalize(vmin=vmin, vmax=vmax)
     cm = plt.get_cmap(cmap)
     segs = [positions[e] for e in edges]
-    lc = mc.LineCollection(segs, colors=[cm(norm(val)) for val in v], linewidths=lw, alpha=alpha)
+    # NaN entries (e.g. an s_shift edge lying entirely inside the actuation /
+    # compression boundary -- source_nodes masking in edge_susceptibilities,
+    # already excluded from every downstream Spearman rho / scatter via
+    # C.spearman's isfinite filter) get a neutral light-gray, not a color from
+    # `cmap` -- matplotlib's default "bad" color is opaque black, which reads
+    # as a spurious extreme value rather than "excluded from the analysis".
+    bad_color = (0.82, 0.82, 0.82, 0.6)
+    colors = [bad_color if not np.isfinite(val) else cm(norm(val)) for val in v]
+    lc = mc.LineCollection(segs, colors=colors, linewidths=lw, alpha=alpha)
     ax.add_collection(lc)
-    ax.set_xlim(positions[:, 0].min() - 0.05, positions[:, 0].max() + 0.05)
-    ax.set_ylim(positions[:, 1].min() - 0.05, positions[:, 1].max() + 0.05)
+    x0, x1 = positions[:, 0].min(), positions[:, 0].max()
+    y0, y1 = positions[:, 1].min(), positions[:, 1].max()
+    px, py = (x1 - x0) * pad_frac, (y1 - y0) * pad_frac
+    ax.set_xlim(x0 - px, x1 + px)
+    ax.set_ylim(y0 - py, y1 + py)
     ax.set_aspect("equal")
     ax.axis("off")
     lc.set_clim(vmin, vmax)
@@ -817,8 +1084,80 @@ def draw_network(ax, positions, edges, values, cmap="magma", log_color=True,
     return lc
 
 
-SUBTASK_COLORS = ("#1f77b4", "#d62728")   # subtask 1, subtask 2
-BEFORE_AFTER_COLORS = ("#7f7f7f", "#d62728")   # before training, best-loss step
+# Categorical accents (docs/figure_style.md sec. 2) -- kept disjoint across the
+# two 2-colour conventions below so "before/after" and "subtask 1/2" never
+# collide when both appear in the same panel legend.
+SUBTASK_COLORS = ("#1f6f8b", "#5ec962")        # subtask 1 (teal), subtask 2 (green)
+BEFORE_AFTER_COLORS = ("#3b528b", "#b5495b")   # before training (blue), best-loss (red)
+
+
+def apply_style() -> None:
+    """Publication-style Matplotlib rcParams (``docs/figure_style.md`` sec. 1).
+
+    Thick lines, sparse outward ticks, no top/right spines, mathtext (``cm``
+    fontset, no LaTeX install needed), white figure/save background.
+    """
+    import matplotlib as mpl
+    mpl.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["DejaVu Serif", "Times New Roman", "CMU Serif"],
+        "mathtext.fontset": "cm",
+        "axes.unicode_minus": False,
+        "font.size": 11,
+        "axes.titlesize": 12,
+        "axes.labelsize": 13,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 10,
+        "figure.titlesize": 14,
+        "lines.linewidth": 2.6,
+        "lines.solid_capstyle": "round",
+        "lines.markersize": 6,
+        "patch.linewidth": 2.0,
+        "axes.linewidth": 1.1,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.labelpad": 5.0,
+        "axes.titlepad": 7.0,
+        "axes.grid": False,
+        "xtick.direction": "out",
+        "ytick.direction": "out",
+        "xtick.major.size": 4.5,
+        "ytick.major.size": 4.5,
+        "xtick.major.width": 1.1,
+        "ytick.major.width": 1.1,
+        "xtick.minor.size": 0.0,
+        "ytick.minor.size": 0.0,
+        "legend.frameon": False,
+        "legend.handlelength": 1.6,
+        "legend.borderaxespad": 0.3,
+        "figure.dpi": 120,
+        "figure.facecolor": "white",
+        "savefig.dpi": 300,
+        "savefig.facecolor": "white",
+        "savefig.bbox": "tight",
+    })
+
+
+def sparse_ticks(ax, nx=4, ny=4) -> None:
+    """At most ``nx``/``ny`` major ticks on linear axes; skip log-scaled ones
+    (``MaxNLocator`` blanks a log axis)."""
+    import matplotlib.ticker as mticker
+    if ax.get_xscale() == "linear":
+        ax.xaxis.set_major_locator(mticker.MaxNLocator(nx, prune=None, min_n_ticks=3))
+    if ax.get_yscale() == "linear":
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(ny, prune=None, min_n_ticks=3))
+
+
+def empty_panel(ax, text="(no data)") -> None:
+    """Dashed faded frame + italic grey caption for a panel with nothing to
+    show -- consistent placeholder instead of ad hoc grey `ax.text` calls."""
+    ax.tick_params(bottom=False, left=False, labelbottom=False, labelleft=False)
+    for s in ax.spines.values():
+        s.set_visible(True); s.set_linestyle((0, (2, 2))); s.set_alpha(0.4)
+    if text:
+        ax.text(0.5, 0.5, text, ha="center", va="center", transform=ax.transAxes,
+                color="0.5", style="italic", fontsize=10)
 
 
 # --------------------------------------------------------------------------- #
@@ -836,6 +1175,35 @@ def aux_subtasks(task_config) -> list[tuple]:
     tp = np.asarray(task_config["target_poisson_ratios"], float)
     order = np.argsort(-np.abs(cs))
     return list(zip(cs[order].tolist(), tp[order].tolist()))
+
+
+def allo_task_linearity_distance(task_config) -> float:
+    """Relative separation between the two subtasks' output/input strain
+    ratios for one allosteric task -- a proxy for how far the task is from a
+    regime where the two subtasks would be compatible with a single linear
+    response. ``(r_shallow - r_deep) / r_deep`` where ``r_i =
+    strain_output_i / strain_input_i`` and 'deep' is whichever subtask has
+    the larger imposed input strain (the more nonlinear-response subtask)."""
+    tc = task_config
+    r1 = tc["strain_output"] / tc["strain_input"]
+    r2 = tc["strain_output2"] / tc["strain_input2"]
+    if tc["strain_input"] >= tc["strain_input2"]:
+        r_deep, r_shallow = r1, r2
+    else:
+        r_deep, r_shallow = r2, r1
+    return (r_shallow - r_deep) / r_deep
+
+
+def aux_task_linearity_distance(task_config) -> float:
+    """Auxetic analogue of :func:`allo_task_linearity_distance`: relative
+    separation between the two subtasks' target Poisson ratios,
+    ``(nu_shallow - nu_deep) / nu_deep``, 'deep' = the subtask with the
+    larger imposed compression (:func:`aux_subtasks`' index 0)."""
+    subs = aux_subtasks(task_config)
+    if len(subs) < 2:
+        return float("nan")
+    (_cs_deep, nu_deep), (_cs_shallow, nu_shallow) = subs[0], subs[1]
+    return (nu_shallow - nu_deep) / nu_deep
 
 
 def aux_compression_frames(network, boundary, compression_strain, n_steps=100):
@@ -913,14 +1281,19 @@ def aux_recompute_loss(network, boundary, compression_strain, target_poisson, n_
 
 
 def aux_cost_hessian(network, boundary, compression_strain, target_poisson,
-                     k_eigs: int = CFG.k_cost_eigs, verbose: bool = False):
+                     k_eigs: int = CFG.k_cost_eigs, verbose: bool = False,
+                     n_strain_steps: int = 100):
     """Top-``k_eigs`` cost-Hessian eigen-pairs for ONE auxetic subtask
     (``(nu(K) - target)^2`` w.r.t. stiffnesses). Thin wrapper around
     ``analysis.cost_utils.compute_cost_hessian``; returns ``(evals, evecs)``
-    with ``evecs`` shaped ``(n_edges, k)``, largest-algebraic first."""
+    with ``evecs`` shaped ``(n_edges, k)``, largest-algebraic first.
+
+    Pass ``n_strain_steps=task_config["n_strain_steps"]`` (400 for the ``_aug``
+    tasks) so the ramp matches training and the post-training sweep; the 100
+    default only exists for backward compatibility."""
     from analysis.cost_utils import compute_cost_hessian
     evals, evecs = compute_cost_hessian(
         network, compression_strain, target_poisson, boundary,
-        k_eigs=k_eigs, verbose=verbose)
+        k_eigs=k_eigs, verbose=verbose, n_strain_steps=n_strain_steps)
     order = np.argsort(evals)[::-1]
     return evals[order], evecs[:, order]
