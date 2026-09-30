@@ -139,7 +139,7 @@ def compute_aux_ckpt(a, step, k):
     for cs, tp in subs:
         fr = C.aux_compression_frames(n2, bd, cs, n_steps=a["task_config"].get("n_strain_steps", 100))
         try:
-            s_shift = C.edge_susceptibilities(fr[-1], edges, k, rl, constrained_nodes=None, source_nodes=cn)["s_shift"]
+            s_shift = C.edge_susceptibilities(fr[-1], edges, k, rl, constrained_nodes=cn)["s_shift"]
         except np.linalg.LinAlgError as e:
             # Singular constrained elastic Hessian (a near-floppy configuration, seen at some
             # early/untrained checkpoints) -- degrade to NaN for this one checkpoint/subtask

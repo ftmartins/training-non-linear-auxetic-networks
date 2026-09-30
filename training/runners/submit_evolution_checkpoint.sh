@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -t 04:00:00
+#SBATCH -t 12:00:00
 #SBATCH --qos=low
 #SBATCH --partition=low
 #SBATCH --nodes=1

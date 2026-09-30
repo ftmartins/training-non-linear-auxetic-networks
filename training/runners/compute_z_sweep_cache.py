@@ -172,7 +172,7 @@ def _sus_aux(a, k, use_sweep=True):
     rows = {}
     for si, (cs, tp) in enumerate(subs):
         fr = C.aux_compression_frames(n2, bd, cs, n_steps=a["task_config"].get("n_strain_steps", 100))
-        sus = _safe_susceptibilities(fr[-1], edges, k, rl, constrained_nodes=None, source_nodes=cn)
+        sus = _safe_susceptibilities(fr[-1], edges, k, rl, constrained_nodes=cn)
         if sw is not None and "cost_hessian_after_eigvecs" in sw:
             j = int(raw_order[si])
             L = np.asarray(sw["cost_hessian_after_eigvals"])[j]
