@@ -684,10 +684,11 @@ def allo_per_task_cost_hessian(nodes, incidence_matrix, task_config, stiffnesses
                                k_eigs: int = CFG.k_cost_eigs, verbose: bool = False):
     """Top-``k_eigs`` eigen-pairs of the MSE1 and MSE2 cost Hessians *separately*.
 
-    The saved ``timestep_sweep.npz`` only stores the *combined* (0.5*(mse1+mse2))
-    cost Hessian. This rebuilds the two per-subtask scalar losses through the
-    differentiable JAX-FIRE ramp (``training.jax_actuation``) -- same machinery
-    as ``analysis.timestep_sweep._compute_cost_hessian_jax`` -- and Lanczos-solves
+    Local fallback for when ``timestep_sweep.npz`` has no per-subtask Hessian at
+    the requested stiffness (see ``allo_cost_hessian_at``). Rebuilds the two
+    per-subtask scalar losses through the differentiable JAX-FIRE ramp
+    (``training.jax_actuation``) -- same machinery as
+    ``analysis.timestep_sweep._compute_cost_hessian_jax`` -- and Lanczos-solves
     each one. Returns ``dict(mse1=(evals, evecs), mse2=(evals, evecs))`` with
     ``evecs`` shaped ``(n_edges, k)``.
     """
@@ -794,6 +795,20 @@ def _sweep_checkpoint_stiffness(d, end):
     return st[idx] if 0 <= idx < len(st) else None
 
 
+def _sweep_cost_hessian_stiffness(d, end):
+    """Stiffness vector the sweep's ``cost_hessian_{end}_*`` was actually
+    evaluated at, or None if ``d`` has no usable sweep.
+
+    2026-09-10+ sweeps evaluate the *after* Hessian at ``best_stiffnesses``
+    (K*) and record it as ``cost_hessian_after_stiffness``; that differs from
+    the after *checkpoint* for ~23% of converged realizations. Older sweeps
+    (and every *before* Hessian) sit at the checkpoint."""
+    sweep = d.get("sweep")
+    if end == "after" and sweep is not None and "cost_hessian_after_stiffness" in sweep:
+        return np.asarray(sweep["cost_hessian_after_stiffness"], dtype=float)
+    return _sweep_checkpoint_stiffness(d, end)
+
+
 def allo_best_loss_stiffness(d) -> np.ndarray:
     """Lowest-loss stiffness vector for an allosteric realization.
 
@@ -808,9 +823,9 @@ def allo_best_loss_stiffness(d) -> np.ndarray:
     sweep-having realizations the sweep's after-checkpoint stiffness lands one
     coarse checkpoint away from the true argmin (loss up to ~40x worse), so a
     susceptibility / cost Hessian built there is not "at the best stiffness".
-    Passing this vector to ``allo_cost_hessian_at`` still sweep-serves the cost
-    Hessian for the ~77% where the two coincide (exact array match) and only
-    recomputes locally for the rest.
+    Passing this vector to ``allo_cost_hessian_at`` sweep-serves the cost
+    Hessian whenever the sweep's after Hessian was evaluated at K* (2026-09-10+
+    sweeps, ``cost_hessian_after_stiffness``), and recomputes locally otherwise.
     """
     if d.get("best_stiffnesses") is not None:
         return np.asarray(d["best_stiffnesses"], float)
@@ -821,15 +836,15 @@ def allo_best_loss_stiffness(d) -> np.ndarray:
 def allo_operating_point(d, at="best"):
     """``(k_vec, tag)`` for the allosteric cost-Hessian operating point.
 
-    When ``d`` carries a precomputed sweep, snap to that sweep's
-    before/after *checkpoint* stiffnesses (``tag`` 'before'/'after') so the cost
-    Hessian is sweep-served and any susceptibility computed at ``k_vec`` is
-    evaluated at the same configuration. Otherwise: ``at='best'`` ->
-    ``best_stiffnesses`` (fallback ``stiff_traj[ti[-1]]``), ``at='before'`` ->
-    ``stiff_traj[ti[0]]``.
+    When ``d`` carries a precomputed sweep, snap to the stiffness that sweep's
+    before/after cost Hessian was evaluated at (``tag`` 'before'/'after'; K* for
+    2026-09-10+ after Hessians, else the checkpoint) so the cost Hessian is
+    sweep-served and any susceptibility computed at ``k_vec`` is evaluated at
+    the same configuration. Otherwise: ``at='best'`` -> ``best_stiffnesses``
+    (fallback ``stiff_traj[ti[-1]]``), ``at='before'`` -> ``stiff_traj[ti[0]]``.
     """
     end = "after" if at in ("best", "after") else "before"
-    k_sweep = _sweep_checkpoint_stiffness(d, end)
+    k_sweep = _sweep_cost_hessian_stiffness(d, end)
     if k_sweep is not None:
         return k_sweep, end
     from analysis.timestep_sweep import _select_local_threshold_indices
@@ -866,15 +881,16 @@ def allo_initial_stiffnesses(d):
 def allo_cost_hessian_at(d, k_vec, k_eigs=CFG.k_cost_eigs, verbose=False):
     """Per-subtask allosteric cost Hessian at stiffness ``k_vec``.
 
-    Prefers ``d['sweep']`` when ``k_vec`` *is* the sweep's before/after
-    checkpoint stiffness (exact array match); otherwise recomputes locally with
+    Prefers ``d['sweep']`` when ``k_vec`` *is* the stiffness the sweep's
+    before/after cost Hessian was evaluated at (exact array match against
+    ``_sweep_cost_hessian_stiffness``); otherwise recomputes locally with
     ``allo_per_task_cost_hessian``. Return contract matches the latter:
     ``dict(mse1=(evals, evecs), mse2=(evals, evecs))`` (plus ``combined`` when
     served from the sweep), eigenvalues DESCENDING, ``evecs`` ``(n_edges, k_eigs)``.
     """
     k_vec = np.asarray(k_vec, dtype=float)
     for end in ("before", "after"):
-        k_ck = _sweep_checkpoint_stiffness(d, end)
+        k_ck = _sweep_cost_hessian_stiffness(d, end)
         if k_ck is not None and k_ck.shape == k_vec.shape and np.array_equal(k_ck, k_vec):
             got = _cost_hessian_from_sweep(d["sweep"], end, k_eigs)
             if got is not None:
@@ -896,26 +912,34 @@ def aux_cost_hessian_at(aa, subtask_idx, compression_strain, target_poisson,
 
     The sweep stacks its per-subtask Hessians in *raw* ``task_config`` order,
     while ``aux_subtasks`` sorts by descending |compression|, so the index is
-    remapped. The sweep is only trusted when its after-checkpoint stiffnesses
-    (needs ``stiffness_trajectory.npy``) exactly match ``aa['network']``'s --
-    otherwise falls back to ``aux_cost_hessian``. Returns ``(evals, evecs)``,
-    largest-algebraic first.
+    remapped. Operating point is the best-loss state (``aux_best_loss_state``,
+    the same one the sweep's after Hessian uses -- NOT ``final_network``). The
+    sweep is only trusted when its after-checkpoint stiffnesses (needs
+    ``stiffness_trajectory.npy``) exactly match that best-loss ``k`` --
+    otherwise falls back to ``aux_cost_hessian`` at the best-loss state.
+    Returns ``(evals, evecs)``, largest-algebraic first.
     """
     sweep = aa.get("sweep")
+    _, k_best, _ = aux_best_loss_state(aa, load_positions=False)
+    k_best = np.asarray(k_best, dtype=float)
     if sweep is not None and "t_indices" in sweep and aa.get("stiff_traj") is not None:
         ti = np.asarray(sweep["t_indices"], dtype=int)
         st = np.asarray(aa["stiff_traj"])
-        k_net = np.asarray(aa["network"].stiffnesses, dtype=float)
         idx = int(ti[-1])
-        if 0 <= idx < len(st) and st[idx].shape == k_net.shape and np.array_equal(
-                np.asarray(st[idx], dtype=float), k_net):
+        if 0 <= idx < len(st) and st[idx].shape == k_best.shape and np.array_equal(
+                np.asarray(st[idx], dtype=float), k_best):
             cs_raw = np.asarray(aa["task_config"]["compression_strains"], float)
             raw_order = np.argsort(-np.abs(cs_raw))          # aux_subtasks[i] -> raw index raw_order[i]
             if subtask_idx < len(raw_order):
                 got = _cost_hessian_from_sweep(sweep, "after", k_eigs)
                 if got is not None and raw_order[subtask_idx] < len(got["per_subtask"]):
                     return got["per_subtask"][int(raw_order[subtask_idx])]
-    return aux_cost_hessian(aa["network"], aa["boundary"],
+    import copy
+    pos_best, k_best, _ = aux_best_loss_state(aa)
+    net_best = copy.deepcopy(aa["network"])
+    net_best.stiffnesses = np.asarray(k_best, dtype=float)
+    net_best.positions = np.asarray(pos_best, dtype=float)
+    return aux_cost_hessian(net_best, aa["boundary"],
                             compression_strain, target_poisson,
                             k_eigs=k_eigs, verbose=verbose,
                             n_strain_steps=(aa.get("task_config") or {}).get("n_strain_steps", 100))
