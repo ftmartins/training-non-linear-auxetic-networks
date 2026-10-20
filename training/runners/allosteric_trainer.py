@@ -537,7 +537,10 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                 f'update_mag={update_mag:.4e}, lr_scale={lr_scale:.3g}')
 
         global_step = step_offset + j + 1
-        if global_step % 50 == 0:
+        # Also checkpoint the very first iteration of a fresh run (step_offset == 0):
+        # that is the untouched initial draw, which otherwise only lives in memory
+        # (global_step starts at 1, so % 50 first fires after 49 updates).
+        if global_step % 50 == 0 or (step_offset == 0 and j == 0):
             print(f"  step {global_step}: MSE1={mse:.4e}  MSE2={mse2:.4e}"
                   f"  best_combined={best_combined_mse:.4e}")
             np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
