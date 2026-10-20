@@ -68,6 +68,7 @@ from training.src.targeted_task_generator import (
 from training.src.task_generator import generate_realization_stiffnesses, compute_target_extensions
 from training.src.good_realizations import get_realization_seed
 from base.network_utils import create_auxetic_network
+from base.stored_network import load_stored_network, network_fingerprint
 from training.src.checkpoint_manager import (
     is_training_complete,
     save_training_results,
@@ -96,6 +97,7 @@ _CODE_SNAPSHOT_FILES = [
     _SRC / 'run_provenance.py',
     _ROOT / 'base' / 'config.py',
     _ROOT / 'base' / 'network_utils.py',
+    _ROOT / 'base' / 'stored_network.py',
 ]
 
 # Import training function
@@ -107,7 +109,8 @@ TRAINING_FUNCTIONS_AVAILABLE = True
 
 def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
                         gradient_method='newton', network_type=NETWORK_TYPE, overwrite=False,
-                        lr_override=None, steps_override=None):
+                        lr_override=None, steps_override=None, network_file=None,
+                        results_root=None):
     """
     Run a single targeted training job with checkpoint support.
 
@@ -126,6 +129,10 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             results, meta) is wiped and restarted from scratch under the new hyperparameters
             — never resumed under a relabeled meta, which would make training_meta.json
             describe a trajectory that never actually happened.
+        network_file: Stored-network file (base.stored_network) to train on instead
+            of regenerating the packing; None (default) regenerates it.
+        results_root: Replaces TARGETED_RESULTS_DIR from config (e.g. a scratch
+            tree for a reproduction check); None (default) uses config.
 
     Returns:
         success: Boolean indicating success
@@ -136,6 +143,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     print(f"Starting Targeted Task {task_id}, Realization {realization_seed}")
     print(f"{'='*80}")
     from training.src.targeted_task_generator import TARGETED_RESULTS_DIR
+    if results_root is not None:
+        TARGETED_RESULTS_DIR = Path(results_root)
 
     TARGETED_RESULTS_DIR_ = TARGETED_RESULTS_DIR / f'{gradient_method}'
     TARGETED_RESULTS_DIR = TARGETED_RESULTS_DIR_
@@ -224,17 +233,24 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         print(f"  Compression strains: {task_config['compression_strains']}")
         print(f"  Target Poisson ratios: {task_config['target_poisson_ratios']}")
 
-        # 2. Create base network structure
-        if verbose:
-            print("Step 2: Creating network from packing...")
-        network, boundary_dict = create_auxetic_network(
-            n_nodes=task_config['n_nodes'],
-            packing_seed=task_config['packing_seed'],
-            force_type=FORCE_TYPE,
-            boundary_margin=BOUNDARY_MARGIN,
-            central_force=PACKING_PARAMS['central'],
-            network_type=network_type,
-        )
+        # 2. Create base network structure. The packing is hardware-dependent
+        # (docs/adr/0002-auxetic-ensemble-on-stored-network-a.md), so runs that
+        # must share a network load it from network_file instead.
+        if network_file is not None:
+            if verbose:
+                print(f"Step 2: Loading stored network {network_file}...")
+            network, boundary_dict, _ = load_stored_network(network_file)
+        else:
+            if verbose:
+                print("Step 2: Creating network from packing...")
+            network, boundary_dict = create_auxetic_network(
+                n_nodes=task_config['n_nodes'],
+                packing_seed=task_config['packing_seed'],
+                force_type=FORCE_TYPE,
+                boundary_margin=BOUNDARY_MARGIN,
+                central_force=PACKING_PARAMS['central'],
+                network_type=network_type,
+            )
         print(f"  Network created: {len(network.positions)} nodes, {len(network.edges)} edges")
 
         # 3. Determine initial state: resume from checkpoint if present, else fresh start
@@ -265,6 +281,12 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             network.save_original_parameters()
             print(f"  Stiffnesses initialized: range "
                   f"[{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
+
+        # Fingerprint of the network actually trained (after any checkpoint
+        # restore). Recorded as a critical key, so resuming onto a different
+        # network fails in save_run_metadata instead of mixing networks.
+        fingerprint = network_fingerprint(network.positions, network.edges)
+        print(f"  Network fingerprint: {fingerprint}")
 
         # 4. Prepare training parameters
         compression_strains = task_config['compression_strains']
@@ -298,6 +320,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 'optimizer': optimizer,
                 'opt_fire_finc': OPT_FIRE_FINC,
                 'realization_seed': screened_seed,
+                'network_fingerprint': fingerprint,
             },
             results_dir=results_dir,
             network_type=network_type,
@@ -601,6 +624,16 @@ Examples:
         help='Override N_STEPS from config for this run (single mode). n_steps is exempt '
              'from the hyperparameter-mismatch guard, so this works on a plain resume.'
     )
+    parser.add_argument(
+        '--network-file', type=Path, default=None,
+        help='Train on a stored network (e.g. base/networks/auxetic_network_A.npz) '
+             'instead of regenerating the hardware-dependent packing (single mode).'
+    )
+    parser.add_argument(
+        '--results-dir', type=Path, default=None,
+        help='Replace TARGETED_RESULTS_DIR from config (single mode), e.g. a scratch '
+             'tree for a reproduction check.'
+    )
 
     args = parser.parse_args()
 
@@ -616,7 +649,9 @@ Examples:
                                       network_type=args.network_type,
                                       overwrite=args.overwrite,
                                       lr_override=args.learning_rate,
-                                      steps_override=args.steps)
+                                      steps_override=args.steps,
+                                      network_file=args.network_file,
+                                      results_root=args.results_dir)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':

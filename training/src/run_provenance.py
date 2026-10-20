@@ -37,7 +37,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_CRITICAL_KEYS = frozenset({
     'solver', 'gradient_method', 'learning_rate', 'k_min', 'k_max', 'force_tol',
-    'optimizer', 'opt_fire_finc', 'realization_seed',
+    'optimizer', 'opt_fire_finc', 'realization_seed', 'network_fingerprint',
 })
 
 

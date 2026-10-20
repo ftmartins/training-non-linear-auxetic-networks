@@ -486,9 +486,11 @@ def discover_auxetic(max_per_task: int | None = None, require_converged: bool = 
 #                ENSEMBLE_N_ALLO best-trained converged realizations
 #                (5 x 6 x 5 = 150 when every cell has >= 5).
 #   auxetic    : TARGETED family only, tasks 0..19, the ENSEMBLE_N_AUX best-trained
-#                converged realizations per task (20 x 15 = 300).
+#                converged realizations per task (20 x 15 = 300), Network A only.
 # "Best trained" = lowest (min loss / initial loss); ties broken by lower real_id.
 # Converged still means ratio <= MIN_SUCCESS_RATIO (allo) / 1e-4 (aux).
+# At most one realization per realization seed per cell: the recorded seed in
+# training_meta*.json, never the real_id (docs/adr/0001, 0002).
 ENSEMBLE_N_ALLO = 5
 ENSEMBLE_N_AUX = 15
 ENSEMBLE_AUX_TASKS = tuple(range(20))
@@ -512,32 +514,82 @@ def _aux_ratio(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> float:
     return float(np.nanmin(s) / s[0]) if len(s) and s[0] > 0 else np.inf
 
 
+def _aux_dir(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> Path:
+    return REPO_ROOT / "data" / "auxetic_nets_aug" / family / f"task_{tid:02d}" / f"realization_{rid:02d}"
+
+
+def allo_realization_seed(gid, tid, rid) -> int:
+    """Recorded realization seed of an allosteric run (``training_meta.json``)."""
+    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
+    return int(json.loads((d / "training_meta.json").read_text())["realization_seed"])
+
+
+def aux_realization_seed(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> int:
+    """Recorded realization seed of an auxetic run (``training_meta_jammed.json``)."""
+    meta = _auxfile(_aux_dir(tid, rid, family), "training_meta", "json")
+    return int(json.loads(meta.read_text())["realization_seed"])
+
+
+def aux_network_fingerprint(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> str:
+    """Fingerprint of the network an auxetic run trained on (see base.stored_network)."""
+    from base.stored_network import network_fingerprint
+    with open(_auxfile(_aux_dir(tid, rid, family), "final_network", "pkl"), "rb") as f:
+        net = pickle.load(f)
+    return network_fingerprint(net["positions"], net["edges"])
+
+
+def _best_distinct_seeds(cands, n_best) -> list[int]:
+    """real_ids of the ``n_best`` lowest-ratio candidates ``(ratio, rid, seed)``,
+    keeping only the best realization of each seed, in real_id order."""
+    seen, best = set(), []
+    for _, rid, seed in sorted(cands):
+        if seed in seen:
+            continue
+        seen.add(seed)
+        best.append(rid)
+        if len(best) == n_best:
+            break
+    return sorted(best)
+
+
 def figure_ensemble_allosteric(n_best: int = ENSEMBLE_N_ALLO) -> list[tuple]:
     """Canonical allosteric ensemble: ``(geometry_id, task_id, real_id)`` triples,
-    the ``n_best`` lowest-ratio converged realizations of every (geometry, task)."""
+    the ``n_best`` lowest-ratio converged realizations with distinct realization
+    seeds of every (geometry, task)."""
     by_cell: dict = {}
     for gid, tid, rid in discover_allosteric("all", None):
-        by_cell.setdefault((gid, tid), []).append((_allo_ratio(gid, tid, rid), rid))
+        by_cell.setdefault((gid, tid), []).append(
+            (_allo_ratio(gid, tid, rid), rid, allo_realization_seed(gid, tid, rid)))
     out = []
     for gid in ALLO_GEOMETRIES:
         for tid in sorted(t for g, t in by_cell if g == gid):
-            best = sorted(by_cell[(gid, tid)])[:n_best]
-            out.extend((gid, tid, rid) for _, rid in sorted(best, key=lambda x: x[1]))
+            out.extend((gid, tid, rid) for rid in _best_distinct_seeds(by_cell[(gid, tid)], n_best))
     return out
 
 
 def figure_ensemble_auxetic(n_best: int = ENSEMBLE_N_AUX, tasks=ENSEMBLE_AUX_TASKS,
-                            family: str = ENSEMBLE_AUX_FAMILY) -> list[tuple]:
+                            family: str = ENSEMBLE_AUX_FAMILY,
+                            network: str | None = "A") -> list[tuple]:
     """Canonical auxetic ensemble: ``(family, task_id, real_id)`` triples (same
-    triple shape as ``FIG2_AUX_POOL``), targeted tasks 0..19, ``n_best`` per task."""
+    triple shape as ``FIG2_AUX_POOL``), targeted tasks 0..19, the ``n_best``
+    lowest-ratio converged realizations with distinct realization seeds per task.
+
+    ``network``: ``"A"`` (default) keeps only runs whose network fingerprint is
+    Network A's; a fingerprint string selects that network; ``None`` disables
+    the filter."""
+    from base.stored_network import NETWORK_A_FINGERPRINT
+    want = NETWORK_A_FINGERPRINT if network == "A" else network
     by_task: dict = {}
     for tid, rid in discover_auxetic(None, family=family):
-        if tid in tasks:
-            by_task.setdefault(tid, []).append((_aux_ratio(tid, rid, family), rid))
+        if tid not in tasks:
+            continue
+        if want is not None and aux_network_fingerprint(tid, rid, family) != want:
+            continue
+        by_task.setdefault(tid, []).append(
+            (_aux_ratio(tid, rid, family), rid, aux_realization_seed(tid, rid, family)))
     out = []
     for tid in sorted(by_task):
-        best = sorted(by_task[tid])[:n_best]
-        out.extend((family, tid, rid) for _, rid in sorted(best, key=lambda x: x[1]))
+        out.extend((family, tid, rid) for rid in _best_distinct_seeds(by_task[tid], n_best))
     return out
 
 
