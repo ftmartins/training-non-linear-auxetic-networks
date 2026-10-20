@@ -572,7 +572,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             np.save(traj_path,  traj)
             np.save(steps_path, steps)
 
-        if mse/msearray[0] < 8e-5 and mse2/msearray2[0] < 8e-5:
+        if mse/msearray[0] < 1e-5 and mse2/msearray2[0] < 1e-5:
             np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
             np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
             np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
