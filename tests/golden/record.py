@@ -27,6 +27,10 @@ def main(kinds=('write', 'read', 'discovery')):
             _write('write', f'targeted_{name}', W.targeted_scenario(name))
         for name in W.GENERAL_SCENARIOS:
             _write('write', f'general_{name}', W.general_scenario(name))
+    if 'real' in kinds:   # opt-in: ~4 min of real solver runs
+        from tests.golden import real_physics as P
+        for name, run in P.SCENARIOS.items():
+            _write('real', name, run())
     if 'discovery' in kinds:
         from tests.golden.discovery import discover
         path = EXPECTED_DIR / 'discovery.json'
