@@ -21,6 +21,7 @@
 #     overwrite - wipe and restart at LR [and STEPS]
 # Submit, e.g.:
 #     sbatch --array=0-105 --export=ALL,MODE=fresh,LOOKUP=netA_supplement_bc.txt submit_netA_supplement.sh
+#     sbatch --array=0-58 --export=ALL,MODE=fresh,LOOKUP=netA_supplement_new.txt submit_netA_supplement.sh
 
 MODE=${MODE:-fresh}
 LOOKUP=${LOOKUP:-netA_supplement_bc.txt}
