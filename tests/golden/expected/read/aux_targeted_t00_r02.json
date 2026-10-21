@@ -1,0 +1,423 @@
+{
+ "aux_best_loss_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+     "shape": [
+      98,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "28a9ced28a5ccbb1b84a41ed73a3509b2f905ea18b1b118b81bed81ebeaac32e",
+     "shape": [
+      194
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 13
+    }
+   ]
+  }
+ },
+ "aux_best_loss_state.no_positions": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+     "shape": [
+      98,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "28a9ced28a5ccbb1b84a41ed73a3509b2f905ea18b1b118b81bed81ebeaac32e",
+     "shape": [
+      194
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 13
+    }
+   ]
+  }
+ },
+ "aux_network_fingerprint": {
+  "value": "86a25180f56a10ea"
+ },
+ "aux_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1000013
+  }
+ },
+ "data_io.load_auxetic_network": {
+  "value": {
+   "__tuple__": [
+    {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "0516711aa0898acec3c84e6b96cee46fc1d76a4d9ccc47dee7c9a0eb5d7873c8",
+        "shape": [
+         194,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "083391983a4648d557e403d78854b03f3238a4a3b84b797a2127029f87df254e",
+        "shape": [
+         194
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "283bfa6cf090e8a91e58a5de08294e3a3491126038c726d2e8ea2efdb6db303c",
+        "shape": [
+         194
+        ]
+       }
+      }
+     }
+    },
+    {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "ad54f11c5112c5f0b9efae084c842943c99e0b6d1e8a4c6857affc7b25179643",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "673578f817b50885ac44b4faf1a3531848f5c2a8f260abe8b541d737c0efc33a",
+       "shape": [
+        8
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "aee48beb185269c11f3678fb43febb618607273750fc30e2cd5444083f33b05a",
+       "shape": [
+        9
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "733d2fb6b395e2edb2995b45bd4de3b44af3944eb6c880053a9ff1d29138c7d9",
+       "shape": [
+        8
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "load_auxetic": {
+  "value": {
+   "__dict__": {
+    "boundary": {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "ad54f11c5112c5f0b9efae084c842943c99e0b6d1e8a4c6857affc7b25179643",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "673578f817b50885ac44b4faf1a3531848f5c2a8f260abe8b541d737c0efc33a",
+       "shape": [
+        8
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "aee48beb185269c11f3678fb43febb618607273750fc30e2cd5444083f33b05a",
+       "shape": [
+        9
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "733d2fb6b395e2edb2995b45bd4de3b44af3944eb6c880053a9ff1d29138c7d9",
+       "shape": [
+        8
+       ]
+      }
+     }
+    },
+    "dir": "/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/auxetic_nets_aug/targeted/task_00/realization_02",
+    "loss_traj": {
+     "__nd__": "<f8",
+     "sha256": "6a67849485eef165765fd3115f9d5f850e94feb76f855fd72a799c23045132b6",
+     "shape": [
+      14
+     ]
+    },
+    "network": {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "0516711aa0898acec3c84e6b96cee46fc1d76a4d9ccc47dee7c9a0eb5d7873c8",
+        "shape": [
+         194,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "083391983a4648d557e403d78854b03f3238a4a3b84b797a2127029f87df254e",
+        "shape": [
+         194
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "283bfa6cf090e8a91e58a5de08294e3a3491126038c726d2e8ea2efdb6db303c",
+        "shape": [
+         194
+        ]
+       }
+      }
+     }
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 2
+    },
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "aba52e0807580ca0afbb245f0e207f545257030d8a8e1a79387a3f0eb8f09d1b",
+     "shape": [
+      14,
+      194
+     ]
+    },
+    "sweep": {
+     "__dict__": {
+      "compression_strains": {
+       "__nd__": "<f8",
+       "sha256": "bb029bb87ab7528b50677aeec1bb96d22034724da0b18a6254cd34d2e57072b3",
+       "shape": [
+        1
+       ]
+      },
+      "cost_hessian_after_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "5551903b83cac92ce9e92a58a38d366997213cb13e9ea6f1002da0b4cf185bc9",
+       "shape": [
+        1,
+        10
+       ]
+      },
+      "cost_hessian_after_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "886b752494c035507a1cf670ac1b7e149e49714f718873d41498dfbeff492387",
+       "shape": [
+        1,
+        194,
+        10
+       ]
+      },
+      "cost_hessian_before_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "1cc2c8b3d244e1baa11fa16bd980872a7b85197149cfdb1c6008638800bc8547",
+       "shape": [
+        1,
+        10
+       ]
+      },
+      "cost_hessian_before_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "aedaeb56e34449c12e2f05aeeaf89ddb957b736bf7ca87160c748bffb48aa70d",
+       "shape": [
+        1,
+        194,
+        10
+       ]
+      },
+      "elastic_hessian_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "638d8dd108bfff853a015e8378c97e6e228bce052ae494a8b3d529679fa6b7ea",
+       "shape": [
+        7,
+        1,
+        20,
+        166
+       ]
+      },
+      "elastic_hessian_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "0384a2296255908cc327e5990218d85592470e659c2f029ee15b1941422bc258",
+       "shape": [
+        7,
+        1,
+        20,
+        166,
+        166
+       ]
+      },
+      "elastic_hessian_traj_indices": {
+       "__nd__": "<i8",
+       "sha256": "7774d2bcbfebb35c4bd903160f9d254565fab007bf78f58d20bed996849b0a4b",
+       "shape": [
+        20
+       ]
+      },
+      "elastic_hessian_traj_strain": {
+       "__nd__": "<f8",
+       "sha256": "992f857d541054793959d8232592084de23b354f596a90170a17f2a0a21da592",
+       "shape": [
+        1,
+        20
+       ]
+      },
+      "elastic_hessian_traj_strain_frac": {
+       "__nd__": "<f8",
+       "sha256": "32ceaa0e5ecb7504b5c6b16d37fbce94f0e8c86f7d5b0baba6a9dc0177d28ca5",
+       "shape": [
+        20
+       ]
+      },
+      "recomputed_stiffness_loss": {
+       "__nd__": "<f8",
+       "sha256": "35d3ae0c42d72e588d94a5e461ea710d74526d8c5283bc8639b854dd9362adf3",
+       "shape": [
+        7
+       ]
+      },
+      "recomputed_trajectory_loss": {
+       "__nd__": "<f8",
+       "sha256": "35d3ae0c42d72e588d94a5e461ea710d74526d8c5283bc8639b854dd9362adf3",
+       "shape": [
+        7
+       ]
+      },
+      "stored_loss": {
+       "__nd__": "<f8",
+       "sha256": "f9068ccff8a9ad746b7cbadbb383e99ced80314fe72252cdb1712345bf044d69",
+       "shape": [
+        7
+       ]
+      },
+      "subtask_trajectory_loss": {
+       "__nd__": "<f8",
+       "sha256": "35d3ae0c42d72e588d94a5e461ea710d74526d8c5283bc8639b854dd9362adf3",
+       "shape": [
+        7,
+        1
+       ]
+      },
+      "t_indices": {
+       "__nd__": "<i8",
+       "sha256": "60b26c0c341456e210f130609f19b54b353261cbfd81567f01c66442e5fdd2d8",
+       "shape": [
+        7
+       ]
+      },
+      "target_poisson_ratios": {
+       "__nd__": "<f8",
+       "sha256": "2dce19cf9b6655b6254281eae64f09d38a5725f524c6e3f633ebce02d279e8a7",
+       "shape": [
+        1
+       ]
+      },
+      "trajectory_positions": {
+       "__nd__": "<f8",
+       "sha256": "56fd43c389786cdbea0211146c4cb408a136588cab96434b14498b93705768a6",
+       "shape": [
+        7,
+        1,
+        400,
+        98,
+        2
+       ]
+      },
+      "trajectory_strain_frac": {
+       "__nd__": "<f8",
+       "sha256": "b81873b2261316e5b2756f1405eccc92752f9413661f55935249ac142ab692af",
+       "shape": [
+        400
+       ]
+      }
+     }
+    },
+    "task_config": {
+     "__dict__": {
+      "compression_strains": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.2"
+        }
+       ]
+      },
+      "n_nodes": {
+       "__int__": "int",
+       "v": 100
+      },
+      "n_strain_steps": {
+       "__int__": "int",
+       "v": 400
+      },
+      "packing_seed": {
+       "__int__": "int",
+       "v": 42
+      },
+      "target_poisson_ratios": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.8"
+        }
+       ]
+      },
+      "task_seed": {
+       "__int__": "int",
+       "v": 0
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 0
+    }
+   }
+  }
+ },
+ "load_checkpoint": {
+  "value": null
+ }
+}

@@ -1,0 +1,278 @@
+{
+ "aux_best_loss_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "c4ecc7e47df912e7113b42dfdbe6f7dd432f5d59e2109b2f033e0342127a2f94",
+     "shape": [
+      97,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "c8f6da416e83d31409a7b380e2df61cab192e57d20b9413bfa8e4f1f88ac1363",
+     "shape": [
+      196
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 4999
+    }
+   ]
+  },
+  "warnings": [
+   "UserWarning: auxetic 29/5: no history.pkl -> best-loss k with final positions"
+  ]
+ },
+ "aux_best_loss_state.no_positions": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "c4ecc7e47df912e7113b42dfdbe6f7dd432f5d59e2109b2f033e0342127a2f94",
+     "shape": [
+      97,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "c8f6da416e83d31409a7b380e2df61cab192e57d20b9413bfa8e4f1f88ac1363",
+     "shape": [
+      196
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 4999
+    }
+   ]
+  }
+ },
+ "aux_network_fingerprint": {
+  "value": "9d947403d03bc64e"
+ },
+ "aux_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1290034
+  }
+ },
+ "data_io.load_auxetic_network": {
+  "value": {
+   "__tuple__": [
+    {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "2650d3165ac6f208b98987b3a98a7887be8aa111db2bae1386ddba4bda0d8fa1",
+        "shape": [
+         196,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "c4ecc7e47df912e7113b42dfdbe6f7dd432f5d59e2109b2f033e0342127a2f94",
+        "shape": [
+         97,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "a2ad99eba3f42e555392ed10f0d833c6af10bb6a646ef3b5054025a7b30c0837",
+        "shape": [
+         196
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "cbb43a3fdcb75d6a31b2ecf8785ef367809544f1153c475a90996a07c1afa902",
+        "shape": [
+         196
+        ]
+       }
+      }
+     }
+    },
+    {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "98aa36393c5511caf455f97b816bffff409c67935ea78a83c5c3457a542b5f04",
+       "shape": [
+        9
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "3c521df6077099c8cc7c10e0d6f75cb07e588480bebe33e153f7b368b1484a86",
+       "shape": [
+        7
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "8cb65e6190d3255e1cfe63c37fdfdf7f407b22de6bdb247eeab1ec9ac61add57",
+       "shape": [
+        8
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "bcb61fef66db885b6210ea6306f32ffe5cf5f041dca8781a495fdcdc504f6986",
+       "shape": [
+        8
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "load_auxetic": {
+  "value": {
+   "__dict__": {
+    "boundary": {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "98aa36393c5511caf455f97b816bffff409c67935ea78a83c5c3457a542b5f04",
+       "shape": [
+        9
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "3c521df6077099c8cc7c10e0d6f75cb07e588480bebe33e153f7b368b1484a86",
+       "shape": [
+        7
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "8cb65e6190d3255e1cfe63c37fdfdf7f407b22de6bdb247eeab1ec9ac61add57",
+       "shape": [
+        8
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "bcb61fef66db885b6210ea6306f32ffe5cf5f041dca8781a495fdcdc504f6986",
+       "shape": [
+        8
+       ]
+      }
+     }
+    },
+    "dir": "/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/auxetic_nets_aug/general/task_29/realization_05",
+    "loss_traj": {
+     "__nd__": "<f8",
+     "sha256": "b277fff58d638fe2feb4fff8de00979cb62d3f9f0b9f15dfa369e6e573e31355",
+     "shape": [
+      5000
+     ]
+    },
+    "network": {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "2650d3165ac6f208b98987b3a98a7887be8aa111db2bae1386ddba4bda0d8fa1",
+        "shape": [
+         196,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "c4ecc7e47df912e7113b42dfdbe6f7dd432f5d59e2109b2f033e0342127a2f94",
+        "shape": [
+         97,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "a2ad99eba3f42e555392ed10f0d833c6af10bb6a646ef3b5054025a7b30c0837",
+        "shape": [
+         196
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "cbb43a3fdcb75d6a31b2ecf8785ef367809544f1153c475a90996a07c1afa902",
+        "shape": [
+         196
+        ]
+       }
+      }
+     }
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 5
+    },
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "a15cc0621c9ea13bbe874a21f541f036cd5db47111b014189dac150fb261a43f",
+     "shape": [
+      5000,
+      196
+     ]
+    },
+    "sweep": null,
+    "task_config": {
+     "__dict__": {
+      "compression_strains": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.125"
+        },
+        {
+         "__float__": "float",
+         "v": "-0.2"
+        }
+       ]
+      },
+      "packing_seed": {
+       "__int__": "int",
+       "v": 29
+      },
+      "target_poisson_ratios": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.25"
+        },
+        {
+         "__float__": "float",
+         "v": "-0.4"
+        }
+       ]
+      },
+      "task_seed": {
+       "__int__": "int",
+       "v": 29
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 29
+    }
+   }
+  }
+ },
+ "load_checkpoint": {
+  "value": null
+ }
+}

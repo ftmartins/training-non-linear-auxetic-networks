@@ -3,7 +3,7 @@ Initial condition: today's draw of the initial stiffnesses from (task kind, task
 recorded realization seed, edge count) reproduces what the runs on disk started from.
 
 Auxetic: the draw must equal stiffness_trajectory[0], the pre-update stiffnesses of
-step 0. Allosteric: no local run stores step 0 (every stiffnesses_traj starts at
+step 0 (to ~1 ulp). Allosteric: no local run stores step 0 (every stiffnesses_traj starts at
 step 49 or later), so the trainer's draw is checked against the regeneration the
 figure code uses instead (the read golden pins its digest).
 
@@ -47,7 +47,10 @@ class TestAuxeticInitialCondition(unittest.TestCase):
             with self.subTest(sample.auxetic_name(family, task, real), why=why):
                 seed = A.aux_realization_seed(task, real, family)
                 drawn = generate_realization_stiffnesses(task, seed, len(aa['network'].edges))
-                np.testing.assert_array_equal(drawn, np.asarray(aa['stiff_traj'][0]))
+                # Stored step 0 differs from the raw draw by float rounding (~1 ulp, seen
+                # on every sample), so equality is to 1e-13, not bitwise.
+                np.testing.assert_allclose(drawn, np.asarray(aa['stiff_traj'][0]),
+                                           rtol=1e-13, atol=0)
 
 
 if __name__ == '__main__':

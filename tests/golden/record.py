@@ -26,10 +26,16 @@ def main(kinds=('write', 'read')):
         for name in W.TARGETED_SCENARIOS:
             _write('write', f'targeted_{name}', W.targeted_scenario(name))
     if 'read' in kinds:
-        from tests.golden.readers import read_allosteric
+        from tests.golden.readers import read_allosteric, read_auxetic, read_auxetic_legacy
         for geometry, task, real, _why in sample.ALLOSTERIC:
             _write('read', sample.allosteric_name(geometry, task, real),
                    read_allosteric(geometry, task, real))
+        for family, task, real, _why in sample.AUXETIC:
+            _write('read', sample.auxetic_name(family, task, real),
+                   read_auxetic(family, task, real))
+        for data_dir, task, real, network_type, _why in sample.LEGACY:
+            _write('read', sample.legacy_name(data_dir, task, real, network_type),
+                   read_auxetic_legacy(data_dir, task, real, network_type))
 
 
 if __name__ == '__main__':

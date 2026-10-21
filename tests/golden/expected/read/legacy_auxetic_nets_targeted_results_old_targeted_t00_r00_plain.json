@@ -1,0 +1,80 @@
+{
+ "data_io.load_auxetic_network": {
+  "value": {
+   "__tuple__": [
+    {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "151dae481fc86b8c508693d35f752893777d23c8442fbb5820876bd7f94d01d4",
+        "shape": [
+         230,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "4935ac106ef8ef073c243a02b9726d8de212e13b217e08f9725bd10abcaa0c5f",
+        "shape": [
+         100,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "6dea839bce7bb9bdd5901fd3a6484da7ba9354583eef3125b984f639848fc662",
+        "shape": [
+         230
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "bf9a633f228c8bc82fff90591693adbb008b7db8c7e3af49083f5c8bb1aef15d",
+        "shape": [
+         230
+        ]
+       }
+      }
+     }
+    },
+    {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "d9a7016ca9bdbaef4b3f1626108a98854a24dbfff3e2213dd4d44744e0a047d4",
+       "shape": [
+        2
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "2817cbc954df302971e9df62f4a45ee58f571ef5fbc798e74c86d866e184398e",
+       "shape": [
+        2
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "152181f4d5060d94409004dd4da6935e961b8cceb95f40c19f506966cf8f7200",
+       "shape": [
+        3
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "9812cd751e49af945234e8dd1e122057fe4e65daab3d661b14c4051f7760e7d7",
+       "shape": [
+        2
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "load_checkpoint": {
+  "value": null
+ }
+}
