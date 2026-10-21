@@ -38,6 +38,8 @@ from base.config import (
 )
 VMIN = 1e-4
 VMAX = 1e2
+LOSS_TOL = 1e-6  # early-stop threshold; the trainers' default, passed explicitly so the
+                 # runner can tell an early stop from a run that used all its steps
 
 
 LEARNING_RATE = 3e-3  # starting lr / opt_fire dt_init (opt_fire hyperparameter grid sweep,
@@ -359,6 +361,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
                 task_seed=task_id,
                 realization_seed=realization_seed,
                 save_interval=5,
+                loss_tol=LOSS_TOL,
                 task_config=task_config,
                 TARGETED_RESULTS_DIR=results_dir,
                 network_type=network_type,
@@ -385,20 +388,33 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             network_type=network_type,
         )
 
-        # Remove checkpoint after success
-        if use_checkpoint:
-            remove_checkpoint(task_id, realization_seed, results_dir=results_dir,
-                              network_type=network_type)
-
         elapsed = time.time() - start_time
         loss_list = history.get('loss', [])
         final_loss = loss_list[-1] if loss_list else float('nan')
+        nan_stiffness = np.isnan(np.asarray(trained_network.stiffnesses)).any()
+        failed = not np.isfinite(final_loss) or nan_stiffness
+        early_stop = not failed and len(loss_list) < _NSTEPS and final_loss < LOSS_TOL
 
-        if not np.isfinite(final_loss):
+        # The checkpoint is the run's resume state: drop it only when training
+        # stopped because it converged. After all steps it is rewritten at the
+        # last step reached so a later --steps extends from there instead of
+        # retraining from step 0; on NaN the trainer's last periodic (pre-NaN)
+        # checkpoint is kept as is.
+        if use_checkpoint:
+            if early_stop:
+                remove_checkpoint(task_id, realization_seed, results_dir=results_dir,
+                                  network_type=network_type)
+            elif not failed:
+                save_checkpoint(task_id, realization_seed, history, trained_network,
+                                task_config, current_step=len(loss_list),
+                                results_dir=results_dir, network_type=network_type)
+
+        if failed:
             print(f"\n{'='*80}")
             print(f"FAILURE: Targeted Task {task_id}, Realization {realization_seed}")
             print(f"Time elapsed: {elapsed/60:.2f} minutes")
-            print(f"Final loss is not finite: {final_loss}")
+            print(f"Final loss is not finite: {final_loss}" if not np.isfinite(final_loss)
+                  else f"Final stiffnesses contain NaN (final loss {final_loss:.4e})")
             print(f"Training steps completed: {len(loss_list)}")
             print(f"{'='*80}\n")
             return False
