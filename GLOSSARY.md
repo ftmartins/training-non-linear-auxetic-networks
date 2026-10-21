@@ -71,8 +71,23 @@ The per-cell list mapping realization id to realization seed.
 A realization whose best loss is at most 1e-4 of its initial loss.
 
 **Best-loss stiffnesses**:
-The stiffnesses at the training step with the lowest loss (K*), as opposed to the final step.
-_Avoid_: final network (for this meaning)
+The stiffnesses before the update of the training step with the lowest recorded training loss
+(K*), the earliest such step on ties, steps with NaN loss excluded; same rule for both task kinds.
+_Avoid_: final network, checkpoint stiffnesses, last-step stiffnesses (for this meaning)
+
+**Realization record**:
+Everything stored on disk for one realization: its configuration, seed, network, loss and
+stiffness trajectories, best-loss stiffnesses, resume state and post-training sweeps.
+_Avoid_: run directory, run folder (when meaning the content)
+
+**Resume state**:
+The step reached, the current stiffnesses and the loss history from which an interrupted or
+extended realization continues training.
+_Avoid_: checkpoint (when meaning the content rather than the file)
+
+**Realization lifecycle**:
+The stages a realization passes through: fresh start, resume, extend, overwrite, complete.
+_Avoid_: job state
 
 **Canonical ensemble**:
 The set of realizations every ensemble figure is computed from: per cell, the best-trained
