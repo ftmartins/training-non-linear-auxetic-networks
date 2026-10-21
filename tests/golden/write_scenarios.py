@@ -197,3 +197,66 @@ def targeted_scenario(name, task=0, realization=0):
             complete = is_training_complete(task, realization, results_dir=Path(tmp) / 'jax',
                                             network_type='jammed')
         return {'outcomes': outcomes, 'is_training_complete': complete, 'dir': dir_digest(tmp)}
+
+
+# ── General auxetic runner (ensemble_runner) ─────────────────────────────────
+
+GENERAL_SEED = 2_000_017   # stands in for the screened-seed table, untracked for auxetic_general
+
+
+def run_general(root, steps, trainer_kwargs, lr=None, overwrite=False, task=0, realization=0):
+    """One ensemble_runner.run_single_training() invocation. The JAX trainer is the same
+    fake as for the targeted runner; network creation (a ~30 s packing) is replaced by
+    the stored Network A. Returns its return value or the exception it raises."""
+    import ensemble_runner as R
+    from base.stored_network import NETWORK_A_FILE, load_stored_network
+    from tests.test_targeted_runner_checkpoint import _fake_trainer
+    from training.src.task_generator import generate_task_config
+    trainer_kwargs = dict(trainer_kwargs)
+    k = trainer_kwargs.pop('early_stop_at', None)
+    if k is not None:
+        trainer_kwargs['loss_at'] = lambda s: 1e-7 if s >= k else 1.0 / (s + 1)
+    if 'nan_loss_at' in trainer_kwargs:
+        k = trainer_kwargs.pop('nan_loss_at')
+        trainer_kwargs['loss_at'] = lambda s: np.nan if s == k else 1.0 / (s + 1)
+    fake = _fake_trainer(**trainer_kwargs)
+
+    def train(**kw):   # ensemble_runner passes no task_config; the fake wants one
+        return fake(task_config=generate_task_config(kw['task_seed']), **kw)
+
+    def stored_network(**_):
+        network, boundary, _info = load_stored_network(NETWORK_A_FILE)
+        return network, boundary
+
+    with mock.patch.object(R, 'finish_training_GD_auxetic_batch_jax', train), \
+            mock.patch.object(R, 'create_auxetic_network', stored_network), \
+            mock.patch.object(R, 'get_realization_seed', lambda *a, **k: GENERAL_SEED), \
+            mock.patch.object(R, 'RESULTS_DIR', Path(root)), _quiet():
+        try:
+            return R.run_single_training(
+                task, realization, gradient_method='jax', network_type='jammed',
+                overwrite=overwrite, lr_override=lr, steps_override=steps)
+        except Exception as e:  # noqa: BLE001
+            return f'{type(e).__name__}: {e}'.replace(str(root), '<root>')
+
+
+GENERAL_SCENARIOS = {
+    'all_steps_12': [(12, {}, {})],
+    'early_stop_at_step_7': [(50, {'early_stop_at': 7}, {})],
+    'extend_12_to_24': [(12, {}, {}), (24, {}, {})],
+    'nan_loss_at_step_8_then_resumed_to_24': [(24, {'nan_loss_at': 8}, {}), (24, {}, {})],
+    'exception_at_step_8_then_resumed_to_24': [(24, {'raise_at': 8}, {}), (24, {}, {})],
+    'lr_change_without_overwrite': [(12, {}, {}), (12, {}, {'lr': 1e-3})],
+    'lr_change_with_overwrite': [(12, {}, {}), (12, {}, {'lr': 1e-3, 'overwrite': True})],
+}
+
+
+def general_scenario(name, task=0, realization=0):
+    from training.src.checkpoint_manager import is_training_complete
+    with tempfile.TemporaryDirectory() as tmp:
+        outcomes = [digest(run_general(tmp, steps, tk, **kw))
+                    for steps, tk, kw in GENERAL_SCENARIOS[name]]
+        with _quiet():
+            complete = is_training_complete(task, realization, results_dir=Path(tmp) / 'jax',
+                                            network_type='jammed')
+        return {'outcomes': outcomes, 'is_training_complete': complete, 'dir': dir_digest(tmp)}

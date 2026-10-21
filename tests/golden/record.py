@@ -25,6 +25,8 @@ def main(kinds=('write', 'read', 'discovery')):
             _write('write', f'allo_{name}', W.allosteric_scenario(name))
         for name in W.TARGETED_SCENARIOS:
             _write('write', f'targeted_{name}', W.targeted_scenario(name))
+        for name in W.GENERAL_SCENARIOS:
+            _write('write', f'general_{name}', W.general_scenario(name))
     if 'discovery' in kinds:
         from tests.golden.discovery import discover
         path = EXPECTED_DIR / 'discovery.json'

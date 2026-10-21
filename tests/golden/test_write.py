@@ -40,6 +40,12 @@ class TestWriteScenarios(unittest.TestCase):
                 self._check(json.loads(json.dumps(W.targeted_scenario(name))),
                             _expected(f'targeted_{name}'))
 
+    def test_general_runner(self):
+        for name in W.GENERAL_SCENARIOS:
+            with self.subTest(name):
+                self._check(json.loads(json.dumps(W.general_scenario(name))),
+                            _expected(f'general_{name}'))
+
 
 if __name__ == '__main__':
     unittest.main()
