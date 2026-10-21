@@ -1,0 +1,147 @@
+{
+ "dir": {
+  "geometry_targeted/task_0/realization_0/allosteric_trainer.py.gz": "code snapshot",
+  "geometry_targeted/task_0/realization_0/best_combined_mse.txt": {
+   "text": "1.925929944387235853e-33\n"
+  },
+  "geometry_targeted/task_0/realization_0/best_stiffnesses.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "5be637d831117b18f8a60d94267a0800b992f84767d175252e7254e4af8b1725",
+    "shape": [
+     253
+    ]
+   },
+   "npy_sha256": "8b5f3829cc5367fde3830ff33be5cd88741d9c944fef79aed44143c3785ea493"
+  },
+  "geometry_targeted/task_0/realization_0/ckpt_step.txt": {
+   "text": "8\n"
+  },
+  "geometry_targeted/task_0/realization_0/eq_lengths.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "7281102960bd4884d3d8d426f3649d054eb430bf1d7f1cea9ab81ebb26d36d5b",
+    "shape": [
+     253
+    ]
+   },
+   "npy_sha256": "81fe06c55e3fad9deffbc32119628d70a773518d794f7e9d65bd992832178890"
+  },
+  "geometry_targeted/task_0/realization_0/incidence_matrix.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "119f754c6767c3d2a5279e06af52547fa1b8711a59c41b2b1179cf46257df16d",
+    "shape": [
+     253,
+     87
+    ]
+   },
+   "npy_sha256": "2a7768ccfb077d3d72afe92191e5777651a661311f2e88b68880a0b5acb05205"
+  },
+  "geometry_targeted/task_0/realization_0/jax_actuation.py.gz": "code snapshot",
+  "geometry_targeted/task_0/realization_0/lammps_utils.py.gz": "code snapshot",
+  "geometry_targeted/task_0/realization_0/mse1.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "649ef5d1a6c505d6f1eb16ddc5bf49375231cfdb75bdf624ad96229b58139078",
+    "shape": [
+     8
+    ]
+   },
+   "npy_sha256": "6813a23e9b15aee7d8c1256195234eac4a2f92a2dbfbbbebd0c2e406aea624a2"
+  },
+  "geometry_targeted/task_0/realization_0/mse2.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "32c5228e2754bd75367ee859a5c06530f60453af56ff223b2ee6fce98f2c6968",
+    "shape": [
+     8
+    ]
+   },
+   "npy_sha256": "17e13a52bf97aed353ef25775ea6575604eb9214c4bd05d8e350d071547cf027"
+  },
+  "geometry_targeted/task_0/realization_0/nodes.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "d75494b87fc8da56f97167373d2c32025a5a54bac81137eaa3dbb6ace841dba6",
+    "shape": [
+     87,
+     2
+    ]
+   },
+   "npy_sha256": "e791d03892d2be09300b84d92020437169f4eb7d239c550926d219f244c89c82"
+  },
+  "geometry_targeted/task_0/realization_0/run_provenance.json": {
+   "json": [
+    {
+     "eta": 1.0,
+     "k_max": 10.0,
+     "k_min": 0.0001,
+     "learning_rate": 10.0,
+     "n_training_steps": 60,
+     "realization_seed": 1000032,
+     "solver": "jax_fire"
+    }
+   ]
+  },
+  "geometry_targeted/task_0/realization_0/run_provenance.py.gz": "code snapshot",
+  "geometry_targeted/task_0/realization_0/stiffnesses.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "5be637d831117b18f8a60d94267a0800b992f84767d175252e7254e4af8b1725",
+    "shape": [
+     253
+    ]
+   },
+   "npy_sha256": "8b5f3829cc5367fde3830ff33be5cd88741d9c944fef79aed44143c3785ea493"
+  },
+  "geometry_targeted/task_0/realization_0/stiffnesses_ckpt.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "5be637d831117b18f8a60d94267a0800b992f84767d175252e7254e4af8b1725",
+    "shape": [
+     253
+    ]
+   },
+   "npy_sha256": "8b5f3829cc5367fde3830ff33be5cd88741d9c944fef79aed44143c3785ea493"
+  },
+  "geometry_targeted/task_0/realization_0/stiffnesses_traj.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "88db036a16d2e634612e87be51e9d35b3af12b7d7c573e80169ad2d9a595ad4e",
+    "shape": [
+     2,
+     253
+    ]
+   },
+   "npy_sha256": "dcd3683387f27578bd21ea963a386a749015a88743aeff2ce55f45d679120f41"
+  },
+  "geometry_targeted/task_0/realization_0/stiffnesses_traj_steps.npy": {
+   "array": {
+    "__nd__": "<i8",
+    "sha256": "8a3d6da75668c0ceb5f754d095efaaba015252b8bb62b79b7398497510ad14f1",
+    "shape": [
+     2
+    ]
+   },
+   "npy_sha256": "cd1b2b47517d3215154fd2cac557aa555b594b44904bfbed0354234f8c03a7c0"
+  },
+  "geometry_targeted/task_0/realization_0/tasks.txt": {
+   "text": "1.000100000000000000e+06\n-5.999999999999999778e-01\n-8.000000000000000444e-01\n"
+  },
+  "geometry_targeted/task_0/realization_0/training_meta.json": {
+   "json": {
+    "eta": 1.0,
+    "k_max": 10.0,
+    "k_min": 0.0001,
+    "learning_rate": 10.0,
+    "n_training_steps": 60,
+    "realization_seed": 1000032,
+    "solver": "jax_fire"
+   }
+  }
+ },
+ "outcomes": [
+  "ok"
+ ]
+}

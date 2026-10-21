@@ -1,0 +1,272 @@
+{
+ "allo_best_loss_stiffness": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "25c674b0db7bb6013bf72513c05cd505deada492e05c4173d4ce0d9dcaaba9a4",
+   "shape": [
+    253
+   ]
+  }
+ },
+ "allo_initial_stiffnesses": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "69cd8c37eac3e62a36fcb3589d44068b55361d3008c79eda778c71797f3e4239",
+   "shape": [
+    253
+   ]
+  }
+ },
+ "allo_operating_point.before": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "5c83ab71008ceae986ce98dc789851717026f381b05f8137e8cfa34743ac63a1",
+     "shape": [
+      253
+     ]
+    },
+    "before"
+   ]
+  }
+ },
+ "allo_operating_point.best": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "25c674b0db7bb6013bf72513c05cd505deada492e05c4173d4ce0d9dcaaba9a4",
+     "shape": [
+      253
+     ]
+    },
+    "best"
+   ]
+  }
+ },
+ "allo_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1000026
+  }
+ },
+ "data_io.load_allosteric_network": {
+  "value": {
+   "__dict__": {
+    "eq_lengths": {
+     "__nd__": "<f8",
+     "sha256": "98c938d2a9e5b64c8111997c2f4cf8018c3ee29d7340bd90b7856eab47d0c8c5",
+     "shape": [
+      253
+     ]
+    },
+    "incidence_matrix": {
+     "__nd__": "<f8",
+     "sha256": "119f754c6767c3d2a5279e06af52547fa1b8711a59c41b2b1179cf46257df16d",
+     "shape": [
+      253,
+      87
+     ]
+    },
+    "mse1": {
+     "__nd__": "<f8",
+     "sha256": "3fdcd92f84b8a993f178c8e95bff06e530886d85e6162ab78da0febe1164d51b",
+     "shape": [
+      5000
+     ]
+    },
+    "mse2": {
+     "__nd__": "<f8",
+     "sha256": "b7091e07794b24256bc6ea542dbeb0d7ea4d49143267b350445b410277992eb4",
+     "shape": [
+      5000
+     ]
+    },
+    "nodes": {
+     "__nd__": "<f8",
+     "sha256": "61d0c1fe1370f90bbf43111738ca85472274f293b7513eabe8a64e07880c01ad",
+     "shape": [
+      87,
+      2
+     ]
+    },
+    "stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "b21f958b53e302d6837fb13fad0b9388cecaf8c261953545fb40d53b54e70b98",
+     "shape": [
+      253
+     ]
+    },
+    "tasks": "1.000100000000000000e+06\n-5.999999999999999778e-01\n-8.000000000000000444e-01\n"
+   }
+  }
+ },
+ "load_allosteric": {
+  "value": {
+   "__dict__": {
+    "best_stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "25c674b0db7bb6013bf72513c05cd505deada492e05c4173d4ce0d9dcaaba9a4",
+     "shape": [
+      253
+     ]
+    },
+    "dir": "/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/allosteric_nets_aug/geometry_targeted/task_0/realization_11",
+    "edges": {
+     "__nd__": "<i8",
+     "sha256": "cd81c4d82567a4aeab41df19cd213c34718d955d7834797f663090a7ecef58bc",
+     "shape": [
+      253,
+      2
+     ]
+    },
+    "eq_lengths": {
+     "__nd__": "<f8",
+     "sha256": "98c938d2a9e5b64c8111997c2f4cf8018c3ee29d7340bd90b7856eab47d0c8c5",
+     "shape": [
+      253
+     ]
+    },
+    "geometry_id": "targeted",
+    "incidence_matrix": {
+     "__nd__": "<f8",
+     "sha256": "119f754c6767c3d2a5279e06af52547fa1b8711a59c41b2b1179cf46257df16d",
+     "shape": [
+      253,
+      87
+     ]
+    },
+    "mse1": {
+     "__nd__": "<f8",
+     "sha256": "3fdcd92f84b8a993f178c8e95bff06e530886d85e6162ab78da0febe1164d51b",
+     "shape": [
+      5000
+     ]
+    },
+    "mse2": {
+     "__nd__": "<f8",
+     "sha256": "b7091e07794b24256bc6ea542dbeb0d7ea4d49143267b350445b410277992eb4",
+     "shape": [
+      5000
+     ]
+    },
+    "nodes": {
+     "__nd__": "<f8",
+     "sha256": "61d0c1fe1370f90bbf43111738ca85472274f293b7513eabe8a64e07880c01ad",
+     "shape": [
+      87,
+      2
+     ]
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 11
+    },
+    "solver": "lammps",
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "5e1843931a67c24dd0aa488c6c01fc40d1e4683fdeef075b98041e8f66a8e57d",
+     "shape": [
+      100,
+      253
+     ]
+    },
+    "stiff_traj_steps": {
+     "__nd__": "<i8",
+     "sha256": "f30474c5a48b04dfdabb9564162b6003d95d06509534067f1e34d293ec826ffb",
+     "shape": [
+      100
+     ]
+    },
+    "stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "b21f958b53e302d6837fb13fad0b9388cecaf8c261953545fb40d53b54e70b98",
+     "shape": [
+      253
+     ]
+    },
+    "sweep": null,
+    "task_config": {
+     "__dict__": {
+      "dinputdistance": {
+       "__float__": "float",
+       "v": "0.9527358644101644"
+      },
+      "dinputdistance2": {
+       "__float__": "float",
+       "v": "0.4763679322050822"
+      },
+      "nsteps": {
+       "__int__": "int",
+       "v": 40
+      },
+      "nsteps2": {
+       "__int__": "int",
+       "v": 20
+      },
+      "strain_input": {
+       "__float__": "float",
+       "v": "1.0"
+      },
+      "strain_input2": {
+       "__float__": "float",
+       "v": "0.5"
+      },
+      "strain_output": {
+       "__float__": "float",
+       "v": "-0.8"
+      },
+      "strain_output2": {
+       "__float__": "float",
+       "v": "-0.6"
+      },
+      "tod": {
+       "__float__": "float",
+       "v": "0.1858805629109454"
+      },
+      "tod2": {
+       "__float__": "float",
+       "v": "0.3717611258218909"
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 0
+    }
+   }
+  }
+ },
+ "load_resume_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "b21f958b53e302d6837fb13fad0b9388cecaf8c261953545fb40d53b54e70b98",
+     "shape": [
+      253
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "3fdcd92f84b8a993f178c8e95bff06e530886d85e6162ab78da0febe1164d51b",
+     "shape": [
+      5000
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "b7091e07794b24256bc6ea542dbeb0d7ea4d49143267b350445b410277992eb4",
+     "shape": [
+      5000
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 5000
+    }
+   ]
+  }
+ }
+}

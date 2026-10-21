@@ -1,0 +1,437 @@
+{
+ "allo_best_loss_stiffness": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "93601d33b57e9aa29de9ff5ef343776131576964bc27b07eae31e1157eceadfd",
+   "shape": [
+    253
+   ]
+  }
+ },
+ "allo_initial_stiffnesses": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "7aafa5cd776e140446785d24af32eda04b7a42abe8ee0c9c903ec55cd4c52c4a",
+   "shape": [
+    253
+   ]
+  }
+ },
+ "allo_operating_point.before": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "54fe86931b39e23939fa429785f1bcc5c3d6a1a504cc2e5f424fa5d5dcaba952",
+     "shape": [
+      253
+     ]
+    },
+    "before"
+   ]
+  }
+ },
+ "allo_operating_point.best": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "93601d33b57e9aa29de9ff5ef343776131576964bc27b07eae31e1157eceadfd",
+     "shape": [
+      253
+     ]
+    },
+    "after"
+   ]
+  }
+ },
+ "allo_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1000032
+  }
+ },
+ "data_io.load_allosteric_network": {
+  "value": {
+   "__dict__": {
+    "eq_lengths": {
+     "__nd__": "<f8",
+     "sha256": "98c938d2a9e5b64c8111997c2f4cf8018c3ee29d7340bd90b7856eab47d0c8c5",
+     "shape": [
+      253
+     ]
+    },
+    "incidence_matrix": {
+     "__nd__": "<f8",
+     "sha256": "119f754c6767c3d2a5279e06af52547fa1b8711a59c41b2b1179cf46257df16d",
+     "shape": [
+      253,
+      87
+     ]
+    },
+    "mse1": {
+     "__nd__": "<f8",
+     "sha256": "8cff3f881506338ec38a1ac72cbe96dca85746a49f467f55320b526527746cb1",
+     "shape": [
+      3978
+     ]
+    },
+    "mse2": {
+     "__nd__": "<f8",
+     "sha256": "8da639058fe33d29b9e66f70f50e71917e8fbff76943c44d2cb44c4dc4496570",
+     "shape": [
+      3978
+     ]
+    },
+    "nodes": {
+     "__nd__": "<f8",
+     "sha256": "61d0c1fe1370f90bbf43111738ca85472274f293b7513eabe8a64e07880c01ad",
+     "shape": [
+      87,
+      2
+     ]
+    },
+    "stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "771e1c0668b9c1babebdd9200135378f1fc6f47c727fcddd6c91cd68520db678",
+     "shape": [
+      253
+     ]
+    },
+    "tasks": "1.000100000000000000e+06\n-5.999999999999999778e-01\n-8.000000000000000444e-01\n"
+   }
+  }
+ },
+ "load_allosteric": {
+  "value": {
+   "__dict__": {
+    "best_stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "93601d33b57e9aa29de9ff5ef343776131576964bc27b07eae31e1157eceadfd",
+     "shape": [
+      253
+     ]
+    },
+    "dir": "/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/allosteric_nets_aug/geometry_targeted/task_0/realization_0",
+    "edges": {
+     "__nd__": "<i8",
+     "sha256": "cd81c4d82567a4aeab41df19cd213c34718d955d7834797f663090a7ecef58bc",
+     "shape": [
+      253,
+      2
+     ]
+    },
+    "eq_lengths": {
+     "__nd__": "<f8",
+     "sha256": "98c938d2a9e5b64c8111997c2f4cf8018c3ee29d7340bd90b7856eab47d0c8c5",
+     "shape": [
+      253
+     ]
+    },
+    "geometry_id": "targeted",
+    "incidence_matrix": {
+     "__nd__": "<f8",
+     "sha256": "119f754c6767c3d2a5279e06af52547fa1b8711a59c41b2b1179cf46257df16d",
+     "shape": [
+      253,
+      87
+     ]
+    },
+    "mse1": {
+     "__nd__": "<f8",
+     "sha256": "8cff3f881506338ec38a1ac72cbe96dca85746a49f467f55320b526527746cb1",
+     "shape": [
+      3978
+     ]
+    },
+    "mse2": {
+     "__nd__": "<f8",
+     "sha256": "8da639058fe33d29b9e66f70f50e71917e8fbff76943c44d2cb44c4dc4496570",
+     "shape": [
+      3978
+     ]
+    },
+    "nodes": {
+     "__nd__": "<f8",
+     "sha256": "61d0c1fe1370f90bbf43111738ca85472274f293b7513eabe8a64e07880c01ad",
+     "shape": [
+      87,
+      2
+     ]
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 0
+    },
+    "solver": "lammps",
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "1d5bc5a3fc9e4538abd5dbb960c4cb9597b016206a2c61f8f954f9fb1ce5076a",
+     "shape": [
+      82,
+      253
+     ]
+    },
+    "stiff_traj_steps": {
+     "__nd__": "<i8",
+     "sha256": "b0257697a2acf9a6299331ac81ab7b150d8e63f23dd74ba76e620bcf77f8768e",
+     "shape": [
+      82
+     ]
+    },
+    "stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "771e1c0668b9c1babebdd9200135378f1fc6f47c727fcddd6c91cd68520db678",
+     "shape": [
+      253
+     ]
+    },
+    "sweep": {
+     "__dict__": {
+      "checkpoint_steps": {
+       "__nd__": "<i8",
+       "sha256": "49336181af555b8edbd02492360c60866bc4282b9c128ebc412fffdddb05a2a3",
+       "shape": [
+        24
+       ]
+      },
+      "cost_hessian_after_at_best_stiffnesses": {
+       "__nd__": "|b1",
+       "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+       "shape": []
+      },
+      "cost_hessian_after_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "ac1721e047e723ecc703152fd1990a92ea65106632af8cb0a948d9c47ebd26a7",
+       "shape": [
+        2,
+        4
+       ]
+      },
+      "cost_hessian_after_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "586b37519e8e202c95029442dda54629121b68b66e594f29605796d58a80cb06",
+       "shape": [
+        2,
+        253,
+        4
+       ]
+      },
+      "cost_hessian_after_stiffness": {
+       "__nd__": "<f8",
+       "sha256": "93601d33b57e9aa29de9ff5ef343776131576964bc27b07eae31e1157eceadfd",
+       "shape": [
+        253
+       ]
+      },
+      "cost_hessian_before_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "1c3a4532d15baed721660bfa11308ab5c97f18cac85e4423cda4c9b9ab9aca64",
+       "shape": [
+        2,
+        4
+       ]
+      },
+      "cost_hessian_before_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "545ad0ed6e9637fa3c45c8748686c9a49a837e716cea231a753e04d4ea50b34e",
+       "shape": [
+        2,
+        253,
+        4
+       ]
+      },
+      "elastic_hessian_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "e4085450538455eb0fb3afcd5a1584f126a38a189905886786fb914f9f878db6",
+       "shape": [
+        24,
+        2,
+        6,
+        166
+       ]
+      },
+      "elastic_hessian_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "5be808486504b4ba9f99d44c4eedf86510865d8bc33780f8fd1eaf1c858cd375",
+       "shape": [
+        24,
+        2,
+        6,
+        166,
+        166
+       ]
+      },
+      "elastic_hessian_traj_indices": {
+       "__nd__": "<i8",
+       "sha256": "73f15bbec20b479078398cbe5fc161ad031c018bb3c48333bb8178e1d568a952",
+       "shape": [
+        2,
+        6
+       ]
+      },
+      "elastic_hessian_traj_strain": {
+       "__nd__": "<f8",
+       "sha256": "7791c268c4e629c623b4ef1b67947999bc20a7a217c8ad54be3d568fec7b2815",
+       "shape": [
+        2,
+        6
+       ]
+      },
+      "elastic_hessian_traj_strain_frac": {
+       "__nd__": "<f8",
+       "sha256": "8bd3f6ef5cc1a3eda5ae4c403f03bc6d0b3fa0993caa978d459d50bb6e77e25e",
+       "shape": [
+        2,
+        6
+       ]
+      },
+      "recomputed_stiffness_loss": {
+       "__nd__": "<f8",
+       "sha256": "9f65615057076bcf6bda9fce550243e619bd4b7e0c578177dd40e6c0aa42a6ad",
+       "shape": [
+        24,
+        2
+       ]
+      },
+      "recomputed_trajectory_loss": {
+       "__nd__": "<f8",
+       "sha256": "9f65615057076bcf6bda9fce550243e619bd4b7e0c578177dd40e6c0aa42a6ad",
+       "shape": [
+        24,
+        2
+       ]
+      },
+      "stored_loss": {
+       "__nd__": "<f8",
+       "sha256": "d8e70a972b6369cdd2a266453e26b8e05c071a846ca4737fd973623fbbc3cf0d",
+       "shape": [
+        24
+       ]
+      },
+      "t_indices": {
+       "__nd__": "<i8",
+       "sha256": "3472409d411b06369ee646c40a3e622633be55321f644499f610e935210063e1",
+       "shape": [
+        24
+       ]
+      },
+      "trajectory_positions_task1": {
+       "__nd__": "<f8",
+       "sha256": "45f439cf3ab74a537ffa91c618f7292cac0946433776a0d05f505e5c4f0a5e55",
+       "shape": [
+        24,
+        40,
+        87,
+        2
+       ]
+      },
+      "trajectory_positions_task2": {
+       "__nd__": "<f8",
+       "sha256": "f0e81655931661fd566809979d21acc0dbb099d81ab1f5bee82d4a45284565a0",
+       "shape": [
+        24,
+        20,
+        87,
+        2
+       ]
+      },
+      "trajectory_strain_frac_task1": {
+       "__nd__": "<f8",
+       "sha256": "ee31551a6542f38217fe2e99424eff5edbb88dd6f4e3f05eba053cf2fd5da21d",
+       "shape": [
+        40
+       ]
+      },
+      "trajectory_strain_frac_task2": {
+       "__nd__": "<f8",
+       "sha256": "1d0cab2f268d7050d50b5a33f79400b1c17c34f7abef06543bb2382efde20346",
+       "shape": [
+        20
+       ]
+      }
+     }
+    },
+    "task_config": {
+     "__dict__": {
+      "dinputdistance": {
+       "__float__": "float",
+       "v": "0.9527358644101644"
+      },
+      "dinputdistance2": {
+       "__float__": "float",
+       "v": "0.4763679322050822"
+      },
+      "nsteps": {
+       "__int__": "int",
+       "v": 40
+      },
+      "nsteps2": {
+       "__int__": "int",
+       "v": 20
+      },
+      "strain_input": {
+       "__float__": "float",
+       "v": "1.0"
+      },
+      "strain_input2": {
+       "__float__": "float",
+       "v": "0.5"
+      },
+      "strain_output": {
+       "__float__": "float",
+       "v": "-0.8"
+      },
+      "strain_output2": {
+       "__float__": "float",
+       "v": "-0.6"
+      },
+      "tod": {
+       "__float__": "float",
+       "v": "0.1858805629109454"
+      },
+      "tod2": {
+       "__float__": "float",
+       "v": "0.3717611258218909"
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 0
+    }
+   }
+  }
+ },
+ "load_resume_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "771e1c0668b9c1babebdd9200135378f1fc6f47c727fcddd6c91cd68520db678",
+     "shape": [
+      253
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "8cff3f881506338ec38a1ac72cbe96dca85746a49f467f55320b526527746cb1",
+     "shape": [
+      3978
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "8da639058fe33d29b9e66f70f50e71917e8fbff76943c44d2cb44c4dc4496570",
+     "shape": [
+      3978
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 3978
+    }
+   ]
+  }
+ }
+}
