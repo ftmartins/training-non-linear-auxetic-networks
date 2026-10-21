@@ -855,16 +855,13 @@ def allo_operating_point(d, at="best"):
     return d["stiff_traj"][ti[-1] if end == "after" else ti[0]], at
 
 
-_ALLO_REALIZATION_BASE = 3_000_000   # training/runners/allosteric_trainer.py::_REALIZATION_BASE
-
-
 def allo_initial_stiffnesses(d):
     """True step-0 stiffnesses of an allosteric realization.
 
     Runs that predate the step-0 checkpoint only saved ``stiffnesses_traj`` from
     step 49 on (the first ``global_step % 50 == 0``), so the initial draw is
     regenerated exactly as the trainer makes it:
-    ``RandomState(_REALIZATION_BASE + realization_seed).uniform(k_min, k_max, n_edges)``
+    ``base.initial_condition.contrastive(realization_seed, n_edges, k_min, k_max)``
     with ``realization_seed`` / ``k_min`` / ``k_max`` from ``training_meta.json``
     (the *recorded* seed -- the screened-seed table's realization_id -> seed
     mapping has been reordered since some runs, so never re-derive it from ids).
@@ -874,8 +871,9 @@ def allo_initial_stiffnesses(d):
     if int(d["stiff_traj_steps"][0]) == 0:
         return d["stiff_traj"][0]
     meta = json.loads((Path(d["dir"]) / "training_meta.json").read_text())
-    return np.random.RandomState(_ALLO_REALIZATION_BASE + int(meta["realization_seed"])).uniform(
-        meta["k_min"], meta["k_max"], size=len(d["edges"]))
+    from base import initial_condition
+    return initial_condition.contrastive(
+        meta["realization_seed"], len(d["edges"]), meta["k_min"], meta["k_max"])
 
 
 def allo_cost_hessian_at(d, k_vec, k_eigs=CFG.k_cost_eigs, verbose=False):

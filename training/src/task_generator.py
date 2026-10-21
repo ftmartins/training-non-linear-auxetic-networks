@@ -6,6 +6,7 @@ initializations with proper seed management for reproducibility.
 """
 
 import numpy as np
+from base import initial_condition
 from base.config import (
     get_compression_pool, get_poisson_pool,
     STIFFNESS_LOG_MIN, STIFFNESS_LOG_MAX,
@@ -69,22 +70,7 @@ def generate_realization_stiffnesses(task_seed, realization_seed, n_edges):
     Returns:
         stiffnesses: Array of shape (n_edges,) with log-uniform values
     """
-    if task_seed < 20:
-        rng = np.random.RandomState(realization_seed)
-        log_stiffnesses = rng.uniform(
-            STIFFNESS_LOG_MIN,
-            STIFFNESS_LOG_MAX,
-            size=n_edges
-            )
-        return np.exp(log_stiffnesses)
-    else:
-        rng = np.random.RandomState(realization_seed)
-        stiffnesses = rng.uniform(
-            np.exp(STIFFNESS_LOG_MIN),
-            np.exp(STIFFNESS_LOG_MAX),
-            size=n_edges
-            )
-        return stiffnesses
+    return initial_condition.auxetic_gradient(task_seed, realization_seed, n_edges)
 
 def get_all_task_configs(n_tasks=N_TASKS):
     """

@@ -71,6 +71,7 @@ from base.network_utils import create_auxetic_network
 from training.src.task_generator import generate_task_config
 from training.src.targeted_task_generator import get_targeted_task_config, TARGETED_TASKS
 import base.config as _base_config
+from base import initial_condition
 import training.lammps_auxetic as la
 from training.src.run_provenance import (
     save_run_provenance,
@@ -113,11 +114,11 @@ N_TARGETED_TASKS = len(TARGETED_TASKS)
 N_REALIZATIONS = 5
 N_TRAINING_STEPS = 1_000
 
-_REALIZATION_BASE = 3_000_000
+_REALIZATION_BASE = initial_condition.REALIZATION_BASE
 
 
 def realization_rng(seed: int) -> np.random.RandomState:
-    return np.random.RandomState(_REALIZATION_BASE + seed)
+    return initial_condition.realization_rng(seed)
 
 
 # ── Geometry / task setup (reuses the gradient-based pipeline's own code) ─────
@@ -401,8 +402,8 @@ def main():
         print(f"  Stiffnesses: [{stiffnesses.min():.4g}, {stiffnesses.max():.4g}] "
               f"(resumed from step {start_step})")
     else:
-        rrng = realization_rng(screened_seed)
-        network.stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(network.edges))
+        network.stiffnesses = initial_condition.contrastive(
+            screened_seed, len(network.edges), K_MIN, K_MAX)
         loss_history = np.array([])
         start_step = 0
         print(f"  Stiffnesses: [{network.stiffnesses.min():.4g}, {network.stiffnesses.max():.4g}]")

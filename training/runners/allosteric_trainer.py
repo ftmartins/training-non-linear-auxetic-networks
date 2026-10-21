@@ -37,6 +37,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from base import initial_condition
 import training.lammps_utils as f
 import training.jax_actuation as jx
 from training.src.run_provenance import (
@@ -86,7 +87,7 @@ N_TRAINING_STEPS = 1_000
 # Non-overlapping seed namespaces
 _GEOMETRY_BASE    = 1_000_000
 _TASK_BASE        = 2_000_000
-_REALIZATION_BASE = 3_000_000
+_REALIZATION_BASE = initial_condition.REALIZATION_BASE
 
 # ── Targeted ensemble ─────────────────────────────────────────────────────────
 # Fixed geometry shared across all 5 tasks; IC seed independent of task.
@@ -112,7 +113,7 @@ def task_rng(tid: int) -> np.random.RandomState:
     return np.random.RandomState(_TASK_BASE + tid)
 
 def realization_rng(rid: int) -> np.random.RandomState:
-    return np.random.RandomState(_REALIZATION_BASE + rid)
+    return initial_condition.realization_rng(rid)
 
 
 # ── Network creation (verbatim from notebook) ─────────────────────────────────
@@ -799,8 +800,8 @@ def main():
                   f"  (resumed from step {start_step})")
         else:
             # screened_seed computed earlier, up with current_hparams.
-            rrng = realization_rng(screened_seed)
-            stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
+            stiffnesses = initial_condition.contrastive(
+                screened_seed, len(incidence_matrix), K_MIN, K_MAX)
             msearray  = np.array([])
             msearray2 = np.array([])
             start_step = 0
