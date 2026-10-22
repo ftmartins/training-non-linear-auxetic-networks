@@ -276,20 +276,18 @@ def load_local_network(geometry_id, task_id, real_id, data_dir, mods):
         geom_dir    = task_parent.parent
     task_dir = task_parent / f'realization_{real_id}'
 
-    if not (task_dir / 'stiffnesses.npy').exists():
-        return None
+    from base.realization_record import RealizationRecord
+
+    def record(rd):
+        return RealizationRecord.open(rd, kind='allosteric')
+
     try:
-        stiffnesses = np.abs(np.load(task_dir / 'stiffnesses.npy').astype(float))
+        stiffnesses = np.abs(record(task_dir).current_stiffnesses.astype(float))
+        L0 = record(task_dir).network.eq_lengths.astype(float)
     except Exception:
         return None
 
-    if not (task_dir / 'eq_lengths.npy').exists():
-        return None
-    try:
-        L0 = np.load(task_dir / 'eq_lengths.npy').astype(float)
-    except Exception:
-        return None
-
+    # The network and task may be borrowed from another realization of the same geometry.
     nodes = incmat = None
     geom_iter = (
         _geometry_realization_dirs(geom_dir, task_parent, task_dir)
@@ -297,36 +295,28 @@ def load_local_network(geometry_id, task_id, real_id, data_dir, mods):
         else _sibling_realization_dirs(task_parent, task_dir)
     )
     for rd in geom_iter:
-        if nodes is None and (rd / 'nodes.npy').exists():
-            try:
-                nodes = np.load(rd / 'nodes.npy').astype(float)
-            except Exception:
-                pass
-        if incmat is None and (rd / 'incidence_matrix.npy').exists():
-            try:
-                incmat = np.load(rd / 'incidence_matrix.npy')
-            except Exception:
-                pass
-        if nodes is not None and incmat is not None:
-            break
+        try:
+            network = record(rd).network
+        except Exception:
+            continue
+        nodes, incmat = network.nodes.astype(float), network.incidence_matrix
+        break
 
-    task_vals = None
+    task = None
     for rd in _sibling_realization_dirs(task_parent, task_dir):
-        if (rd / 'tasks.txt').exists():
-            try:
-                task_vals = np.loadtxt(rd / 'tasks.txt')
-            except Exception:
-                pass
-        if task_vals is not None:
-            break
+        try:
+            task = record(rd).task
+        except Exception:
+            continue
+        break
 
-    if nodes is None or incmat is None or task_vals is None:
+    if nodes is None or incmat is None or task is None:
         return None
 
     edges  = incmat_to_edges(incmat)
     N      = nodes.shape[0]
     fdofs  = free_dofs_local(N)
-    target = float(np.abs(task_vals[2]))
+    target = float(np.abs(task.strain_output))
 
     return dict(
         nodes=nodes, edges=edges, incmat=incmat,
