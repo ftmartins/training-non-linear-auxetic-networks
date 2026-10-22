@@ -21,9 +21,6 @@ import allosteric_trainer  # noqa: E402
 from analysis import data_io  # noqa: E402
 from training.src import checkpoint_manager  # noqa: E402
 
-ALLO_AUG = DATA_ROOT / 'allosteric_nets_aug'
-
-
 def outcome(fn, *args, **kwargs):
     """Digest of calling fn: its value or the exception it raises, and its warnings."""
     with warnings.catch_warnings(record=True) as caught, \
@@ -53,8 +50,6 @@ def read_allosteric(geometry, task, real):
     run_dir = A._allo_geom_dir(geometry) / f'task_{task}' / f'realization_{real}'
     out = {
         'load_allosteric': outcome(A.load_allosteric, geometry, task, real),
-        'data_io.load_allosteric_network': outcome(
-            data_io.load_allosteric_network, geometry, task, real, data_dir=ALLO_AUG),
         'allo_realization_seed': outcome(A.allo_realization_seed, geometry, task, real),
         'load_resume_state': outcome(allosteric_trainer.load_resume_state, str(run_dir)),
     }

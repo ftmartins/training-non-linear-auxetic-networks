@@ -8,7 +8,7 @@ from pathlib import Path
 from base.elastic_network import ElasticNetwork
 from base.network_utils import get_square_boundary_nodes
 from base.config import (
-    TARGETED_DATA_DIR, DATA_DIR, ALLOSTERIC_DATA_DIR, BOUNDARY_MARGIN,
+    TARGETED_DATA_DIR, DATA_DIR, BOUNDARY_MARGIN,
 )
 from training.src.checkpoint_manager import _nt_filename
 
@@ -74,52 +74,6 @@ def load_auxetic_network(task_seed, real_seed, data_dir=None, network_type=None)
         )
         boundary = {'top': top, 'bottom': bottom, 'left': left, 'right': right}
     return network, boundary
-
-
-def load_allosteric_network(geometry_id, task_id, real_id, data_dir=None):
-    """
-    Load an allosteric network ensemble result.
-
-    Parameters
-    ----------
-    geometry_id, task_id, real_id : int
-    data_dir : str or Path or None  defaults to base.config.ALLOSTERIC_DATA_DIR
-
-    Returns
-    -------
-    dict with keys:
-        'nodes', 'stiffnesses', 'eq_lengths', 'incidence_matrix', 'tasks',
-        'mse1', 'mse2', and optionally 'cost_hessian_eigs'
-    """
-    if data_dir is None:
-        data_dir = ALLOSTERIC_DATA_DIR
-    path = (Path(data_dir)
-            / f'geometry_{geometry_id}'
-            / f'task_{task_id}'
-            / f'realization_{real_id}')
-
-    result = {}
-    for key, fname in [
-        ('nodes',            'nodes.npy'),
-        ('stiffnesses',      'stiffnesses.npy'),
-        ('eq_lengths',       'eq_lengths.npy'),
-        ('incidence_matrix', 'incidence_matrix.npy'),
-        ('mse1',             'mse1.npy'),
-        ('mse2',             'mse2.npy'),
-    ]:
-        f = path / fname
-        if f.exists():
-            result[key] = np.load(f)
-
-    tasks_file = path / 'tasks.txt'
-    if tasks_file.exists():
-        result['tasks'] = tasks_file.read_text()
-
-    eigs_file = path / 'cost_hessian_eigs.npz'
-    if eigs_file.exists():
-        result['cost_hessian_eigs'] = np.load(eigs_file)
-
-    return result
 
 
 # ---------------------------------------------------------------------------

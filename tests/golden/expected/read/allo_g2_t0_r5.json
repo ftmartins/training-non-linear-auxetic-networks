@@ -51,57 +51,6 @@
    "v": 1000201
   }
  },
- "data_io.load_allosteric_network": {
-  "value": {
-   "__dict__": {
-    "eq_lengths": {
-     "__nd__": "<f8",
-     "sha256": "58ef05c29bc54732019c467d752078e464437196a7e7c73acae28ffafd4ca645",
-     "shape": [
-      265
-     ]
-    },
-    "incidence_matrix": {
-     "__nd__": "<f8",
-     "sha256": "30355e0c113a04ed2a644644a13c56c8f99eb82fa75f90758820d992fb22ac0e",
-     "shape": [
-      265,
-      89
-     ]
-    },
-    "mse1": {
-     "__nd__": "<f8",
-     "sha256": "ddcd01988d9368f1c1db78297b3849ec1f31cc6461e3a1abe1f4af068020cc27",
-     "shape": [
-      5500
-     ]
-    },
-    "mse2": {
-     "__nd__": "<f8",
-     "sha256": "ba2cf89476aad97633a4d6a112a2c61c4bc8928237fbe40c182553672bafbb90",
-     "shape": [
-      5500
-     ]
-    },
-    "nodes": {
-     "__nd__": "<f8",
-     "sha256": "363ad16fde06e52c4e75bdbb4662b6c5cebc6aeb1447c3d462ed13927f7f9e9b",
-     "shape": [
-      89,
-      2
-     ]
-    },
-    "stiffnesses": {
-     "__nd__": "<f8",
-     "sha256": "8b7e95e95e2a335c37ee358a05d311dc10a0e312e0d98358f11fe854036b226e",
-     "shape": [
-      265
-     ]
-    },
-    "tasks": "1.000002000000000000e+06\n-1.000000000000000056e-01\n-2.000000000000000111e-01\n"
-   }
-  }
- },
  "load_allosteric": {
   "value": {
    "__dict__": {
