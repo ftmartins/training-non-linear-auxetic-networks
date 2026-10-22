@@ -101,16 +101,19 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
         STRAIN_INPUT, STRAIN_INPUT2, NSTEPS_TASK1, NSTEPS_TASK2, TARGETED_ENSEMBLE,
     )
 
-    geom_dir = 'geometry_targeted' if targeted_ensemble else f'geometry_{geometry}'
-    result_path = Path(output_dir) / geom_dir / f'task_{task}' / f'realization_{realization}'
+    from base.realization_record import RealizationRecord
 
-    nodes             = np.load(result_path / 'nodes.npy')
-    incidence_matrix  = np.load(result_path / 'incidence_matrix.npy')
-    eq_lengths        = np.load(result_path / 'eq_lengths.npy')
-    stiffness_traj    = np.load(result_path / 'stiffnesses_traj.npy')
-    steps             = np.load(result_path / 'stiffnesses_traj_steps.npy')
-    mse1              = np.load(result_path / 'mse1.npy')
-    mse2              = np.load(result_path / 'mse2.npy')
+    record = RealizationRecord.locate(
+        output_dir, 'allosteric', ('targeted' if targeted_ensemble else geometry, task),
+        realization, must_exist=False)
+    result_path = record.run_dir
+
+    network = record.network
+    nodes, incidence_matrix, eq_lengths = (
+        network.nodes, network.incidence_matrix, network.eq_lengths)
+    stiffness_traj    = record.stiffness_trajectory.stiffnesses
+    steps             = record.stiffness_trajectory.steps
+    mse1, mse2        = (np.ascontiguousarray(c) for c in record.loss.per_subtask.T)
 
     # Evaluate the 'after' cost Hessian at the trainer's true lowest-loss K*
     # (best_stiffnesses.npy) rather than the coarse checkpoint-grid argmin
@@ -118,15 +121,14 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
     # realizations (best_stiffnesses_audit.md). Absent (older runs) -> None ->
     # sweep_allosteric keeps the old checkpoint-grid behavior.
     best_stiffnesses = None
-    _bpath = result_path / 'best_stiffnesses.npy'
-    if _bpath.exists():
-        best_stiffnesses = np.load(_bpath)
+    if record.has('best_so_far'):
+        best_stiffnesses = record.best_so_far.stiffnesses
         print(f"  cost_hessian_after: at best_stiffnesses.npy (lowest-loss K*)", flush=True)
     else:
         print(f"  cost_hessian_after: best_stiffnesses.npy absent -> "
               f"stiffness_traj[t_indices[-1]] (checkpoint-grid argmin)", flush=True)
 
-    gseed, strain_output2, strain_output = np.loadtxt(result_path / 'tasks.txt')
+    strain_output, strain_output2 = record.task.strain_output, record.task.strain_output2
     tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
     tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
     dinputdistance  = STRAIN_INPUT  * np.linalg.norm(nodes[0] - nodes[1])
@@ -145,9 +147,8 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
     # file have no record of it -- fall back to None (evaluate_actuation's own
     # default) and warn, since that's the pre-existing (unverified) behavior.
     meta_path = result_path / 'training_meta.json'
-    if meta_path.exists():
-        with open(meta_path) as fh:
-            solver = json.load(fh)['solver']
+    if record.has('config'):
+        solver = record.config['solver']
     else:
         from training.runners.allosteric_trainer import DEFAULT_SOLVER
         solver = None
