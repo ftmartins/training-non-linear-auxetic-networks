@@ -32,6 +32,32 @@ class TestAllostericRead(unittest.TestCase):
                     self.assertEqual(got[call], want[call], call)
 
 
+# Samples whose stored data do not determine K* (ADR 0004), with the reason.
+ALLOSTERIC_K_STAR_UNDETERMINED = {
+    (4, 2, 1): 'stiffness trajectory steps interleaved by two jobs writing one directory',
+    (4, 4, 2): 'stiffness trajectory steps interleaved by two jobs writing one directory',
+}
+
+
+@skip_unless_golden
+class TestAllostericBestLossStiffnesses(unittest.TestCase):
+    def test_record_k_star_is_todays_best_stiffnesses(self):
+        from base.realization_record import RealizationRecord, BestLossUndetermined
+        from tests.golden import DATA_ROOT
+        from tests.golden.digest import digest
+        for geometry, task, real, why in sample.ALLOSTERIC:
+            name = sample.allosteric_name(geometry, task, real)
+            with self.subTest(name, why=why):
+                rec = RealizationRecord.locate(DATA_ROOT / 'allosteric_nets_aug', 'allosteric',
+                                               (geometry, task), real)
+                if (geometry, task, real) in ALLOSTERIC_K_STAR_UNDETERMINED:
+                    with self.assertRaises(BestLossUndetermined):
+                        rec.best_loss_stiffnesses
+                    continue
+                self.assertEqual(digest(rec.best_loss_stiffnesses),
+                                 _expected(name)['allo_best_loss_stiffness']['value'])
+
+
 def _check(case, name, got):
     want = _expected(name)
     case.assertEqual(sorted(got), sorted(want))

@@ -13,6 +13,9 @@ MissingRecordPart (a FileNotFoundError), never returns None; rec.has(part) asks 
 Arrays come back exactly as stored (no abs, no casts), so callers that transform them keep
 doing so themselves.
 
+Best-loss stiffnesses (K*, ADR 0004) are read only here, as rec.best_loss_stiffnesses and
+rec.best_loss_step. They raise BestLossUndetermined rather than fall back to anything else.
+
 Each on-disk layout is a private reader class behind the record. Layouts so far:
   * allosteric (allosteric_trainer, the _aug tree): nodes / incidence_matrix / eq_lengths,
     tasks.txt (geometry_seed, strain_output2, strain_output), mse1 / mse2 per step,
@@ -29,7 +32,11 @@ import numpy as np
 
 KINDS = ('allosteric',)
 PARTS = ('config', 'realization_seed', 'network', 'task', 'loss', 'stiffness_trajectory',
-         'current_stiffnesses', 'best_so_far', 'sweep')
+         'current_stiffnesses', 'best_so_far', 'best_loss_stiffnesses', 'best_loss_step', 'sweep')
+
+# The allosteric trainer saved its best stiffnesses post-update until commit 3c24f68
+# (2026-08-10). Runs first started before the end of that day cannot give K* (ADR 0004).
+BEST_SO_FAR_PRE_UPDATE_SINCE = '2026-08-11'
 
 
 class NotARealization(FileNotFoundError):
@@ -38,6 +45,10 @@ class NotARealization(FileNotFoundError):
 
 class MissingRecordPart(FileNotFoundError):
     """The realization did not store the requested part."""
+
+
+class BestLossUndetermined(ValueError):
+    """The stored data do not determine the best-loss stiffnesses exactly (ADR 0004)."""
 
 
 @dataclass(frozen=True)
@@ -190,6 +201,42 @@ class RealizationRecord:
     def best_so_far(self):
         return self._reader.best_so_far()
 
+    @property
+    def best_loss_stiffnesses(self):
+        """K*: the pre-update stiffnesses at the step with the lowest training loss, earliest
+        on ties, NaN losses excluded (ADR 0004)."""
+        return self._best_loss[1]
+
+    @property
+    def best_loss_step(self):
+        """Loss-step index K* was measured at."""
+        return self._best_loss[0]
+
+    @cached_property
+    def _best_loss(self):
+        def undetermined(why):
+            return BestLossUndetermined(f'{self.run_dir}: {why}')
+
+        loss = self.loss.training
+        if loss.size == 0 or np.all(np.isnan(loss)):
+            raise undetermined('no finite training loss')
+        step = int(np.nanargmin(loss))
+        best = self.best_so_far
+        if best.training_loss != loss[step]:
+            raise undetermined(f'stored best loss {best.training_loss!r} is not the lowest '
+                               f'training loss {loss[step]!r} (step {step})')
+        traj = self.stiffness_trajectory
+        if not _fits(traj, len(loss)):
+            raise undetermined('stiffness trajectory does not fit the loss trajectory')
+        snapshot = np.nonzero(traj.steps == step)[0]
+        if len(snapshot) and not np.array_equal(traj.stiffnesses[snapshot[0]], best.stiffnesses):
+            raise undetermined(f'stored best stiffnesses differ from the snapshot at step {step}')
+        started = self._reader.first_started()
+        if started < BEST_SO_FAR_PRE_UPDATE_SINCE:
+            raise undetermined(f'first started {started}, before best stiffnesses were saved '
+                               f'pre-update')
+        return step, best.stiffnesses
+
     @cached_property
     def sweep(self):
         """Post-training sweep arrays (dict of name -> array)."""
@@ -199,6 +246,24 @@ class RealizationRecord:
         """ResumeState to continue training from, or None when there is nothing usable to
         resume (no saved stiffnesses, or NaN stiffnesses and no clean checkpoint)."""
         return self._reader.resume_state()
+
+
+def _fits(traj, n_steps):
+    """Whether a stiffness trajectory pairs with an n_steps loss trajectory: one snapshot per
+    step index, indices in range and increasing. A step saved twice in a row (a checkpoint
+    and an early stop in the same iteration, or a resume) is fine if both snapshots agree;
+    steps going backwards mean two jobs appended to one run directory."""
+    steps, k = traj.steps, traj.stiffnesses
+    if len(steps) != len(k):
+        return False
+    if len(steps) == 0:
+        return True
+    if steps[0] < 0 or steps[-1] >= n_steps:
+        return False
+    gaps = np.diff(steps)
+    if np.any(gaps < 0):
+        return False
+    return all(np.array_equal(k[i], k[i + 1]) for i in np.nonzero(gaps == 0)[0])
 
 
 def _detect_kind(run_dir):
@@ -268,6 +333,14 @@ class _AllostericReader:
     def sweep(self):
         with np.load(_existing(self.d / 'timestep_sweep.npz'), allow_pickle=True) as z:
             return {k: z[k] for k in z.files}
+
+    def first_started(self):
+        """ISO timestamp of the earliest recorded invocation (run_provenance.json)."""
+        path = self.d / 'run_provenance.json'
+        if not path.exists():
+            raise BestLossUndetermined(f'{self.d}: no run_provenance.json, so the run start '
+                                       f'date is unknown')
+        return min(entry['timestamp'] for entry in json.loads(path.read_text()))
 
     def resume_state(self):
         stiff_path = self.d / 'stiffnesses.npy'
