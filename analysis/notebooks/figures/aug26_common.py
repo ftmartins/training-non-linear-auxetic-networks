@@ -46,6 +46,8 @@ for _p in (REPO_ROOT, REPO_ROOT / "training" / "src", REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from base.realization_record import RealizationRecord, incidence_to_edges  # noqa: E402
+
 # --------------------------------------------------------------------------- #
 # Paths                                                                       #
 # --------------------------------------------------------------------------- #
@@ -175,12 +177,7 @@ def _incmat_to_edges(incidence_matrix):
     importing that module (which pulls in the ``lammps`` extension at import
     time; the plotting env need not have it).
     """
-    incidence_matrix = np.asarray(incidence_matrix)
-    edges = np.zeros((incidence_matrix.shape[0], 2), dtype=int)
-    for e, row in enumerate(incidence_matrix):
-        cols = np.where(np.abs(row) > 0.5)[0]
-        edges[e] = cols[0], cols[1]
-    return edges
+    return incidence_to_edges(incidence_matrix)
 
 
 def allo_solver_available(solver: str) -> bool:
@@ -202,6 +199,11 @@ ALLO_GEOMETRIES = ["targeted", 0, 1, 2, 3, 4]
 def _allo_geom_dir(geometry_id) -> Path:
     name = "geometry_targeted" if geometry_id == "targeted" else f"geometry_{geometry_id}"
     return ALLO_DATA_DIR / name
+
+
+def _allo_record(geometry_id, task_id, real_id) -> RealizationRecord:
+    return RealizationRecord.locate(ALLO_DATA_DIR, "allosteric", (geometry_id, task_id), real_id,
+                                    must_exist=False)
 
 
 def allo_task_config(nodes, tasks_txt_vals) -> dict:
@@ -236,52 +238,46 @@ def load_allosteric(geometry_id, task_id, real_id) -> dict | None:
     best_stiffnesses, stiff_traj, stiff_traj_steps, mse1, mse2, task_config,
     solver, geometry_id, task_id, real_id, dir``.
     """
-    d = _allo_geom_dir(geometry_id) / f"task_{task_id}" / f"realization_{real_id}"
-    need = ["nodes.npy", "incidence_matrix.npy", "eq_lengths.npy",
-            "stiffnesses_traj.npy", "stiffnesses_traj_steps.npy",
-            "mse1.npy", "mse2.npy", "tasks.txt"]
-    if not d.is_dir() or not all((d / f).exists() for f in need):
+    rec = _allo_record(geometry_id, task_id, real_id)
+    if not rec.run_dir.is_dir() or not all(
+            rec.has(p) for p in ("network", "stiffness_trajectory", "loss", "task")):
         return None
 
-    nodes = np.load(d / "nodes.npy").astype(float)
-    incidence_matrix = np.load(d / "incidence_matrix.npy")
-    tasks_vals = np.loadtxt(d / "tasks.txt")
+    net, traj, task = rec.network, rec.stiffness_trajectory, rec.task
+    nodes = net.nodes.astype(float)
+    mse1, mse2 = rec.loss.per_subtask.T
+    solver = rec.config.get("solver", "lammps") if rec.has("config") else "lammps"
 
-    solver = "lammps"
-    if (d / "training_meta.json").exists():
-        solver = json.loads((d / "training_meta.json").read_text()).get("solver", "lammps")
-
+    # Interim until K* lives in the record (#5): the trainer's stored best state.
     best_k = None
-    if (d / "best_stiffnesses.npy").exists():
-        best_k = np.abs(np.load(d / "best_stiffnesses.npy").astype(float))
+    if rec.has("best_so_far"):
+        best_k = np.abs(rec.best_so_far.stiffnesses.astype(float))
 
     # Precomputed post-training sweep, if it has been rsync'd down. When present
     # (and new enough to carry the per-subtask + combined cost-Hessian keys,
     # 2026-08-27+), the figure code reads its cost / elastic Hessian eigen-pairs
     # straight from here instead of recomputing locally -- see
     # allo_cost_hessian_at / _cost_hessian_from_sweep.
-    sweep = None
-    if (d / "timestep_sweep.npz").exists():
-        with np.load(d / "timestep_sweep.npz", allow_pickle=True) as z:
-            sweep = {k: z[k] for k in z.files}
+    sweep = rec.sweep if rec.has("sweep") else None
 
     return dict(
         nodes=nodes,
-        incidence_matrix=incidence_matrix,
-        edges=_incmat_to_edges(incidence_matrix),
-        eq_lengths=np.load(d / "eq_lengths.npy").astype(float),
-        stiffnesses=np.abs(np.load(d / "stiffnesses.npy").astype(float))
-        if (d / "stiffnesses.npy").exists() else None,
+        incidence_matrix=net.incidence_matrix,
+        edges=net.edges,
+        eq_lengths=net.eq_lengths.astype(float),
+        stiffnesses=np.abs(rec.current_stiffnesses.astype(float))
+        if rec.has("current_stiffnesses") else None,
         best_stiffnesses=best_k,
-        stiff_traj=np.abs(np.load(d / "stiffnesses_traj.npy").astype(float)),
-        stiff_traj_steps=np.load(d / "stiffnesses_traj_steps.npy").astype(int),
-        mse1=np.load(d / "mse1.npy").astype(float),
-        mse2=np.load(d / "mse2.npy").astype(float),
-        task_config=allo_task_config(nodes, tasks_vals),
+        stiff_traj=np.abs(traj.stiffnesses.astype(float)),
+        stiff_traj_steps=traj.steps.astype(int),
+        mse1=np.ascontiguousarray(mse1, dtype=float),
+        mse2=np.ascontiguousarray(mse2, dtype=float),
+        task_config=allo_task_config(
+            nodes, (task.geometry_seed, task.strain_output2, task.strain_output)),
         solver=solver,
         sweep=sweep,
         geometry_id=geometry_id, task_id=task_id, real_id=real_id,
-        dir=str(d),
+        dir=str(rec.run_dir),
     )
 
 
@@ -498,10 +494,11 @@ ENSEMBLE_AUX_FAMILY = "targeted"
 
 
 def _allo_ratio(gid, tid, rid) -> float:
-    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
-    if not (d / "mse1.npy").exists() or not (d / "mse2.npy").exists():
+    rec = _allo_record(gid, tid, rid)
+    if not rec.has("loss"):
         return np.inf
-    return convergence_ratio(np.load(d / "mse1.npy"), np.load(d / "mse2.npy"))
+    mse1, mse2 = rec.loss.per_subtask.T
+    return convergence_ratio(mse1, mse2)
 
 
 def _aux_ratio(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> float:
@@ -520,8 +517,7 @@ def _aux_dir(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> Path:
 
 def allo_realization_seed(gid, tid, rid) -> int:
     """Recorded realization seed of an allosteric run (``training_meta.json``)."""
-    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
-    return int(json.loads((d / "training_meta.json").read_text())["realization_seed"])
+    return _allo_record(gid, tid, rid).realization_seed
 
 
 def aux_realization_seed(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> int:
@@ -870,7 +866,7 @@ def allo_initial_stiffnesses(d):
     """
     if int(d["stiff_traj_steps"][0]) == 0:
         return d["stiff_traj"][0]
-    meta = json.loads((Path(d["dir"]) / "training_meta.json").read_text())
+    meta = RealizationRecord.open(d["dir"], kind="allosteric").config
     from base import initial_condition
     return initial_condition.contrastive(
         meta["realization_seed"], len(d["edges"]), meta["k_min"], meta["k_max"])

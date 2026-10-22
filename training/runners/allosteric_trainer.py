@@ -38,6 +38,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from base import initial_condition
+from base.realization_record import RealizationRecord
 import training.lammps_utils as f
 import training.jax_actuation as jx
 from training.src.run_provenance import (
@@ -265,38 +266,33 @@ def load_resume_state(output_path):
     """
     Return (stiffnesses, mse1, mse2, start_step) if a prior run exists, else None.
 
-    stiffnesses.npy is the primary source; stiffnesses_ckpt.npy + ckpt_step.txt
-    (written at each 500-step checkpoint) serve as a fallback if the primary file
-    contains NaNs (run diverged after the last clean save).
+    The realization record decides: the latest saved stiffnesses if NaN-free, else
+    the last NaN-free checkpoint (run diverged after its last clean save).
     """
-    stiff_path = os.path.join(output_path, 'stiffnesses.npy')
-    if not os.path.exists(stiff_path):
+    record = RealizationRecord.open(output_path, kind='allosteric')
+    state = record.resume_state()
+    if state is None:
+        if record.has('current_stiffnesses'):
+            print("  Resume: stiffnesses.npy contains NaNs and no clean checkpoint found; "
+                  "starting fresh.")
         return None
-
-    mse1_path = os.path.join(output_path, 'mse1.npy')
-    mse2_path = os.path.join(output_path, 'mse2.npy')
-    mse1 = np.load(mse1_path) if os.path.exists(mse1_path) else np.array([])
-    mse2 = np.load(mse2_path) if os.path.exists(mse2_path) else np.array([])
-
-    stiff = np.load(stiff_path)
-    if not np.any(np.isnan(stiff)):
-        start_step = len(mse1)
-        print(f"  Resume: found clean stiffnesses at step {start_step}.")
-        return stiff, mse1, mse2, start_step
-
-    # stiffnesses.npy has NaNs — fall back to last NaN-free checkpoint
-    ckpt_stiff_path = os.path.join(output_path, 'stiffnesses_ckpt.npy')
-    ckpt_step_path  = os.path.join(output_path, 'ckpt_step.txt')
-    if os.path.exists(ckpt_stiff_path) and os.path.exists(ckpt_step_path):
-        ckpt_stiff = np.load(ckpt_stiff_path)
-        ckpt_step  = int(np.loadtxt(ckpt_step_path))
+    if state.source == 'current':
+        print(f"  Resume: found clean stiffnesses at step {state.step}.")
+    else:
         print(f"  Resume: stiffnesses.npy contains NaNs; "
-              f"rolling back to checkpoint at step {ckpt_step}.")
-        return ckpt_stiff, mse1[:ckpt_step], mse2[:ckpt_step], ckpt_step
+              f"rolling back to checkpoint at step {state.step}.")
+    mse1, mse2 = (np.ascontiguousarray(c) for c in state.loss.per_subtask.T)
+    return state.stiffnesses, mse1, mse2, state.step
 
-    print("  Resume: stiffnesses.npy contains NaNs and no clean checkpoint found; "
-          "starting fresh.")
-    return None
+
+def load_best_so_far(output_path):
+    """(best_stiffnesses, best_combined_mse) carried across resumes, or (None, inf)."""
+    record = RealizationRecord.open(output_path, kind='allosteric')
+    if not record.has('best_so_far'):
+        return None, np.inf
+    best = record.best_so_far
+    print(f"  Best state    : combined_mse={best.training_loss:.4e} (loaded from disk)")
+    return best.stiffnesses, best.training_loss
 
 
 # ── Actuation evaluation (free + clamped actuation pair at fixed stiffnesses) ─
@@ -808,15 +804,8 @@ def main():
             print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
 
         # Load best state (survives resume across SLURM restarts)
-        best_path = os.path.join(output_path, 'best_stiffnesses.npy')
-        bmse_path = os.path.join(output_path, 'best_combined_mse.txt')
-        if os.path.exists(best_path) and os.path.exists(bmse_path):
-            best_stiffnesses  = np.load(best_path)
-            best_combined_mse = float(np.loadtxt(bmse_path))
-            print(f"  Best state    : combined_mse={best_combined_mse:.4e} (loaded from disk)")
-        else:
-            best_stiffnesses  = None   # _run_training_loop initialises from stiffnesses
-            best_combined_mse = np.inf
+        # (None, inf) when absent: _run_training_loop initialises from stiffnesses
+        best_stiffnesses, best_combined_mse = load_best_so_far(output_path)
 
         print(f"  Training steps: {training_steps:,}")
 
