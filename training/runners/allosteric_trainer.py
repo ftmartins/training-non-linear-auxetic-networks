@@ -112,8 +112,8 @@ def geometry_seed(gid: int) -> int:
 def task_rng(tid: int) -> np.random.RandomState:
     return np.random.RandomState(_TASK_BASE + tid)
 
-def realization_rng(rid: int) -> np.random.RandomState:
-    return initial_condition.realization_rng(rid)
+def realization_rng(seed: int) -> np.random.RandomState:
+    return initial_condition.realization_rng(seed)
 
 
 # ── Network creation (verbatim from notebook) ─────────────────────────────────
