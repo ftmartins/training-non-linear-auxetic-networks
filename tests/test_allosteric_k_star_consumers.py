@@ -99,9 +99,15 @@ class TestPostTrainingSweep(ConsumerTestCase):
         self.run_dir()
         np.testing.assert_array_equal(self.sweep_kwargs()['best_stiffnesses'], self.k_star())
 
-    def test_without_stored_best_sweeps_at_the_checkpoint_grid(self):
+    def test_without_stored_best_raises_before_sweeping(self):
         self.run_dir(best=False)
-        self.assertIsNone(self.sweep_kwargs()['best_stiffnesses'])
+        with self.assertRaises(MissingRecordPart):
+            self.sweep_kwargs()
+
+    def test_undetermined_k_star_raises_before_sweeping(self):
+        self.run_dir(started='2026-08-01T00:00:00')
+        with self.assertRaises(BestLossUndetermined):
+            self.sweep_kwargs()
 
 
 class TestAug26CostHessianAtKStar(ConsumerTestCase):

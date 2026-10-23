@@ -115,18 +115,12 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
     steps             = record.stiffness_trajectory.steps
     mse1, mse2        = (np.ascontiguousarray(c) for c in record.loss.per_subtask.T)
 
-    # Evaluate the 'after' cost Hessian at the trainer's true lowest-loss K*
-    # (best_stiffnesses.npy) rather than the coarse checkpoint-grid argmin
-    # stiffness_traj[t_indices[-1]] -- they differ for ~23% of converged
-    # realizations (best_stiffnesses_audit.md). Absent (older runs) -> None ->
-    # sweep_allosteric keeps the old checkpoint-grid behavior.
-    best_stiffnesses = None
-    if record.has('best_so_far'):
-        best_stiffnesses = record.best_so_far.stiffnesses
-        print(f"  cost_hessian_after: at best_stiffnesses.npy (lowest-loss K*)", flush=True)
-    else:
-        print(f"  cost_hessian_after: best_stiffnesses.npy absent -> "
-              f"stiffness_traj[t_indices[-1]] (checkpoint-grid argmin)", flush=True)
+    # Evaluate the 'after' cost Hessian at the best-loss stiffnesses K* (ADR 0004), never
+    # at the coarse checkpoint-grid argmin stiffness_traj[t_indices[-1]] -- they differ
+    # for ~23% of converged realizations (best_stiffnesses_audit.md). The record raises
+    # when K* cannot be determined, so no sweep is written for such a run.
+    best_stiffnesses = record.best_loss_stiffnesses
+    print(f"  cost_hessian_after: at K* (step {record.best_loss_step})", flush=True)
 
     strain_output, strain_output2 = record.task.strain_output, record.task.strain_output2
     tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
