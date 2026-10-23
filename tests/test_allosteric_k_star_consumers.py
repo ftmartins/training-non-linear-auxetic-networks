@@ -82,9 +82,13 @@ class TestZSweepOperatingStiffness(ConsumerTestCase):
     def test_is_k_star(self):
         np.testing.assert_array_equal(Z._allo_operating_k(self.loaded()), self.k_star())
 
-    def test_without_stored_best_falls_back_to_the_final_snapshot(self):
-        d = self.loaded(best=False)
-        np.testing.assert_array_equal(Z._allo_operating_k(d), d['stiff_traj'][-1])
+    def test_without_stored_best_raises(self):
+        with self.assertRaises(MissingRecordPart):
+            Z._allo_operating_k(self.loaded(best=False))
+
+    def test_undetermined_k_star_raises(self):
+        with self.assertRaises(BestLossUndetermined):
+            Z._allo_operating_k(self.loaded(started='2026-08-01T00:00:00'))
 
 
 class TestPostTrainingSweep(ConsumerTestCase):

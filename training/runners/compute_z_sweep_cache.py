@@ -196,8 +196,9 @@ def _rho_summary(rows):
 
 
 def _allo_operating_k(d):
-    """Stiffnesses the allosteric susceptibilities and cost Hessian are evaluated at."""
-    return d["best_stiffnesses"] if d["best_stiffnesses"] is not None else d["stiff_traj"][-1]
+    """Stiffnesses the allosteric susceptibilities and cost Hessian are evaluated at: K*,
+    raising when it cannot be determined (never the final snapshot)."""
+    return C.allo_best_loss_stiffness(d)
 
 
 def compute_one(r, exp_root, allo_solver):
