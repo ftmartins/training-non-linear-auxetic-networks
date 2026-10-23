@@ -9,7 +9,6 @@ figure code uses instead (the read golden pins its digest).
 
 Run: GOLDEN=1 python -m unittest tests.golden.test_initial_condition
 """
-import json
 import unittest
 
 import numpy as np
@@ -21,12 +20,17 @@ from tests.golden import sample
 @skip_unless_golden
 class TestAllostericInitialCondition(unittest.TestCase):
     def test_trainer_draw_matches_figure_regeneration(self):
-        from tests.golden.readers import A, _value, allosteric_trainer as T
+        from base.realization_record import RealizationRecord
+        from tests.golden.readers import A, allosteric_trainer as T
         for geometry, task, real, why in sample.ALLOSTERIC:
             with self.subTest(sample.allosteric_name(geometry, task, real), why=why):
-                d = _value(A.load_allosteric, geometry, task, real)
-                meta = json.loads((A._allo_geom_dir(geometry) / f'task_{task}'
-                                   / f'realization_{real}' / 'training_meta.json').read_text())
+                # The parts allo_initial_stiffnesses uses, straight from the record, so runs
+                # load_allosteric refuses (stale sweep, undetermined K*) are still checked.
+                rec = RealizationRecord.locate(A.ALLO_DATA_DIR, 'allosteric', (geometry, task), real)
+                d = dict(edges=rec.network.edges, dir=str(rec.run_dir),
+                         stiff_traj=rec.stiffness_trajectory.stiffnesses,
+                         stiff_traj_steps=rec.stiffness_trajectory.steps)
+                meta = rec.config
                 self.assertEqual((meta['k_min'], meta['k_max']), (T.K_MIN, T.K_MAX))
                 drawn = T.realization_rng(int(meta['realization_seed'])).uniform(
                     T.K_MIN, T.K_MAX, size=len(d['edges']))
