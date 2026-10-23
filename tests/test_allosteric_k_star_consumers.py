@@ -25,7 +25,8 @@ for _p in (_ROOT, _ROOT / 'training' / 'runners', _ROOT / 'analysis' / 'notebook
 import aug26_common as A  # noqa: E402
 import compute_z_sweep_cache as Z  # noqa: E402
 from training.runners import post_training_sweep as P  # noqa: E402
-from base.realization_record import BestLossUndetermined, MissingRecordPart  # noqa: E402
+from base.realization_record import (  # noqa: E402
+    BestLossUndetermined, MissingRecordPart, StaleSweep)
 from tests.test_realization_record import write_allosteric_run, TRAJ_STEPS, BEST_STEP  # noqa: E402
 
 TASK, REAL = 0, 3
@@ -140,9 +141,13 @@ class TestAug26CostHessianAtKStar(ConsumerTestCase):
 
 
 class TestAug26StaleSweep(ConsumerTestCase):
-    def test_sweep_without_k_star_after_hessian_is_read(self):
-        d = self.loaded(sweep=True)
-        self.assertEqual(sorted(d['sweep']), ['a', 'b'])
+    def test_sweep_at_k_star_is_read(self):
+        d = self.loaded(sweep='at_k_star')
+        np.testing.assert_array_equal(d['sweep']['cost_hessian_after_stiffness'], self.k_star())
+
+    def test_sweep_without_k_star_after_hessian_raises(self):
+        with self.assertRaises(StaleSweep):
+            self.loaded(sweep='stale')
 
 
 if __name__ == '__main__':

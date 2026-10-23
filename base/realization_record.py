@@ -14,7 +14,8 @@ Arrays come back exactly as stored (no abs, no casts), so callers that transform
 doing so themselves.
 
 Best-loss stiffnesses (K*, ADR 0004) are read only here, as rec.best_loss_stiffnesses and
-rec.best_loss_step. They raise BestLossUndetermined rather than fall back to anything else.
+rec.best_loss_step. They raise BestLossUndetermined rather than fall back to anything else,
+and a sweep whose after cost Hessian is not at K* raises StaleSweep.
 
 Each on-disk layout is a private reader class behind the record. Layouts so far:
   * allosteric (allosteric_trainer, the _aug tree): nodes / incidence_matrix / eq_lengths,
@@ -49,6 +50,11 @@ class MissingRecordPart(FileNotFoundError):
 
 class BestLossUndetermined(ValueError):
     """The stored data do not determine the best-loss stiffnesses exactly (ADR 0004)."""
+
+
+class StaleSweep(ValueError):
+    """The post-training sweep's after cost Hessian was not evaluated at K* (sweeps made
+    before 2026-09-10); it must be recomputed, not read (ADR 0004)."""
 
 
 @dataclass(frozen=True)
@@ -239,8 +245,16 @@ class RealizationRecord:
 
     @cached_property
     def sweep(self):
-        """Post-training sweep arrays (dict of name -> array)."""
-        return self._reader.sweep()
+        """Post-training sweep arrays (dict of name -> array). Raises StaleSweep when its
+        after cost Hessian was not evaluated at K*, and BestLossUndetermined when K* itself
+        is undetermined."""
+        sweep = self._reader.sweep()
+        at = sweep.get('cost_hessian_after_stiffness')
+        k_star = np.asarray(self.best_loss_stiffnesses, float)
+        if at is None or not np.array_equal(np.asarray(at, float), k_star):
+            raise StaleSweep(f'{self.run_dir}: sweep after cost Hessian is not at K*; '
+                             f'recompute the sweep')
+        return sweep
 
     def resume_state(self):
         """ResumeState to continue training from, or None when there is nothing usable to

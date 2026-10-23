@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from base.realization_record import (
-    RealizationRecord, MissingRecordPart, NotARealization, BestLossUndetermined)
+    RealizationRecord, MissingRecordPart, NotARealization, BestLossUndetermined, StaleSweep)
 
 N_NODES, N_EDGES = 5, 4
 
@@ -54,8 +54,13 @@ def write_allosteric_run(d, meta=True, nan_current=False, ckpt_step=None, best=T
     if started is not None:
         (d / 'run_provenance.json').write_text(json.dumps(
             [{'timestamp': started}, {'timestamp': '2026-09-01T00:00:00'}]))
+    # sweep: 'at_k_star' (2026-09-10+, after Hessian at K*), 'stale' (older, no record of
+    # where the after Hessian was taken) or 'elsewhere' (after Hessian at another snapshot).
     if sweep:
-        np.savez(d / 'timestep_sweep.npz', a=np.arange(3), b=np.ones(2))
+        after = {'at_k_star': {'cost_hessian_after_stiffness': traj[1]},
+                 'elsewhere': {'cost_hessian_after_stiffness': traj[2]},
+                 'stale': {}}[sweep]
+        np.savez(d / 'timestep_sweep.npz', a=np.arange(3), b=np.ones(2), **after)
     return d
 
 
@@ -178,10 +183,22 @@ class TestParts(RecordTestCase):
         with self.assertRaises(MissingRecordPart):
             RealizationRecord.open(d).best_so_far
 
-    def test_sweep(self):
-        sweep = RealizationRecord.open(self.run_dir(sweep=True)).sweep
-        self.assertEqual(sorted(sweep), ['a', 'b'])
+    def test_sweep_at_k_star(self):
+        sweep = RealizationRecord.open(self.run_dir(sweep='at_k_star')).sweep
+        self.assertEqual(sorted(sweep), ['a', 'b', 'cost_hessian_after_stiffness'])
         np.testing.assert_array_equal(sweep['a'], np.arange(3))
+
+    def test_stale_sweep_raises(self):
+        with self.assertRaises(StaleSweep):
+            RealizationRecord.open(self.run_dir(sweep='stale')).sweep
+
+    def test_sweep_after_hessian_away_from_k_star_raises(self):
+        with self.assertRaises(StaleSweep):
+            RealizationRecord.open(self.run_dir(sweep='elsewhere')).sweep
+
+    def test_sweep_of_a_run_without_k_star_raises(self):
+        with self.assertRaises(BestLossUndetermined):
+            RealizationRecord.open(self.run_dir(sweep='at_k_star', started=None)).sweep
 
 
 class TestResumeState(RecordTestCase):

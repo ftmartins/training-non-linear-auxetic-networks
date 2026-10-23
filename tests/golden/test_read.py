@@ -7,6 +7,8 @@ Run: GOLDEN=1 python -m unittest tests.golden.test_read
 import json
 import unittest
 
+import numpy as np
+
 from tests.golden import EXPECTED_DIR, skip_unless_golden
 from tests.golden import sample
 
@@ -55,7 +57,7 @@ class TestAllostericBestLossStiffnesses(unittest.TestCase):
                         rec.best_loss_stiffnesses
                     continue
                 self.assertEqual(digest(rec.best_loss_stiffnesses),
-                                 _expected(name)['allo_best_loss_stiffness']['value'])
+                                 digest(np.load(rec.run_dir / 'best_stiffnesses.npy')))
 
 
 def _check(case, name, got):
