@@ -235,7 +235,9 @@ def load_allosteric(geometry_id, task_id, real_id) -> dict | None:
     """Load one allosteric realization from the ``_aug`` tree.
 
     Returns ``None`` if the realization directory or its essential files are
-    missing. Keys: ``nodes, incidence_matrix, edges, eq_lengths, stiffnesses,
+    missing; raises when K* (``best_stiffnesses``) is missing or undetermined, or the
+    sweep is stale (ADR 0004). ``stiffnesses`` are the latest saved (post-update) ones,
+    never K*. Keys: ``nodes, incidence_matrix, edges, eq_lengths, stiffnesses,
     best_stiffnesses, stiff_traj, stiff_traj_steps, mse1, mse2, task_config,
     solver, geometry_id, task_id, real_id, dir``.
     """
@@ -249,10 +251,9 @@ def load_allosteric(geometry_id, task_id, real_id) -> dict | None:
     mse1, mse2 = rec.loss.per_subtask.T
     solver = rec.config.get("solver", "lammps") if rec.has("config") else "lammps"
 
-    # Interim until K* lives in the record (#5): the trainer's stored best state.
-    best_k = None
-    if rec.has("best_so_far"):
-        best_k = np.abs(rec.best_so_far.stiffnesses.astype(float))
+    # best_stiffnesses is K*: raises (MissingRecordPart / BestLossUndetermined) rather than
+    # leave callers to fall back to the final or a checkpoint stiffness.
+    best_k = np.abs(rec.best_loss_stiffnesses.astype(float))
 
     # Precomputed post-training sweep, if it has been rsync'd down. When present
     # (and new enough to carry the per-subtask + combined cost-Hessian keys,

@@ -56,17 +56,33 @@ class ConsumerTestCase(unittest.TestCase):
                        / 'stiffnesses_traj.npy')[list(TRAJ_STEPS).index(BEST_STEP)]
 
 
+class TestAug26LoadAllosteric(ConsumerTestCase):
+    def test_best_stiffnesses_is_k_star(self):
+        np.testing.assert_array_equal(self.loaded()['best_stiffnesses'], self.k_star())
+
+    def test_without_stored_best_raises(self):
+        with self.assertRaises(MissingRecordPart):
+            self.loaded(best=False)
+
+    def test_undetermined_k_star_raises(self):
+        with self.assertRaises(BestLossUndetermined):
+            self.loaded(started='2026-08-01T00:00:00')
+
+
+def lose_best(d):
+    """d, with its run's stored best state deleted after loading."""
+    for name in ('best_stiffnesses.npy', 'best_combined_mse.txt'):
+        (Path(d['dir']) / name).unlink()
+    return d
+
+
 class TestAug26BestLossStiffness(ConsumerTestCase):
     def test_is_k_star(self):
         np.testing.assert_array_equal(A.allo_best_loss_stiffness(self.loaded()), self.k_star())
 
     def test_without_stored_best_raises(self):
+        d = lose_best(self.loaded())
         with self.assertRaises(MissingRecordPart):
-            A.allo_best_loss_stiffness(self.loaded(best=False))
-
-    def test_undetermined_k_star_raises(self):
-        d = self.loaded(started='2026-08-01T00:00:00')
-        with self.assertRaises(BestLossUndetermined):
             A.allo_best_loss_stiffness(d)
 
     def test_operating_point_without_sweep_is_k_star(self):
@@ -75,8 +91,9 @@ class TestAug26BestLossStiffness(ConsumerTestCase):
         np.testing.assert_array_equal(k, self.k_star())
 
     def test_operating_point_without_sweep_or_stored_best_raises(self):
+        d = lose_best(self.loaded())
         with self.assertRaises(MissingRecordPart):
-            A.allo_operating_point(self.loaded(best=False), 'best')
+            A.allo_operating_point(d, 'best')
 
 
 class TestZSweepOperatingStiffness(ConsumerTestCase):
@@ -84,12 +101,9 @@ class TestZSweepOperatingStiffness(ConsumerTestCase):
         np.testing.assert_array_equal(Z._allo_operating_k(self.loaded()), self.k_star())
 
     def test_without_stored_best_raises(self):
+        d = lose_best(self.loaded())
         with self.assertRaises(MissingRecordPart):
-            Z._allo_operating_k(self.loaded(best=False))
-
-    def test_undetermined_k_star_raises(self):
-        with self.assertRaises(BestLossUndetermined):
-            Z._allo_operating_k(self.loaded(started='2026-08-01T00:00:00'))
+            Z._allo_operating_k(d)
 
 
 class TestPostTrainingSweep(ConsumerTestCase):
