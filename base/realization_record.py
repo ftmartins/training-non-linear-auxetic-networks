@@ -17,6 +17,9 @@ Best-loss stiffnesses (K*, ADR 0004) are read only here, as rec.best_loss_stiffn
 rec.best_loss_step. They raise BestLossUndetermined rather than fall back to anything else,
 and a sweep whose after cost Hessian is not at K* raises StaleSweep.
 
+Trainers write through the record too (write_network, write_task, save_checkpoint,
+save_final, wipe), so the layout lives only here.
+
 Each on-disk layout is a private reader class behind the record. Layouts so far:
   * allosteric (allosteric_trainer, the _aug tree): nodes / incidence_matrix / eq_lengths,
     tasks.txt (geometry_seed, strain_output2, strain_output), mse1 / mse2 per step,
@@ -25,6 +28,7 @@ Each on-disk layout is a private reader class behind the record. Layouts so far:
     training_meta.json, timestep_sweep.npz.
 """
 import json
+import shutil
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -261,6 +265,41 @@ class RealizationRecord:
         resume (no saved stiffnesses, or NaN stiffnesses and no clean checkpoint)."""
         return self._reader.resume_state()
 
+    # ── Write side: every write goes through these, in the realization's own layout ──
+
+    def refresh(self):
+        """Forget parts read so far, so the next access sees what is on disk now."""
+        for name in [*PARTS, '_best_loss']:
+            self.__dict__.pop(name, None)
+
+    def wipe(self):
+        """Delete everything stored for this realization and start an empty directory."""
+        shutil.rmtree(self.run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.refresh()
+
+    def write_network(self, network):
+        self._reader.write_network(network)
+        self.refresh()
+
+    def write_task(self, task):
+        self._reader.write_task(task)
+        self.refresh()
+
+    def save_checkpoint(self, step, current_stiffnesses, loss, measured_stiffnesses, best=None):
+        """Save training progress at `step` (steps completed). current_stiffnesses is the
+        post-update state training continues from; measured_stiffnesses the pre-update
+        state the last loss entry was measured at, appended to the stiffness trajectory;
+        best (a BestSoFar) only when it changed since the last checkpoint."""
+        self._reader.save_checkpoint(step, current_stiffnesses, loss, measured_stiffnesses, best)
+        self.refresh()
+
+    def save_final(self, current_stiffnesses, loss, best):
+        """Save the state an invocation ends with. best is a BestSoFar, or None when the run
+        never had one."""
+        self._reader.save_final(current_stiffnesses, loss, best)
+        self.refresh()
+
 
 def _fits(traj, n_steps):
     """Whether a stiffness trajectory pairs with an n_steps loss trajectory: one snapshot per
@@ -372,6 +411,53 @@ class _AllostericReader:
             return ResumeState(step, np.load(ckpt_path),
                                self._loss(mse1[:step], mse2[:step]), 'checkpoint')
         return None
+
+    # Writes, byte-for-byte what allosteric_trainer wrote before the record existed.
+
+    def write_network(self, network):
+        np.save(self.d / 'nodes.npy', network.nodes)
+        np.save(self.d / 'incidence_matrix.npy', network.incidence_matrix)
+        np.save(self.d / 'eq_lengths.npy', network.eq_lengths)
+
+    def write_task(self, task):
+        np.savetxt(self.d / 'tasks.txt',
+                   [task.geometry_seed, task.strain_output2, task.strain_output])
+
+    def _save_loss(self, loss):
+        np.save(self.d / 'mse1.npy', np.ascontiguousarray(loss.per_subtask[:, 0]))
+        np.save(self.d / 'mse2.npy', np.ascontiguousarray(loss.per_subtask[:, 1]))
+
+    def _save_best(self, best):
+        np.save(self.d / 'best_stiffnesses.npy', best.stiffnesses)
+        np.savetxt(self.d / 'best_combined_mse.txt', [best.training_loss])
+
+    def save_checkpoint(self, step, current_stiffnesses, loss, measured_stiffnesses, best):
+        np.save(self.d / 'stiffnesses.npy', current_stiffnesses)
+        self._save_loss(loss)
+        if not np.any(np.isnan(current_stiffnesses)):
+            np.save(self.d / 'stiffnesses_ckpt.npy', current_stiffnesses)
+            np.savetxt(self.d / 'ckpt_step.txt', [step], fmt='%d')
+        if best is not None:
+            self._save_best(best)
+        # The snapshot pairs with its own loss index (the entry just measured), not `step`.
+        traj_path, steps_path = self.d / 'stiffnesses_traj.npy', self.d / 'stiffnesses_traj_steps.npy'
+        if traj_path.exists() and steps_path.exists():
+            traj = np.vstack([np.load(traj_path), measured_stiffnesses])
+            steps = np.append(np.load(steps_path), loss.n_steps - 1)
+        else:
+            traj = measured_stiffnesses[np.newaxis, :]
+            steps = np.array([loss.n_steps - 1])
+        np.save(traj_path, traj)
+        np.save(steps_path, steps)
+
+    def save_final(self, current_stiffnesses, loss, best):
+        np.save(self.d / 'stiffnesses.npy', current_stiffnesses)
+        if best is None:
+            # As before the record: a run that never had a best state stores None and inf.
+            best = BestSoFar(None, np.inf)
+        np.save(self.d / 'best_stiffnesses.npy', best.stiffnesses)
+        self._save_loss(loss)
+        np.savetxt(self.d / 'best_combined_mse.txt', [best.training_loss])
 
 
 _READERS = {'allosteric': _AllostericReader}

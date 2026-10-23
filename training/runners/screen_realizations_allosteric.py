@@ -27,6 +27,7 @@ if _ROOT not in sys.path:
 
 import numpy as np
 
+from base.realization_record import RealizationRecord
 from training.runners.allosteric_trainer import (
     K_MIN, K_MAX, ETA, LEARNING_RATE, DEFAULT_SOLVER,
     STRAIN_INPUT, STRAIN_INPUT2, NSTEPS_TASK1, NSTEPS_TASK2,
@@ -70,7 +71,8 @@ def run_one(kind, task_id, geometry_id, candidate_idx, results_dir):
     os.chdir(work_dir)
     try:
         gseed = _TARGETED_GEOMETRY_SEED if targeted else geometry_seed(geometry_id)
-        nodes, incidence_matrix, eq_lengths = load_or_create_geometry(geom_dir, gseed)
+        nodes, incidence_matrix, eq_lengths = load_or_create_geometry(
+            RealizationRecord.open(geom_dir, kind='allosteric'), gseed)
 
         if targeted:
             strain_output = TARGETED_ENSEMBLE[task_id]['strain_output']
@@ -98,7 +100,8 @@ def run_one(kind, task_id, geometry_id, candidate_idx, results_dir):
         msearray, msearray2, final_stiffnesses, best_stiffnesses, best_combined_mse = _run_training_loop(
             nodes, incidence_matrix, eq_lengths, stiffnesses,
             LEARNING_RATE, tod, tod2, dinputdistance, dinputdistance2,
-            NSTEPS_TASK1, NSTEPS_TASK2, N_STEPS, candidate_out,
+            NSTEPS_TASK1, NSTEPS_TASK2, N_STEPS,
+            RealizationRecord.open(candidate_out, kind='allosteric').save_checkpoint,
             solver=DEFAULT_SOLVER,
         )
         dt = time.time() - t0
