@@ -135,6 +135,7 @@ ALLOSTERIC_SCENARIOS = {
     'extend_60_to_120': [(60, {}, {}), (120, {}, {})],
     'killed_at_step_55_then_resumed_to_120': [(120, {'raise_at': 110}, {}), (120, {}, {})],
     'nan_at_step_52_then_resumed_to_60': [(60, {'nan_at': 104}, {}), (60, {}, {})],
+    'nan_at_step_52': [(60, {'nan_at': 104}, {})],
     'lr_change_without_overwrite': [(60, {}, {}), (60, {}, {'learning_rate': 5.0})],
     'lr_change_with_overwrite': [(60, {}, {}),
                                  (60, {}, {'learning_rate': 5.0, 'overwrite': True})],

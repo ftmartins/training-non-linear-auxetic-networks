@@ -438,7 +438,9 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                        solver=DEFAULT_SOLVER, stop_rule=ALLOSTERIC_STOP_RULE):
     """Train for up to n_steps steps. on_checkpoint(step, current_stiffnesses, loss,
     measured_stiffnesses, best) saves progress (RealizationRecord.save_checkpoint); it is
-    called every 50 global steps, on the first step of a fresh run, and on early stop."""
+    called every 50 global steps, on the first step of a fresh run, and on early stop.
+    Returns (mse1, mse2, stiffnesses, best_stiffnesses, best_combined_mse, diverged);
+    diverged is True when a NaN loss or update stopped training."""
     if msearray  is None: msearray  = np.array([])
     if msearray2 is None: msearray2 = np.array([])
     if best_stiffnesses is None:
@@ -449,6 +451,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
     update_mag = np.nan
 
     best_updated = False
+    diverged = False
 
     pbar = tqdm(range(n_steps),
                 desc=f'(mse1={np.nan:.4e}, mse2={np.nan:.4e}, best_combined={best_combined_mse:.4e}), updated_mag={update_mag:.4e}')
@@ -499,7 +502,14 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         # reloaded on resume, so lr_scale needs no separate persisted state.
         lr_scale, _ = lr_schedule.lr_scale_for_step((msearray + msearray2) / 2.0)
         current_lr = learning_rate * lr_scale
-        stiffnesses = np.clip(stiffnesses + current_lr * (delta_K1 + delta_K2), K_MIN, K_MAX)
+        updated = np.clip(stiffnesses + current_lr * (delta_K1 + delta_K2), K_MIN, K_MAX)
+        if np.isnan(mse) or np.isnan(mse2) or np.any(np.isnan(updated)):
+            # A diverged step is discarded and training stops: the state stays at the
+            # start of this step, so a resume retries exactly from there.
+            print(f"  NaN at step {step_offset + j + 1}: loss=({mse}, {mse2}); stopping.")
+            diverged = True
+            break
+        stiffnesses = updated
 
         update_mag = np.mean(np.log10(np.abs(current_lr * (delta_K1 + delta_K2))))
 
@@ -539,7 +549,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
             print(f"  Early stop at step {global_step}: both tasks converged.")
             break
 
-    return msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse
+    return msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse, diverged
 
 
 # ── Success check ─────────────────────────────────────────────────────────────
@@ -613,7 +623,7 @@ class AllostericTrainer:
         print('Learning rate: ', self.learning_rate)
         mse1, mse2 = (np.ascontiguousarray(c) for c in state.loss.per_subtask.T)
         best = state.best
-        msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
+        msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse, diverged = \
             _run_training_loop(
                 self.nodes, self.incidence_matrix, self.eq_lengths, state.stiffnesses,
                 self.learning_rate, self.tod, self.tod2,
@@ -624,9 +634,12 @@ class AllostericTrainer:
                 best_combined_mse=np.inf if best is None else best.training_loss,
                 solver=self.solver, stop_rule=stop_rule)
         loss = Loss(np.column_stack([msearray, msearray2]))
-        status = ('converged'
-                  if stop_rule.reached((msearray[0], msearray2[0]), (msearray[-1], msearray2[-1]))
-                  else 'steps_exhausted')
+        if diverged:
+            status = 'nan'
+        elif stop_rule.reached((msearray[0], msearray2[0]), (msearray[-1], msearray2[-1])):
+            status = 'converged'
+        else:
+            status = 'steps_exhausted'
         return TrainResult(
             TrainState(len(msearray), stiffnesses, loss,
                        BestSoFar(best_stiffnesses, best_combined_mse)),
@@ -740,6 +753,9 @@ def main():
     finally:
         os.chdir(original_dir)
         shutil.rmtree(work_dir, ignore_errors=True)
+    if outcome.status == 'nan':
+        print(f"Training stopped on a NaN at step {outcome.state.step}; the run fails.")
+        sys.exit(1)
 
 
 if __name__ == '__main__':

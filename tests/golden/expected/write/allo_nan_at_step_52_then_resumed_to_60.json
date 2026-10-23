@@ -151,7 +151,7 @@
   }
  },
  "outcomes": [
-  "ok",
+  "SystemExit: 1",
   "ok"
  ]
 }
