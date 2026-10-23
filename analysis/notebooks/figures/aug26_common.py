@@ -549,12 +549,32 @@ def _best_distinct_seeds(cands, n_best) -> list[int]:
     return sorted(best)
 
 
+def allo_trajectory_consistent(gid, tid, rid) -> bool:
+    """Whether the run's stiffness trajectory pairs with its loss trajectory: snapshot steps
+    in range and never going backwards, a step repeated only with an identical snapshot.
+    Steps going backwards mean two jobs appended to one run directory, so its best-loss
+    stiffnesses are undetermined (ADR 0004)."""
+    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
+    steps = np.load(d / "stiffnesses_traj_steps.npy")
+    k = np.load(d / "stiffnesses_traj.npy")
+    n_steps = len(np.load(d / "mse1.npy"))
+    if len(steps) != len(k) or (len(steps) and not 0 <= steps[0] <= steps[-1] < n_steps):
+        return False
+    gaps = np.diff(steps)
+    return not np.any(gaps < 0) and all(np.array_equal(k[i], k[i + 1])
+                                        for i in np.nonzero(gaps == 0)[0])
+
+
 def figure_ensemble_allosteric(n_best: int = ENSEMBLE_N_ALLO) -> list[tuple]:
     """Canonical allosteric ensemble: ``(geometry_id, task_id, real_id)`` triples,
     the ``n_best`` lowest-ratio converged realizations with distinct realization
-    seeds of every (geometry, task)."""
+    seeds of every (geometry, task). Runs whose stiffness trajectory is inconsistent
+    (``allo_trajectory_consistent``) are left out, so the next distinct-seed spare
+    takes their place."""
     by_cell: dict = {}
     for gid, tid, rid in discover_allosteric("all", None):
+        if not allo_trajectory_consistent(gid, tid, rid):
+            continue
         by_cell.setdefault((gid, tid), []).append(
             (_allo_ratio(gid, tid, rid), rid, allo_realization_seed(gid, tid, rid)))
     out = []
