@@ -115,14 +115,28 @@ class TestPostTrainingSweep(ConsumerTestCase):
 
 
 class TestAug26CostHessianAtKStar(ConsumerTestCase):
-    def test_without_sweep_recomputes_with_jax_fire_for_a_lammps_run(self):
-        d = self.loaded()
-        d['solver'] = 'lammps'
+    def recompute(self, d, k):
         with mock.patch.object(A, 'allo_per_task_cost_hessian',
                                return_value='recomputed') as recompute:
-            self.assertEqual(A.allo_cost_hessian_at(d, A.allo_best_loss_stiffness(d)),
-                             'recomputed')
+            out = A.allo_cost_hessian_at(d, k)
         recompute.assert_called_once()
+        return out
+
+    def test_without_sweep_raises_for_a_lammps_run(self):
+        d = self.loaded()
+        d['solver'] = 'lammps'
+        with self.assertRaises(A.CostHessianSolverMismatch):
+            self.recompute(d, A.allo_best_loss_stiffness(d))
+
+    def test_without_sweep_recomputes_for_a_jax_fire_run(self):
+        d = self.loaded()
+        d['solver'] = 'jax_fire'
+        self.assertEqual(self.recompute(d, A.allo_best_loss_stiffness(d)), 'recomputed')
+
+    def test_away_from_k_star_still_recomputes_for_a_lammps_run(self):
+        d = self.loaded()
+        d['solver'] = 'lammps'
+        self.assertEqual(self.recompute(d, d['stiff_traj'][0]), 'recomputed')
 
 
 class TestAug26StaleSweep(ConsumerTestCase):
