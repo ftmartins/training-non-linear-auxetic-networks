@@ -806,14 +806,9 @@ def _sweep_cost_hessian_stiffness(d, end):
 
 
 def allo_best_loss_stiffness(d) -> np.ndarray:
-    """Lowest-loss stiffness vector for an allosteric realization.
-
-    Prefers ``best_stiffnesses.npy`` -- the trainer's per-logged-step
-    argmin-``0.5*(mse1+mse2)`` snapshot (verified against ``best_combined_mse.txt``
-    for every targeted+general realization). Falls back to the coarse
-    checkpoint-grid proxy ``stiff_traj[argmin(mse1+mse2 at checkpoints)]`` (==
-    ``select_steps(...)[0][-1]``, since ``select_loss_threshold_steps`` always
-    puts the checkpoint argmin last) only when ``best_stiffnesses`` is absent.
+    """Best-loss stiffnesses K* of an allosteric realization, from its realization record
+    (ADR 0004). Raises when the record cannot determine K* -- never falls back to a
+    checkpoint.
 
     NOTE this is deliberately NOT ``allo_operating_point``: for ~23% of converged
     sweep-having realizations the sweep's after-checkpoint stiffness lands one
@@ -823,10 +818,8 @@ def allo_best_loss_stiffness(d) -> np.ndarray:
     Hessian whenever the sweep's after Hessian was evaluated at K* (2026-09-10+
     sweeps, ``cost_hessian_after_stiffness``), and recomputes locally otherwise.
     """
-    if d.get("best_stiffnesses") is not None:
-        return np.asarray(d["best_stiffnesses"], float)
-    ti, _ = select_steps(d["mse1"], d["mse2"], d["stiff_traj_steps"])
-    return np.asarray(d["stiff_traj"][ti[-1]], float)
+    return np.asarray(
+        RealizationRecord.open(d["dir"], kind="allosteric").best_loss_stiffnesses, float)
 
 
 def allo_operating_point(d, at="best"):
@@ -836,8 +829,8 @@ def allo_operating_point(d, at="best"):
     before/after cost Hessian was evaluated at (``tag`` 'before'/'after'; K* for
     2026-09-10+ after Hessians, else the checkpoint) so the cost Hessian is
     sweep-served and any susceptibility computed at ``k_vec`` is evaluated at
-    the same configuration. Otherwise: ``at='best'`` -> ``best_stiffnesses``
-    (fallback ``stiff_traj[ti[-1]]``), ``at='before'`` -> ``stiff_traj[ti[0]]``.
+    the same configuration. Otherwise: ``at='best'`` -> K* (``allo_best_loss_stiffness``,
+    raises when undetermined), ``at='before'`` -> ``stiff_traj[ti[0]]``.
     """
     end = "after" if at in ("best", "after") else "before"
     k_sweep = _sweep_cost_hessian_stiffness(d, end)
@@ -846,9 +839,9 @@ def allo_operating_point(d, at="best"):
     from analysis.timestep_sweep import _select_local_threshold_indices
     ti, _ = _select_local_threshold_indices(
         d["stiff_traj_steps"], d["mse1"], d["mse2"], CFG.n_thresh_steps, CFG.eps_min)
-    if at in ("best", "after") and d.get("best_stiffnesses") is not None:
-        return d["best_stiffnesses"], "best"
-    return d["stiff_traj"][ti[-1] if end == "after" else ti[0]], at
+    if at in ("best", "after"):
+        return allo_best_loss_stiffness(d), "best"
+    return d["stiff_traj"][ti[0]], at
 
 
 def allo_initial_stiffnesses(d):

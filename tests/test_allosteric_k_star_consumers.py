@@ -25,6 +25,7 @@ for _p in (_ROOT, _ROOT / 'training' / 'runners', _ROOT / 'analysis' / 'notebook
 import aug26_common as A  # noqa: E402
 import compute_z_sweep_cache as Z  # noqa: E402
 from training.runners import post_training_sweep as P  # noqa: E402
+from base.realization_record import BestLossUndetermined, MissingRecordPart  # noqa: E402
 from tests.test_realization_record import write_allosteric_run, TRAJ_STEPS, BEST_STEP  # noqa: E402
 
 TASK, REAL = 0, 3
@@ -58,16 +59,23 @@ class TestAug26BestLossStiffness(ConsumerTestCase):
     def test_is_k_star(self):
         np.testing.assert_array_equal(A.allo_best_loss_stiffness(self.loaded()), self.k_star())
 
-    def test_without_stored_best_falls_back_to_a_checkpoint(self):
-        d = self.loaded(best=False)
-        k = A.allo_best_loss_stiffness(d)
-        self.assertTrue(any(np.array_equal(k, row) for row in d['stiff_traj']))
+    def test_without_stored_best_raises(self):
+        with self.assertRaises(MissingRecordPart):
+            A.allo_best_loss_stiffness(self.loaded(best=False))
 
-    def test_operating_point_without_sweep_or_stored_best_falls_back_to_a_checkpoint(self):
-        d = self.loaded(best=False)
-        k, tag = A.allo_operating_point(d, 'best')
+    def test_undetermined_k_star_raises(self):
+        d = self.loaded(started='2026-08-01T00:00:00')
+        with self.assertRaises(BestLossUndetermined):
+            A.allo_best_loss_stiffness(d)
+
+    def test_operating_point_without_sweep_is_k_star(self):
+        k, tag = A.allo_operating_point(self.loaded(), 'best')
         self.assertEqual(tag, 'best')
-        self.assertTrue(any(np.array_equal(k, row) for row in d['stiff_traj']))
+        np.testing.assert_array_equal(k, self.k_star())
+
+    def test_operating_point_without_sweep_or_stored_best_raises(self):
+        with self.assertRaises(MissingRecordPart):
+            A.allo_operating_point(self.loaded(best=False), 'best')
 
 
 class TestZSweepOperatingStiffness(ConsumerTestCase):

@@ -1,12 +1,6 @@
 {
  "allo_best_loss_stiffness": {
-  "value": {
-   "__nd__": "<f8",
-   "sha256": "4aa179430ccf8a553fd3e4727f66e1476f90e601440e56fec86e27f5897cdf76",
-   "shape": [
-    248
-   ]
-  }
+  "raises": "BestLossUndetermined: <repo>/data/allosteric_nets_aug/geometry_4/task_4/realization_2: stiffness trajectory does not fit the loss trajectory"
  },
  "allo_initial_stiffnesses": {
   "value": {
