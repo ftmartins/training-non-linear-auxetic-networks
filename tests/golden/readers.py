@@ -9,7 +9,7 @@ import sys
 import warnings
 
 from tests.golden import REPO_ROOT, DATA_ROOT
-from tests.golden.digest import digest
+from tests.golden.digest import digest, portable
 
 for _p in (REPO_ROOT, REPO_ROOT / 'training' / 'runners',
            REPO_ROOT / 'analysis' / 'notebooks' / 'figures'):
@@ -29,8 +29,8 @@ def outcome(fn, *args, **kwargs):
         try:
             out = {'value': digest(fn(*args, **kwargs))}
         except Exception as e:  # noqa: BLE001 - the exception is the pinned behaviour
-            out = {'raises': f'{type(e).__name__}: {e}'}
-    msgs = sorted({f'{w.category.__name__}: {w.message}' for w in caught
+            out = {'raises': portable(f'{type(e).__name__}: {e}')}
+    msgs = sorted({portable(f'{w.category.__name__}: {w.message}') for w in caught
                    if not issubclass(w.category, DeprecationWarning)})
     if msgs:
         out['warnings'] = msgs

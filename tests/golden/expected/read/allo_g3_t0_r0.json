@@ -61,7 +61,7 @@
       258
      ]
     },
-    "dir": "/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/allosteric_nets_aug/geometry_3/task_0/realization_0",
+    "dir": "<repo>/data/allosteric_nets_aug/geometry_3/task_0/realization_0",
     "edges": {
      "__nd__": "<i8",
      "sha256": "ff839956cbeaa37e3af8af4d1ce2a7cefe8d751c162886bcd31594f05b32977b",

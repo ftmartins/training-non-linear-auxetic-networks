@@ -168,7 +168,7 @@
       }
      }
     },
-    "dir": "/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/auxetic_nets_aug/targeted/task_02/realization_09",
+    "dir": "<repo>/data/auxetic_nets_aug/targeted/task_02/realization_09",
     "loss_traj": {
      "__nd__": "<f8",
      "sha256": "c709e0885093519c0b40517206e70655767ce450e9c56c18efe77a31dfe37684",

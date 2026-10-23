@@ -5,11 +5,20 @@ Arrays become (dtype, shape, sha256 of the C-contiguous bytes), floats their rep
 objects their class name plus the digest of their attributes. Two values with equal
 digests are bit-identical as far as any caller can observe; this is what the golden
 tests compare, so the stored expectations stay small and never contain data.
+Paths inside the checkout are written relative to <repo>, so the goldens hold in any
+checkout or worktree.
 """
 import hashlib
 from pathlib import Path
 
 import numpy as np
+
+from tests.golden import REPO_ROOT
+
+
+def portable(text):
+    """text with this checkout's absolute path replaced by <repo>."""
+    return text.replace(str(REPO_ROOT), '<repo>')
 
 
 def _array(a):
@@ -21,8 +30,10 @@ def _array(a):
 
 
 def digest(x):
-    if x is None or isinstance(x, (bool, str)):
+    if x is None or isinstance(x, bool):
         return x
+    if isinstance(x, str):
+        return portable(x)
     if isinstance(x, (int, np.integer)) and not isinstance(x, bool):
         return {'__int__': type(x).__name__, 'v': int(x)}
     if isinstance(x, (float, np.floating)):
@@ -30,7 +41,7 @@ def digest(x):
     if isinstance(x, np.ndarray):
         return _array(x)
     if isinstance(x, Path):
-        return {'__path__': str(x)}
+        return {'__path__': portable(str(x))}
     if isinstance(x, dict):
         return {'__dict__': {str(k): digest(v) for k, v in sorted(x.items(), key=lambda kv: str(kv[0]))}}
     if isinstance(x, (list, tuple)):

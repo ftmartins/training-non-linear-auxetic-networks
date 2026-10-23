@@ -1,6 +1,6 @@
 {
  "aux_network_fingerprint": {
-  "raises": "FileNotFoundError: [Errno 2] No such file or directory: '/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/auxetic_nets_aug/general/task_02/realization_05/final_network.pkl'"
+  "raises": "FileNotFoundError: [Errno 2] No such file or directory: '<repo>/data/auxetic_nets_aug/general/task_02/realization_05/final_network.pkl'"
  },
  "aux_realization_seed": {
   "value": {
@@ -9,7 +9,7 @@
   }
  },
  "data_io.load_auxetic_network": {
-  "raises": "FileNotFoundError: [Errno 2] No such file or directory: '/Users/fmartins/Library/CloudStorage/Box-Box/PhD/nonlinear_mech_nets_refactor/data/auxetic_nets_aug/general/task_02/realization_05/final_network_jammed.pkl'"
+  "raises": "FileNotFoundError: [Errno 2] No such file or directory: '<repo>/data/auxetic_nets_aug/general/task_02/realization_05/final_network_jammed.pkl'"
  },
  "load_auxetic": {
   "value": null
