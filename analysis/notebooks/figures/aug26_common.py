@@ -46,8 +46,7 @@ for _p in (REPO_ROOT, REPO_ROOT / "training" / "src", REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from base.realization_record import (  # noqa: E402
-    RealizationRecord, BestLossUndetermined, MissingRecordPart, incidence_to_edges)
+from base.realization_record import RealizationRecord, incidence_to_edges  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Paths                                                                       #
@@ -867,28 +866,15 @@ def allo_initial_stiffnesses(d):
         meta["realization_seed"], len(d["edges"]), meta["k_min"], meta["k_max"])
 
 
-class CostHessianSolverMismatch(ValueError):
-    """The cost Hessian at K* would be recomputed with a solver the run did not train with."""
-
-
-def _is_k_star(d, k_vec) -> bool:
-    try:
-        k_star = allo_best_loss_stiffness(d)
-    except (BestLossUndetermined, MissingRecordPart):
-        return False
-    return k_star.shape == k_vec.shape and np.array_equal(k_star, k_vec)
-
-
 def allo_cost_hessian_at(d, k_vec, k_eigs=CFG.k_cost_eigs, verbose=False):
     """Per-subtask allosteric cost Hessian at stiffness ``k_vec``.
 
     Prefers ``d['sweep']`` when ``k_vec`` *is* the stiffness the sweep's
     before/after cost Hessian was evaluated at (exact array match against
     ``_sweep_cost_hessian_stiffness``); otherwise recomputes locally with
-    ``allo_per_task_cost_hessian`` (JAX-FIRE). At K* that recompute is only allowed for
-    a run trained with JAX-FIRE: K* is not a stationary point of the JAX-FIRE loss of a
-    LAMMPS-trained run, so CostHessianSolverMismatch is raised and the sweep has to be
-    computed on the cluster. Return contract matches ``allo_per_task_cost_hessian``:
+    ``allo_per_task_cost_hessian``. Both are JAX-FIRE cost Hessians, also for
+    LAMMPS-trained runs, where K* is not a stationary point of the JAX-FIRE loss
+    (accepted, ADR 0005). Return contract matches ``allo_per_task_cost_hessian``:
     ``dict(mse1=(evals, evecs), mse2=(evals, evecs))`` (plus ``combined`` when
     served from the sweep), eigenvalues DESCENDING, ``evecs`` ``(n_edges, k_eigs)``.
     """
@@ -904,10 +890,6 @@ def allo_cost_hessian_at(d, k_vec, k_eigs=CFG.k_cost_eigs, verbose=False):
                 if got["combined"] is not None:
                     out["combined"] = got["combined"]
                 return out
-    if d.get("solver") != "jax_fire" and _is_k_star(d, k_vec):
-        raise CostHessianSolverMismatch(
-            f"{d['dir']}: no sweep cost Hessian at K*, and a local JAX-FIRE recompute does "
-            f"not match the training solver {d.get('solver')!r}; recompute the sweep")
     return allo_per_task_cost_hessian(
         d["nodes"], d["incidence_matrix"], d["task_config"], k_vec,
         k_eigs=k_eigs, verbose=verbose)

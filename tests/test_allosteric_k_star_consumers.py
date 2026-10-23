@@ -137,11 +137,11 @@ class TestAug26CostHessianAtKStar(ConsumerTestCase):
         recompute.assert_called_once()
         return out
 
-    def test_without_sweep_raises_for_a_lammps_run(self):
+    def test_without_sweep_recomputes_with_jax_fire_for_a_lammps_run(self):
+        # Accepted solver mismatch, ADR 0005.
         d = self.loaded()
         d['solver'] = 'lammps'
-        with self.assertRaises(A.CostHessianSolverMismatch):
-            self.recompute(d, A.allo_best_loss_stiffness(d))
+        self.assertEqual(self.recompute(d, A.allo_best_loss_stiffness(d)), 'recomputed')
 
     def test_without_sweep_recomputes_for_a_jax_fire_run(self):
         d = self.loaded()
