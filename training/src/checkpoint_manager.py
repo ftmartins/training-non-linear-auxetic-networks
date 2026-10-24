@@ -375,10 +375,7 @@ def load_checkpoint(task_seed, realization_seed, results_dir=None, network_type=
 
     print(checkpoint_file, checkpoint_file.exists())
 
-    # Only the network-type-suffixed name counts here, not a plain checkpoint.pkl.
-    if not checkpoint_file.exists():
-        return None
-
+    # The record also reads a plain checkpoint.pkl as jammed (the older runs' name).
     state = RealizationRecord.open(result_path, kind='auxetic',
                                    network_type=network_type).resume_state()
     return None if state is None else state.trainer_state
