@@ -57,11 +57,10 @@ class TestAuxBestLossState(AuxeticConsumerTestCase):
         with self.assertRaises(MissingRecordPart):
             self.best_state()
 
-    def test_all_nan_loss_falls_back_to_the_final_network(self):
+    def test_all_nan_loss_raises(self):
         np.save(self.d / 'loss_trajectory_jammed.npy', np.full(N_STEPS, np.nan))
-        aa, (pos, k, b) = self.best_state()
-        self.assertIsNone(b)
-        np.testing.assert_array_equal(k, aa['network'].stiffnesses)
+        with self.assertRaises(BestLossUndetermined):
+            self.best_state()
 
     def test_short_stiffness_trajectory_falls_back_to_the_final_network(self):
         np.save(self.d / 'loss_trajectory_jammed.npy', np.array([3.0, 2, 1, 1, 1, 1, 0.5]))

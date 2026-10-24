@@ -406,9 +406,7 @@ def aux_best_loss_state(aa, load_positions: bool = True) -> tuple:
         raise MissingRecordPart(f"{tag}: no loss/stiffness trajectory, so no best-loss state")
     loss_traj = np.asarray(loss_traj, float)
     if not np.isfinite(loss_traj).any():
-        warnings.warn(f"{tag}: loss trajectory all-NaN -> best-loss state falls "
-                      "back to final_network")
-        return pos_final, k_final, None
+        raise BestLossUndetermined(f"{tag}: loss trajectory all-NaN, so no best-loss state")
     b = int(np.nanargmin(loss_traj))
     stiff_traj = np.asarray(stiff_traj, float)
     k_best = np.asarray(stiff_traj[b], float) if b < len(stiff_traj) else k_final
