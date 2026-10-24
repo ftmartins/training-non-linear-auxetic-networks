@@ -390,33 +390,21 @@ def aux_best_loss_state(aa, load_positions: bool = True) -> tuple:
     step, not the best one, and for auxetic runs that ended above their own
     minimum (resume rounds, post-backprop-crash restarts) the two differ.
 
-    ``stiffnesses`` come from ``stiffness_trajectory.npy`` (``aa['stiff_traj']``);
-    ``positions`` from ``history.pkl`` (the only per-step positions record --
-    each entry is the strain-relaxed config that step's loss was measured at).
-    Falls back to the ``final_network`` state (with a warning) when a per-step
-    record is missing or length-misaligned.
+    ``stiffnesses`` and ``best_idx`` are K* and its step from the realization record
+    (ADR 0004), which raises when they cannot be determined -- never the final network.
+    ``positions`` come from ``history.pkl`` (the only per-step positions record -- each
+    entry is the strain-relaxed config that step's loss was measured at), falling back to
+    the final-network positions (with a warning) when that record is missing or
+    length-misaligned.
     """
-    net = aa["network"]
-    pos_final = np.asarray(net.positions, float)
-    k_final = np.asarray(net.stiffnesses, float)
-    loss_traj = aa.get("loss_traj")
-    stiff_traj = aa.get("stiff_traj")
+    rec = RealizationRecord.open(aa["dir"], kind="auxetic", network_type=AUX_NETWORK_TYPE)
+    b = rec.best_loss_step
+    k_best = np.asarray(rec.best_loss_stiffnesses, float)
+    loss_traj = rec.loss.training
     tag = f"auxetic {aa.get('task_id')}/{aa.get('real_id')}"
-    if loss_traj is None or stiff_traj is None or len(np.asarray(loss_traj)) == 0:
-        raise MissingRecordPart(f"{tag}: no loss/stiffness trajectory, so no best-loss state")
-    loss_traj = np.asarray(loss_traj, float)
-    if not np.isfinite(loss_traj).any():
-        raise BestLossUndetermined(f"{tag}: loss trajectory all-NaN, so no best-loss state")
-    b = int(np.nanargmin(loss_traj))
-    stiff_traj = np.asarray(stiff_traj, float)
-    if len(stiff_traj) != len(loss_traj):
-        raise BestLossUndetermined(f"{tag}: stiffness trajectory has {len(stiff_traj)} rows "
-                                   f"for {len(loss_traj)} loss steps")
-    k_best = np.asarray(stiff_traj[b], float)
-    pos_best = pos_final
+    pos_best = np.asarray(aa["network"].positions, float)
     if not load_positions:
         return pos_best, k_best, b
-    rec = RealizationRecord.open(aa["dir"], kind="auxetic", network_type=AUX_NETWORK_TYPE)
     if rec.has("positions_trajectory"):
         positions = rec.positions_trajectory
         if positions is not None and len(positions) == len(loss_traj):
