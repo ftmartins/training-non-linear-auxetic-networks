@@ -60,6 +60,28 @@ class TestAllostericBestLossStiffnesses(unittest.TestCase):
                                  digest(np.load(rec.run_dir / 'best_stiffnesses.npy')))
 
 
+@skip_unless_golden
+class TestAuxeticBestLossStiffnesses(unittest.TestCase):
+    def test_record_k_star_is_todays_per_step_pairing(self):
+        """K* = stiffness_trajectory[nanargmin(loss_trajectory)], as the Aug26 helpers and
+        the post-training sweep pair them; runs without a stiffness trajectory have none."""
+        from base.realization_record import RealizationRecord, MissingRecordPart
+        from tests.golden import DATA_ROOT
+        for family, task, real, why in sample.AUXETIC:
+            with self.subTest(sample.auxetic_name(family, task, real), why=why):
+                rec = RealizationRecord.locate(DATA_ROOT / 'auxetic_nets_aug' / family, 'auxetic',
+                                               task, real)
+                if not rec.has('stiffness_trajectory'):
+                    with self.assertRaises(MissingRecordPart):
+                        rec.best_loss_stiffnesses
+                    continue
+                loss = np.load(rec.run_dir / 'loss_trajectory_jammed.npy')
+                k = np.load(rec.run_dir / 'stiffness_trajectory_jammed.npy')
+                b = int(np.nanargmin(loss))
+                self.assertEqual(rec.best_loss_step, b)
+                np.testing.assert_array_equal(rec.best_loss_stiffnesses, k[b])
+
+
 def _check(case, name, got):
     want = _expected(name)
     case.assertEqual(sorted(got), sorted(want))

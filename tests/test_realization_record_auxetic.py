@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from base.realization_record import RealizationRecord, MissingRecordPart
+from base.realization_record import RealizationRecord, MissingRecordPart, BestLossUndetermined
 
 N_NODES, N_EDGES, N_STEPS = 6, 5, 7
 TASK_CONFIG = {'task_seed': 1, 'packing_seed': 42, 'n_nodes': N_NODES, 'n_strain_steps': 400,
@@ -124,6 +124,41 @@ class TestParts(AuxeticTestCase):
 
     def test_no_best_so_far(self):
         self.assertFalse(RealizationRecord.open(self.run_dir()).has('best_so_far'))
+
+
+class TestBestLossStiffnesses(AuxeticTestCase):
+    def test_k_star_is_the_trajectory_row_at_the_lowest_loss(self):
+        d = self.run_dir()
+        np.save(d / 'loss_trajectory_jammed.npy', np.array([3.0, 2.0, 0.5, 1.0, 0.7, 0.9, 2.0]))
+        rec = RealizationRecord.open(d)
+        self.assertEqual(rec.best_loss_step, 2)
+        np.testing.assert_array_equal(rec.best_loss_stiffnesses,
+                                      np.load(d / 'stiffness_trajectory_jammed.npy')[2])
+
+    def test_ties_go_to_the_first_step_and_nan_is_excluded(self):
+        d = self.run_dir()
+        np.save(d / 'loss_trajectory_jammed.npy', np.array([np.nan, 2.0, 0.5, 0.5, 1, 1, 1.0]))
+        self.assertEqual(RealizationRecord.open(d).best_loss_step, 2)
+
+    def test_all_nan_loss_raises(self):
+        d = self.run_dir()
+        np.save(d / 'loss_trajectory_jammed.npy', np.full(N_STEPS, np.nan))
+        with self.assertRaises(BestLossUndetermined):
+            RealizationRecord.open(d).best_loss_stiffnesses
+
+    def test_trajectories_of_different_lengths_raise(self):
+        d = self.run_dir()
+        np.save(d / 'stiffness_trajectory_jammed.npy', np.ones((N_STEPS - 1, N_EDGES)))
+        with self.assertRaises(BestLossUndetermined):
+            RealizationRecord.open(d).best_loss_stiffnesses
+
+    def test_missing_stiffness_trajectory_raises_missing_part(self):
+        d = self.run_dir()
+        (d / 'stiffness_trajectory_jammed.npy').unlink()
+        rec = RealizationRecord.open(d)
+        with self.assertRaises(MissingRecordPart):
+            rec.best_loss_stiffnesses
+        self.assertFalse(rec.has('best_loss_stiffnesses'))
 
 
 class TestResumeState(AuxeticTestCase):

@@ -291,21 +291,7 @@ class RealizationRecord:
         if loss.size == 0 or np.all(np.isnan(loss)):
             raise undetermined('no finite training loss')
         step = int(np.nanargmin(loss))
-        best = self.best_so_far
-        if best.training_loss != loss[step]:
-            raise undetermined(f'stored best loss {best.training_loss!r} is not the lowest '
-                               f'training loss {loss[step]!r} (step {step})')
-        traj = self.stiffness_trajectory
-        if not _fits(traj, len(loss)):
-            raise undetermined('stiffness trajectory does not fit the loss trajectory')
-        snapshot = np.nonzero(traj.steps == step)[0]
-        if len(snapshot) and not np.array_equal(traj.stiffnesses[snapshot[0]], best.stiffnesses):
-            raise undetermined(f'stored best stiffnesses differ from the snapshot at step {step}')
-        started = self._reader.first_started()
-        if started < BEST_SO_FAR_PRE_UPDATE_SINCE:
-            raise undetermined(f'first started {started}, before best stiffnesses were saved '
-                               f'pre-update')
-        return step, best.stiffnesses
+        return step, self._reader.stiffnesses_at_best_loss(self, step, undetermined)
 
     @cached_property
     def sweep(self):
@@ -455,6 +441,25 @@ class _AllostericReader:
     def sweep(self):
         with np.load(_existing(self.d / 'timestep_sweep.npz'), allow_pickle=True) as z:
             return {k: z[k] for k in z.files}
+
+    def stiffnesses_at_best_loss(self, record, step, undetermined):
+        """The trainer's stored best state, accepted only if the stored data pin it to `step`."""
+        loss = record.loss.training
+        best = record.best_so_far
+        if best.training_loss != loss[step]:
+            raise undetermined(f'stored best loss {best.training_loss!r} is not the lowest '
+                               f'training loss {loss[step]!r} (step {step})')
+        traj = record.stiffness_trajectory
+        if not _fits(traj, len(loss)):
+            raise undetermined('stiffness trajectory does not fit the loss trajectory')
+        snapshot = np.nonzero(traj.steps == step)[0]
+        if len(snapshot) and not np.array_equal(traj.stiffnesses[snapshot[0]], best.stiffnesses):
+            raise undetermined(f'stored best stiffnesses differ from the snapshot at step {step}')
+        started = self.first_started()
+        if started < BEST_SO_FAR_PRE_UPDATE_SINCE:
+            raise undetermined(f'first started {started}, before best stiffnesses were saved '
+                               f'pre-update')
+        return best.stiffnesses
 
     def first_started(self):
         """ISO timestamp of the earliest recorded invocation (run_provenance.json)."""
@@ -619,8 +624,14 @@ class _AuxeticReader:
                            Loss(training=np.asarray(ckpt['history'].get('loss', []), float)),
                            'checkpoint', trainer_state=ckpt)
 
-    def first_started(self):
-        raise BestLossUndetermined(f'{self.d}: auxetic K* is not read from the record yet')
+    def stiffnesses_at_best_loss(self, record, step, undetermined):
+        """Row `step` of the stiffness trajectory, which stores the stiffnesses each step's
+        loss was measured at, one row per step."""
+        traj = record.stiffness_trajectory
+        if len(traj.stiffnesses) != record.loss.n_steps:
+            raise undetermined(f'stiffness trajectory has {len(traj.stiffnesses)} rows for '
+                               f'{record.loss.n_steps} loss steps')
+        return traj.stiffnesses[step]
 
 
 _READERS = {'allosteric': _AllostericReader, 'auxetic': _AuxeticReader}
