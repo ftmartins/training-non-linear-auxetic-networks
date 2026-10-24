@@ -12,7 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
-from base.realization_record import RealizationRecord, MissingRecordPart, BestLossUndetermined
+from base.realization_record import (
+    RealizationRecord, MissingRecordPart, BestLossUndetermined, StaleSweep)
 
 N_NODES, N_EDGES, N_STEPS = 6, 5, 7
 TASK_CONFIG = {'task_seed': 1, 'packing_seed': 42, 'n_nodes': N_NODES, 'n_strain_steps': 400,
@@ -159,6 +160,28 @@ class TestBestLossStiffnesses(AuxeticTestCase):
         with self.assertRaises(MissingRecordPart):
             rec.best_loss_stiffnesses
         self.assertFalse(rec.has('best_loss_stiffnesses'))
+
+
+class TestSweep(AuxeticTestCase):
+    def sweep_run(self, last_index):
+        d = self.run_dir()   # loss falls monotonically: K* is the last step
+        np.savez(d / 'timestep_sweep_jammed.npz', t_indices=np.array([0, 3, last_index]))
+        return RealizationRecord.open(d)
+
+    def test_sweep_whose_after_step_is_k_star_is_read(self):
+        sweep = self.sweep_run(N_STEPS - 1).sweep
+        np.testing.assert_array_equal(sweep['t_indices'], [0, 3, N_STEPS - 1])
+
+    def test_sweep_whose_after_step_is_not_k_star_raises(self):
+        with self.assertRaises(StaleSweep):
+            self.sweep_run(N_STEPS - 2).sweep
+
+    def test_sweep_of_a_run_without_k_star_raises(self):
+        rec = self.sweep_run(N_STEPS - 1)
+        (rec.run_dir / 'stiffness_trajectory_jammed.npy').unlink()
+        rec.refresh()
+        with self.assertRaises(BestLossUndetermined):
+            rec.sweep
 
 
 class TestResumeState(AuxeticTestCase):

@@ -297,13 +297,13 @@ class RealizationRecord:
     def sweep(self):
         """Post-training sweep arrays (dict of name -> array). Raises StaleSweep when its
         after cost Hessian was not evaluated at K*, and BestLossUndetermined when K* itself
-        is undetermined."""
+        is undetermined or missing."""
         sweep = self._reader.sweep()
-        if not self._reader.sweep_after_hessian_at_k_star:
-            return sweep   # auxetic: checked once K* is read from the record (#8)
-        at = sweep.get('cost_hessian_after_stiffness')
-        k_star = np.asarray(self.best_loss_stiffnesses, float)
-        if at is None or not np.array_equal(np.asarray(at, float), k_star):
+        try:
+            at_k_star = self._reader.sweep_after_hessian_at_k_star(self, sweep)
+        except MissingRecordPart as e:
+            raise BestLossUndetermined(f'{self.run_dir}: has a sweep but no K* ({e})') from e
+        if not at_k_star:
             raise StaleSweep(f'{self.run_dir}: sweep after cost Hessian is not at K*; '
                              f'recompute the sweep')
         return sweep
@@ -386,7 +386,6 @@ def _load(path):
 
 class _AllostericReader:
     kind = 'allosteric'
-    sweep_after_hessian_at_k_star = True
 
     def __init__(self, run_dir):
         self.d = Path(run_dir)
@@ -441,6 +440,13 @@ class _AllostericReader:
     def sweep(self):
         with np.load(_existing(self.d / 'timestep_sweep.npz'), allow_pickle=True) as z:
             return {k: z[k] for k in z.files}
+
+    @staticmethod
+    def sweep_after_hessian_at_k_star(record, sweep):
+        """2026-09-10+ sweeps record the stiffnesses their after Hessian was taken at."""
+        at = sweep.get('cost_hessian_after_stiffness')
+        return at is not None and np.array_equal(
+            np.asarray(at, float), np.asarray(record.best_loss_stiffnesses, float))
 
     def stiffnesses_at_best_loss(self, record, step, undetermined):
         """The trainer's stored best state, accepted only if the stored data pin it to `step`."""
@@ -536,7 +542,6 @@ class _AllostericReader:
 
 class _AuxeticReader:
     kind = 'auxetic'
-    sweep_after_hessian_at_k_star = False
     _MARKERS = ('final_network', 'checkpoint', 'loss_trajectory', 'training_meta',
                 'training_complete', 'training_complete_small_loss')
 
@@ -623,6 +628,11 @@ class _AuxeticReader:
         return ResumeState(ckpt['current_step'], ckpt['network']['stiffnesses'],
                            Loss(training=np.asarray(ckpt['history'].get('loss', []), float)),
                            'checkpoint', trainer_state=ckpt)
+
+    @staticmethod
+    def sweep_after_hessian_at_k_star(record, sweep):
+        """The sweep takes its after Hessian at the last selected step, t_indices[-1]."""
+        return int(np.asarray(sweep['t_indices'])[-1]) == record.best_loss_step
 
     def stiffnesses_at_best_loss(self, record, step, undetermined):
         """Row `step` of the stiffness trajectory, which stores the stiffnesses each step's
