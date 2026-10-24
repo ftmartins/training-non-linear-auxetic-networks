@@ -46,7 +46,8 @@ for _p in (REPO_ROOT, REPO_ROOT / "training" / "src", REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from base.realization_record import RealizationRecord, incidence_to_edges  # noqa: E402
+from base.realization_record import (  # noqa: E402
+    RealizationRecord, BestLossUndetermined, MissingRecordPart, incidence_to_edges)
 
 # --------------------------------------------------------------------------- #
 # Paths                                                                       #
@@ -402,9 +403,7 @@ def aux_best_loss_state(aa, load_positions: bool = True) -> tuple:
     stiff_traj = aa.get("stiff_traj")
     tag = f"auxetic {aa.get('task_id')}/{aa.get('real_id')}"
     if loss_traj is None or stiff_traj is None or len(np.asarray(loss_traj)) == 0:
-        warnings.warn(f"{tag}: no loss/stiffness trajectory -> best-loss state "
-                      "falls back to final_network")
-        return pos_final, k_final, None
+        raise MissingRecordPart(f"{tag}: no loss/stiffness trajectory, so no best-loss state")
     loss_traj = np.asarray(loss_traj, float)
     if not np.isfinite(loss_traj).any():
         warnings.warn(f"{tag}: loss trajectory all-NaN -> best-loss state falls "

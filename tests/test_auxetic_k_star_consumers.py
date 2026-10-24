@@ -20,6 +20,7 @@ for _p in (_ROOT, _ROOT / 'analysis' / 'notebooks' / 'figures'):
         sys.path.insert(0, str(_p))
 
 import aug26_common as A  # noqa: E402
+from base.realization_record import BestLossUndetermined, MissingRecordPart  # noqa: E402
 from tests.test_realization_record_auxetic import write_auxetic_run, N_STEPS, N_EDGES  # noqa: E402
 
 TASK, REAL = 3, 1
@@ -51,11 +52,10 @@ class TestAuxBestLossState(AuxeticConsumerTestCase):
         self.assertEqual(b, 2)
         np.testing.assert_array_equal(k, np.load(self.d / 'stiffness_trajectory_jammed.npy')[2])
 
-    def test_without_stiffness_trajectory_falls_back_to_the_final_network(self):
+    def test_without_stiffness_trajectory_raises(self):
         (self.d / 'stiffness_trajectory_jammed.npy').unlink()
-        aa, (pos, k, b) = self.best_state()
-        self.assertIsNone(b)
-        np.testing.assert_array_equal(k, aa['network'].stiffnesses)
+        with self.assertRaises(MissingRecordPart):
+            self.best_state()
 
     def test_all_nan_loss_falls_back_to_the_final_network(self):
         np.save(self.d / 'loss_trajectory_jammed.npy', np.full(N_STEPS, np.nan))
