@@ -1,6 +1,6 @@
 {
  "aux_network_fingerprint": {
-  "raises": "FileNotFoundError: [Errno 2] No such file or directory: '<repo>/data/auxetic_nets_aug/general/task_02/realization_04/final_network.pkl'"
+  "raises": "MissingRecordPart: <repo>/data/auxetic_nets_aug/general/task_02/realization_04/final_network_jammed.pkl"
  },
  "aux_realization_seed": {
   "value": {

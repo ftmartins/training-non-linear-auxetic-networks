@@ -345,35 +345,23 @@ def load_auxetic(task_id, real_id, family: str | None = None) -> dict | None:
     touching the module-level default the rest of the notebook relies on.
     """
     data_dir = AUX_DATA_DIR if family is None else REPO_ROOT / "data" / "auxetic_nets_aug" / family
-    d = data_dir / f"task_{task_id:02d}" / f"realization_{real_id:02d}"
-    if not d.is_dir() or not _auxfile(d, "final_network", "pkl").exists():
+    rec = RealizationRecord.locate(data_dir, "auxetic", task_id, real_id, must_exist=False,
+                                   network_type=AUX_NETWORK_TYPE)
+    d = rec.run_dir
+    if not d.is_dir() or not rec.has("network"):
         return None
     from analysis.data_io import load_auxetic_network
 
     network, boundary = load_auxetic_network(
         task_id, real_id, data_dir=data_dir, network_type=AUX_NETWORK_TYPE)
 
-    task_config = {}
-    tc_path = _auxfile(d, "task_config", "json")
-    if tc_path.exists():
-        # Some general-family task_config_jammed.json files on disk are a bare
-        # `null` (found 2026-09-05, 14/677 general realizations) -- treat that
-        # the same as "file missing" rather than propagating None downstream.
-        task_config = json.loads(tc_path.read_text()) or {}
-
-    lt_path = _auxfile(d, "loss_trajectory", "npy")
-    st_path = _auxfile(d, "stiffness_trajectory", "npy")
-    loss_traj = np.load(lt_path) if lt_path.exists() else None
-    stiff_traj = np.load(st_path) if st_path.exists() else None
-
-    # Precomputed post-training sweep (network-type-suffixed filename possible).
-    # Used by aux_cost_hessian_at when its operating point can be matched to the
-    # sweep's before/after checkpoint (needs stiffness_trajectory.npy too).
-    sweep = None
-    for cand in sorted(d.glob("timestep_sweep*.npz")):
-        with np.load(cand, allow_pickle=True) as z:
-            sweep = {k: z[k] for k in z.files}
-        break
+    # Missing, or a bare `null` on disk (14/677 general realizations, 2026-09-05): {}.
+    task_config = rec.task.config if rec.has("task") else {}
+    loss_traj = rec.loss.training if rec.has("loss") else None
+    stiff_traj = rec.stiffness_trajectory.stiffnesses if rec.has("stiffness_trajectory") else None
+    # Precomputed post-training sweep. Used by aux_cost_hessian_at when its operating
+    # point can be matched to the sweep's before/after checkpoint.
+    sweep = rec.sweep if rec.has("sweep") else None
 
     return dict(
         network=network, boundary=boundary, task_config=task_config,
@@ -428,10 +416,9 @@ def aux_best_loss_state(aa, load_positions: bool = True) -> tuple:
     pos_best = pos_final
     if not load_positions:
         return pos_best, k_best, b
-    hist_path = _auxfile(Path(aa["dir"]), "history", "pkl")
-    if hist_path.exists():
-        with open(hist_path, "rb") as f:
-            positions = pickle.load(f).get("positions")
+    rec = RealizationRecord.open(aa["dir"], kind="auxetic", network_type=AUX_NETWORK_TYPE)
+    if rec.has("positions_trajectory"):
+        positions = rec.positions_trajectory
         if positions is not None and len(positions) == len(loss_traj):
             pos_best = np.asarray(positions[b], float)
         else:
@@ -502,12 +489,16 @@ def _allo_ratio(gid, tid, rid) -> float:
     return convergence_ratio(mse1, mse2)
 
 
+def _aux_record(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> RealizationRecord:
+    return RealizationRecord.locate(REPO_ROOT / "data" / "auxetic_nets_aug" / family, "auxetic",
+                                    tid, rid, must_exist=False, network_type=AUX_NETWORK_TYPE)
+
+
 def _aux_ratio(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> float:
-    d = REPO_ROOT / "data" / "auxetic_nets_aug" / family / f"task_{tid:02d}" / f"realization_{rid:02d}"
-    lt = _auxfile(d, "loss_trajectory", "npy")
-    if not lt.exists():
+    rec = _aux_record(tid, rid, family)
+    if not rec.has("loss"):
         return np.inf
-    loss = np.asarray(np.load(lt), dtype=float)
+    loss = np.asarray(rec.loss.training, dtype=float)
     s = loss.mean(axis=1) if loss.ndim > 1 else loss
     return float(np.nanmin(s) / s[0]) if len(s) and s[0] > 0 else np.inf
 
@@ -523,16 +514,14 @@ def allo_realization_seed(gid, tid, rid) -> int:
 
 def aux_realization_seed(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> int:
     """Recorded realization seed of an auxetic run (``training_meta_jammed.json``)."""
-    meta = _auxfile(_aux_dir(tid, rid, family), "training_meta", "json")
-    return int(json.loads(meta.read_text())["realization_seed"])
+    return _aux_record(tid, rid, family).realization_seed
 
 
 def aux_network_fingerprint(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> str:
     """Fingerprint of the network an auxetic run trained on (see base.stored_network)."""
     from base.stored_network import network_fingerprint
-    with open(_auxfile(_aux_dir(tid, rid, family), "final_network", "pkl"), "rb") as f:
-        net = pickle.load(f)
-    return network_fingerprint(net["positions"], net["edges"])
+    net = _aux_record(tid, rid, family).network
+    return network_fingerprint(net.positions, net.edges)
 
 
 def _best_distinct_seeds(cands, n_best) -> list[int]:

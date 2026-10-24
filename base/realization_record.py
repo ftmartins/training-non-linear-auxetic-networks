@@ -26,8 +26,17 @@ Each on-disk layout is a private reader class behind the record. Layouts so far:
     stiffnesses.npy (current), stiffnesses_ckpt.npy + ckpt_step.txt (last NaN-free state),
     stiffnesses_traj(_steps).npy, best_stiffnesses.npy + best_combined_mse.txt,
     training_meta.json, timestep_sweep.npz.
+  * auxetic (targeted and general ensemble runners, checkpoint_manager): task_NN /
+    realization_NN directories (unpadded task_N too), file names suffixed by network type
+    (<stem>_jammed.<ext>, <stem>_lattice.<ext>) or plain (<stem>.<ext>, the older jammed
+    runs): final_network.pkl, boundary_nodes.json, task_config.json, loss_trajectory.npy
+    (training loss only), stiffness_trajectory.npy (one row per step), history.pkl
+    (per-step positions), checkpoint.pkl, training_meta.json, timestep_sweep.npz.
+    Open with network_type='jammed' (default; falls back to plain names), 'lattice', or
+    None (plain names only).
 """
 import json
+import pickle
 import shutil
 from dataclasses import dataclass
 from functools import cached_property
@@ -35,9 +44,10 @@ from pathlib import Path
 
 import numpy as np
 
-KINDS = ('allosteric',)
-PARTS = ('config', 'realization_seed', 'network', 'task', 'loss', 'stiffness_trajectory',
-         'current_stiffnesses', 'best_so_far', 'best_loss_stiffnesses', 'best_loss_step', 'sweep')
+KINDS = ('allosteric', 'auxetic')
+PARTS = ('config', 'realization_seed', 'network', 'boundary', 'task', 'loss',
+         'stiffness_trajectory', 'positions_trajectory', 'current_stiffnesses', 'best_so_far',
+         'best_loss_stiffnesses', 'best_loss_step', 'sweep')
 
 # The allosteric trainer saved its best stiffnesses post-update until commit 3c24f68
 # (2026-08-10). Runs first started before the end of that day cannot give K* (ADR 0004).
@@ -74,25 +84,59 @@ class Network:
 
 
 @dataclass(frozen=True)
+class AuxeticNetwork:
+    positions: np.ndarray      # (n_nodes, 2)
+    edges: np.ndarray          # (n_edges, 2)
+    rest_lengths: np.ndarray   # (n_edges,)
+
+
+@dataclass(frozen=True)
+class AuxeticTask:
+    config: dict   # as stored (task_seed, packing_seed, n_nodes, compression_strains, ...)
+
+    @property
+    def compression_strains(self):
+        return self.config['compression_strains']
+
+    @property
+    def target_poisson_ratios(self):
+        return self.config['target_poisson_ratios']
+
+
+@dataclass(frozen=True)
 class AllostericTask:
     geometry_seed: float
     strain_output: float    # subtask 1 target
     strain_output2: float   # subtask 2 target
 
 
-@dataclass(frozen=True)
 class Loss:
-    """Recorded loss history. per_subtask is (n_steps, n_subtasks) in stored task order;
-    the training loss is its mean over subtasks, for every task kind."""
-    per_subtask: np.ndarray
+    """Recorded loss history. per_subtask is (n_steps, n_subtasks) in stored task order; the
+    training loss is its mean over subtasks, for every task kind. Runs that stored only the
+    training loss (existing auxetic runs) give Loss(training=...), whose per_subtask raises
+    MissingRecordPart."""
+
+    def __init__(self, per_subtask=None, *, training=None):
+        if (per_subtask is None) == (training is None):
+            raise ValueError('give per_subtask or training, not both')
+        self._per_subtask = per_subtask
+        self._training = training
+
+    @property
+    def per_subtask(self):
+        if self._per_subtask is None:
+            raise MissingRecordPart('per-subtask loss was not recorded')
+        return self._per_subtask
 
     @property
     def training(self):
-        return self.per_subtask.mean(axis=1)
+        if self._per_subtask is None:
+            return self._training
+        return self._per_subtask.mean(axis=1)
 
     @property
     def n_steps(self):
-        return self.per_subtask.shape[0]
+        return len(self._training if self._per_subtask is None else self._per_subtask)
 
 
 @dataclass(frozen=True)
@@ -118,6 +162,8 @@ class ResumeState:
     stiffnesses: np.ndarray
     loss: Loss
     source: str
+    trainer_state: dict = None   # anything else the trainer saved to resume (auxetic: the
+                                 # checkpoint's network, history and task_config)
 
 
 def incidence_to_edges(incidence_matrix):
@@ -139,10 +185,11 @@ class RealizationRecord:
         self._reader = reader
 
     @classmethod
-    def open(cls, run_dir, kind=None):
+    def open(cls, run_dir, kind=None, **layout):
         """Record of the realization stored in run_dir. With kind=None the task kind is
         detected from the files present; passing kind skips detection, so a directory a
-        trainer is about to fill (nothing written yet) can be opened too."""
+        trainer is about to fill (nothing written yet) can be opened too. layout: auxetic
+        network_type (see the module docstring)."""
         run_dir = Path(run_dir)
         if kind is None:
             if not run_dir.is_dir():
@@ -150,18 +197,19 @@ class RealizationRecord:
             kind = _detect_kind(run_dir)
         elif kind not in _READERS:
             raise ValueError(f'unknown task kind {kind!r}; known: {", ".join(KINDS)}')
-        return cls(run_dir, _READERS[kind](run_dir))
+        return cls(run_dir, _READERS[kind](run_dir, **layout))
 
     @classmethod
-    def locate(cls, root, kind, cell, realization_id, must_exist=True):
+    def locate(cls, root, kind, cell, realization_id, must_exist=True, **layout):
         """Record of realization `realization_id` in `cell` under data root `root`.
-        Allosteric cell = (geometry_id, task_id); geometry_id may be 'targeted'."""
+        Allosteric cell = (geometry_id, task_id); geometry_id may be 'targeted'.
+        Auxetic cell = task_id."""
         if kind not in _READERS:
             raise ValueError(f'unknown task kind {kind!r}; known: {", ".join(KINDS)}')
         run_dir = _READERS[kind].run_dir(Path(root), cell, realization_id)
         if must_exist and not run_dir.is_dir():
             raise NotARealization(f'{run_dir}: no such directory')
-        return cls(run_dir, _READERS[kind](run_dir))
+        return cls(run_dir, _READERS[kind](run_dir, **layout))
 
     def has(self, part):
         """Whether the realization stored `part` (one of PARTS)."""
@@ -191,6 +239,12 @@ class RealizationRecord:
         return self._reader.network()
 
     @cached_property
+    def boundary(self):
+        """Boundary node indices fixed when the network was built (auxetic):
+        dict of 'top' / 'bottom' / 'left' / 'right' -> int array."""
+        return self._reader.boundary()
+
+    @cached_property
     def task(self):
         return self._reader.task()
 
@@ -201,6 +255,12 @@ class RealizationRecord:
     @cached_property
     def stiffness_trajectory(self):
         return self._reader.stiffness_trajectory()
+
+    @cached_property
+    def positions_trajectory(self):
+        """Per-step relaxed positions the loss was measured at (auxetic history), a list
+        of (n_nodes, 2) arrays."""
+        return self._reader.positions_trajectory()
 
     @cached_property
     def current_stiffnesses(self):
@@ -253,6 +313,8 @@ class RealizationRecord:
         after cost Hessian was not evaluated at K*, and BestLossUndetermined when K* itself
         is undetermined."""
         sweep = self._reader.sweep()
+        if not self._reader.sweep_after_hessian_at_k_star:
+            return sweep   # auxetic: checked once K* is read from the record (#8)
         at = sweep.get('cost_hessian_after_stiffness')
         k_star = np.asarray(self.best_loss_stiffnesses, float)
         if at is None or not np.array_equal(np.asarray(at, float), k_star):
@@ -338,6 +400,7 @@ def _load(path):
 
 class _AllostericReader:
     kind = 'allosteric'
+    sweep_after_hessian_at_k_star = True
 
     def __init__(self, run_dir):
         self.d = Path(run_dir)
@@ -353,6 +416,12 @@ class _AllostericReader:
 
     def config(self):
         return json.loads(_existing(self.d / 'training_meta.json').read_text())
+
+    def boundary(self):
+        raise MissingRecordPart(f'{self.d}: allosteric runs store no boundary nodes')
+
+    def positions_trajectory(self):
+        raise MissingRecordPart(f'{self.d}: allosteric runs store no per-step positions')
 
     def network(self):
         return Network(nodes=_load(self.d / 'nodes.npy'),
@@ -460,4 +529,98 @@ class _AllostericReader:
         np.savetxt(self.d / 'best_combined_mse.txt', [best.training_loss])
 
 
-_READERS = {'allosteric': _AllostericReader}
+class _AuxeticReader:
+    kind = 'auxetic'
+    sweep_after_hessian_at_k_star = False
+    _MARKERS = ('final_network', 'checkpoint', 'loss_trajectory', 'training_meta',
+                'training_complete', 'training_complete_small_loss')
+
+    def __init__(self, run_dir, network_type='jammed'):
+        self.d = Path(run_dir)
+        self.network_type = network_type
+
+    @staticmethod
+    def run_dir(root, cell, realization_id):
+        padded = root / f'task_{cell:02d}' / f'realization_{realization_id:02d}'
+        unpadded = root / f'task_{cell}' / f'realization_{realization_id:02d}'
+        return unpadded if not padded.exists() and unpadded.exists() else padded
+
+    @classmethod
+    def recognises(cls, run_dir):
+        return any(any(run_dir.glob(f'{m}*')) for m in cls._MARKERS)
+
+    def path(self, stem, ext):
+        """<stem>_<network_type>.<ext>; plain <stem>.<ext> for network_type None, and as the
+        fallback for 'jammed' (plain names are the older jammed runs)."""
+        plain = self.d / f'{stem}.{ext}'
+        if self.network_type is None:
+            return plain
+        suffixed = self.d / f'{stem}_{self.network_type}.{ext}'
+        if self.network_type == 'jammed' and not suffixed.exists() and plain.exists():
+            return plain
+        return suffixed
+
+    def _pickle(self, stem):
+        with open(_existing(self.path(stem, 'pkl')), 'rb') as f:
+            return pickle.load(f)
+
+    def config(self):
+        return json.loads(_existing(self.path('training_meta', 'json')).read_text())
+
+    def _final_network(self):
+        return self._pickle('final_network')
+
+    def network(self):
+        net = self._final_network()
+        return AuxeticNetwork(net['positions'], net['edges'], net['rest_lengths'])
+
+    def boundary(self):
+        nodes = json.loads(_existing(self.path('boundary_nodes', 'json')).read_text())
+        return {k: np.asarray(v, dtype=int) for k, v in nodes.items()}
+
+    def task(self):
+        config = json.loads(_existing(self.path('task_config', 'json')).read_text())
+        if config is None:   # some general-family files hold a bare `null`
+            raise MissingRecordPart(f'{self.d}: task_config is null')
+        return AuxeticTask(config)
+
+    def loss(self):
+        return Loss(training=_load(self.path('loss_trajectory', 'npy')))
+
+    def stiffness_trajectory(self):
+        k = _load(self.path('stiffness_trajectory', 'npy'))
+        return StiffnessTrajectory(steps=np.arange(len(k)), stiffnesses=k)
+
+    def positions_trajectory(self):
+        return self._pickle('history')['positions']
+
+    def current_stiffnesses(self):
+        return self._final_network()['stiffnesses']
+
+    def best_so_far(self):
+        raise MissingRecordPart(f'{self.d}: auxetic runners store no best-so-far state')
+
+    def sweep(self):
+        with np.load(_existing(self.path('timestep_sweep', 'npz')), allow_pickle=True) as z:
+            return {k: z[k] for k in z.files}
+
+    def resume_state(self):
+        """The checkpoint, or None when there is none or it cannot be unpickled."""
+        path = self.path('checkpoint', 'pkl')
+        if not path.exists():
+            return None
+        try:
+            with open(path, 'rb') as f:
+                ckpt = pickle.load(f)
+        except Exception as e:  # noqa: BLE001 - a truncated checkpoint means a fresh start
+            print(f'Warning: Failed to load checkpoint {path}: {e}')
+            return None
+        return ResumeState(ckpt['current_step'], ckpt['network']['stiffnesses'],
+                           Loss(training=np.asarray(ckpt['history'].get('loss', []), float)),
+                           'checkpoint', trainer_state=ckpt)
+
+    def first_started(self):
+        raise BestLossUndetermined(f'{self.d}: auxetic K* is not read from the record yet')
+
+
+_READERS = {'allosteric': _AllostericReader, 'auxetic': _AuxeticReader}

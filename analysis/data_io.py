@@ -1,11 +1,12 @@
 """Network and trajectory I/O for analysis notebooks."""
 
-import json
-import pickle
+import errno
+import os
 import numpy as np
 from pathlib import Path
 
 from base.elastic_network import ElasticNetwork
+from base.realization_record import RealizationRecord
 from base.network_utils import get_square_boundary_nodes
 from base.config import (
     TARGETED_DATA_DIR, DATA_DIR, BOUNDARY_MARGIN,
@@ -38,21 +39,22 @@ def load_auxetic_network(task_seed, real_seed, data_dir=None, network_type=None)
     """
     if data_dir is None:
         data_dir = TARGETED_DATA_DIR
-    filename = ('final_network.pkl' if network_type is None
-                else _nt_filename('final_network.pkl', network_type))
-    path = (Path(data_dir)
-            / f'task_{task_seed:02d}'
-            / f'realization_{real_seed:02d}'
-            / filename)
+    record = RealizationRecord.locate(data_dir, 'auxetic', task_seed, real_seed,
+                                      must_exist=False, network_type=network_type)
 
-    with open(path, 'rb') as f:
-        net_dict = pickle.load(f)
+    def exact(name):
+        return record.run_dir / (name if network_type is None else _nt_filename(name, network_type))
 
+    # Only the exact file name for network_type counts here (no fallback to plain names).
+    path = exact('final_network.pkl')
+    if not path.exists():
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(path))
+    net = record.network
     network = ElasticNetwork(
-        positions=net_dict['positions'],
-        edges=net_dict['edges'],
-        stiffnesses=net_dict['stiffnesses'],
-        rest_lengths=net_dict['rest_lengths'],
+        positions=net.positions,
+        edges=net.edges,
+        stiffnesses=record.current_stiffnesses,
+        rest_lengths=net.rest_lengths,
     )
 
     # Prefer the boundary fixed at network-creation time and saved alongside
@@ -62,15 +64,11 @@ def load_auxetic_network(task_seed, real_seed, data_dir=None, network_type=None)
     # node set than the one training actually used (deformation moves nodes
     # off/onto the margin-based threshold). Only fall back to recomputing for
     # older result directories saved before boundary_nodes.json existed.
-    boundary_filename = ('boundary_nodes.json' if network_type is None
-                          else _nt_filename('boundary_nodes.json', network_type))
-    boundary_path = path.parent / boundary_filename
-    if boundary_path.exists():
-        with open(boundary_path) as f:
-            boundary = {k: np.asarray(v, dtype=int) for k, v in json.load(f).items()}
+    if exact('boundary_nodes.json').exists():
+        boundary = record.boundary
     else:
         top, bottom, left, right = get_square_boundary_nodes(
-            np.array(net_dict['positions']), BOUNDARY_MARGIN
+            np.array(net.positions), BOUNDARY_MARGIN
         )
         boundary = {'top': top, 'bottom': bottom, 'left': left, 'right': right}
     return network, boundary

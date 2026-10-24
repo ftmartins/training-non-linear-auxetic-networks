@@ -17,6 +17,7 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 from base.config import RESULTS_DIR, N_TASKS, N_REALIZATIONS, NETWORK_TYPE
+from base.realization_record import RealizationRecord
 from training.src.run_provenance import (
     save_run_provenance,
     save_training_meta,
@@ -373,17 +374,14 @@ def load_checkpoint(task_seed, realization_seed, results_dir=None, network_type=
     checkpoint_file = result_path / _nt_filename("checkpoint.pkl", network_type)
 
     print(checkpoint_file, checkpoint_file.exists())
- 
+
+    # Only the network-type-suffixed name counts here, not a plain checkpoint.pkl.
     if not checkpoint_file.exists():
         return None
 
-    try:
-        with open(checkpoint_file, "rb") as f:
-            checkpoint_data = pickle.load(f)
-        return checkpoint_data
-    except Exception as e:
-        print(f"Warning: Failed to load checkpoint for task {task_seed}, realization {realization_seed}: {e}")
-        return None
+    state = RealizationRecord.open(result_path, kind='auxetic',
+                                   network_type=network_type).resume_state()
+    return None if state is None else state.trainer_state
 
 
 def has_checkpoint(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):

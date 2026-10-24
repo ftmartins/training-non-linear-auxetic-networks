@@ -40,12 +40,8 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
                  eps_min, n_traj_steps, k_eigs, force_type, network_type, gradient_method,
                  n_hessian_traj_steps):
     from base.elastic_network import ElasticNetwork
-    from training.src.checkpoint_manager import (
-        get_training_result_path, _nt_filename, results_dir_for_gradient_method,
-    )
-    from training.src.data_loader import (
-        load_loss_trajectory, load_stiffness_trajectory, load_positions_trajectory,
-    )
+    from base.realization_record import RealizationRecord
+    from training.src.checkpoint_manager import results_dir_for_gradient_method
 
     if results_dir is None:
         if task_type == 'targeted':
@@ -58,24 +54,21 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
     # --results-dir override) already points at a gradient_method
     # subdirectory — never produces a doubled-up .../newton/newton/... path.
     results_dir = results_dir_for_gradient_method(results_dir, gradient_method)
-    result_path = get_training_result_path(task, realization, results_dir)
+    record = RealizationRecord.locate(results_dir, 'auxetic', task, realization,
+                                      must_exist=False, network_type=network_type)
+    result_path = record.run_dir
 
-    with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as fh:
-        net_dict = pickle.load(fh)
+    net = record.network
     network = ElasticNetwork(
-        positions=net_dict['positions'], edges=net_dict['edges'],
-        rest_lengths=net_dict['rest_lengths'], stiffnesses=net_dict['stiffnesses'],
+        positions=net.positions, edges=net.edges,
+        rest_lengths=net.rest_lengths, stiffnesses=record.current_stiffnesses,
     )
+    boundary = record.boundary
+    task_config = record.task.config
 
-    with open(result_path / _nt_filename('boundary_nodes.json', network_type), 'r') as fh:
-        boundary = {k: np.asarray(v, dtype=int) for k, v in json.load(fh).items()}
-
-    with open(result_path / _nt_filename('task_config.json', network_type), 'r') as fh:
-        task_config = json.load(fh)
-
-    loss_traj      = load_loss_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
-    stiffness_traj = load_stiffness_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
-    positions_traj = load_positions_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
+    loss_traj      = record.loss.training
+    stiffness_traj = record.stiffness_trajectory.stiffnesses
+    positions_traj = record.positions_trajectory
 
     if 'n_strain_steps' in task_config:
         n_strain_steps = task_config['n_strain_steps']
