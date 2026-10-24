@@ -56,6 +56,7 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from base.config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_strain_steps, get_n_nodes
 from base.network_utils import create_auxetic_network, get_square_boundary_nodes
 from base.elastic_network import ElasticNetwork
+from base.realization_record import RealizationRecord
 from training.src.task_generator import generate_task_config
 from training.src.training_functions import (
     compute_quasistatic_trajectory_auxetic,
@@ -223,9 +224,12 @@ def compute_actuation_and_modes(
     if n_strain_steps is None:
         n_strain_steps = get_n_strain_steps(task_seed)
 
-    loss, stiffness_traj = load_trajectories(task_seed, realization_seed, data_dir)
-    best_step = int(np.argmin(loss))
-    best_stiffness = stiffness_traj[best_step]
+    # K* from the realization record (ADR 0004): raises rather than pick a NaN step.
+    record = RealizationRecord.locate(data_dir, 'auxetic', task_seed, realization_seed,
+                                      network_type=None)
+    loss = record.loss.training
+    best_step = record.best_loss_step
+    best_stiffness = record.best_loss_stiffnesses
 
     task_config = generate_task_config(task_seed)
     compression_strains = task_config["compression_strains"]
