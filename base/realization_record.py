@@ -39,6 +39,7 @@ import json
 import pickle
 import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 
@@ -321,10 +322,40 @@ class RealizationRecord:
             self.__dict__.pop(name, None)
 
     def wipe(self):
-        """Delete everything stored for this realization and start an empty directory."""
-        shutil.rmtree(self.run_dir)
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        """Delete everything stored for this realization (auxetic: only this network type's
+        files; jammed and lattice runs share a directory)."""
+        self._reader.wipe()
         self.refresh()
+
+    def meta_file_name(self, stem):
+        """File name this layout gives a run_provenance record ('training_meta',
+        'run_provenance'), for training.src.run_provenance to write."""
+        return self._reader.meta_file_name(stem)
+
+    # Auxetic writes (the ensemble runners and their trainers).
+
+    def save_results(self, history, network, task_config, boundary=None):
+        """Trajectories, final network, boundary nodes and task config from a trainer
+        history and network."""
+        self._reader.save_results(history, network, task_config, boundary)
+        self.refresh()
+
+    def save_training_checkpoint(self, step, history, network, task_config, task_id,
+                                 realization_id):
+        """The auxetic resume state: everything the trainer needs to continue at `step`."""
+        self._reader.save_training_checkpoint(step, history, network, task_config, task_id,
+                                              realization_id)
+        self.refresh()
+
+    def drop_checkpoint(self):
+        self._reader.drop_checkpoint()
+        self.refresh()
+
+    def mark_complete(self):
+        self._reader.mark_complete()
+
+    def mark_complete_small_loss(self, reduction_ratio=None):
+        self._reader.mark_complete_small_loss(reduction_ratio)
 
     def write_network(self, network):
         self._reader.write_network(network)
@@ -494,6 +525,15 @@ class _AllostericReader:
 
     # Writes, byte-for-byte what allosteric_trainer wrote before the record existed.
 
+    def wipe(self):
+        shutil.rmtree(self.d)
+        self.d.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def meta_file_name(stem):
+        """File name of a run_provenance record (training_meta, run_provenance)."""
+        return f'{stem}.json'
+
     def write_network(self, network):
         np.save(self.d / 'nodes.npy', network.nodes)
         np.save(self.d / 'incidence_matrix.npy', network.incidence_matrix)
@@ -642,6 +682,86 @@ class _AuxeticReader:
             raise undetermined(f'stiffness trajectory has {len(traj.stiffnesses)} rows for '
                                f'{record.loss.n_steps} loss steps')
         return traj.stiffnesses[step]
+
+
+    # Writes, byte-for-byte what checkpoint_manager wrote before the record existed: always
+    # the network-type-suffixed name (never the plain fallback reads accept).
+
+    def _write_path(self, stem, ext):
+        if self.network_type is None:
+            return self.d / f'{stem}.{ext}'
+        return self.d / f'{stem}_{self.network_type}.{ext}'
+
+    def meta_file_name(self, stem):
+        return self._write_path(stem, 'json').name
+
+    def wipe(self):
+        if not self.d.exists():
+            return
+        suffix = f'_{self.network_type}'
+        for f in self.d.iterdir():
+            if f.is_file() and suffix in f.stem:
+                f.unlink()
+
+    @staticmethod
+    def _network_dict(network):
+        return {'positions': network.positions, 'edges': network.edges,
+                'stiffnesses': network.stiffnesses, 'rest_lengths': network.rest_lengths}
+
+    def save_results(self, history, network, task_config, boundary=None):
+        """history.pkl, boundary_nodes.json, loss / stiffness trajectories, edges,
+        final_network.pkl and task_config.json, from a trainer history and network."""
+        self.d.mkdir(parents=True, exist_ok=True)
+        stiffness_array = np.array(history.get('stiffnesses', []))
+        loss_array = np.array(history.get('loss', []))
+        boundary_to_save = None
+        if boundary is not None:
+            boundary_to_save = {k: np.asarray(v).tolist() for k, v in boundary.items()}
+        with open(self._write_path('history', 'pkl'), 'wb') as f:
+            pickle.dump({'stiffnesses': stiffness_array, 'loss': loss_array,
+                         'positions': history.get('positions', []),
+                         'freetraj': history.get('freetraj', []),
+                         'boundary': boundary_to_save}, f)
+        if boundary_to_save is not None:
+            with open(self._write_path('boundary_nodes', 'json'), 'w') as f:
+                json.dump(boundary_to_save, f, indent=2)
+        np.save(self._write_path('loss_trajectory', 'npy'), loss_array)
+        np.save(self._write_path('stiffness_trajectory', 'npy'), stiffness_array)
+        np.save(self._write_path('edges', 'npy'), np.array(network.edges))
+        with open(self._write_path('final_network', 'pkl'), 'wb') as f:
+            pickle.dump(self._network_dict(network), f)
+        self._save_task_config(task_config)
+
+    def _save_task_config(self, task_config):
+        with open(self._write_path('task_config', 'json'), 'w') as f:
+            json.dump(task_config, f, indent=2)
+
+    def save_training_checkpoint(self, step, history, network, task_config, task_id,
+                                 realization_id):
+        self.d.mkdir(parents=True, exist_ok=True)
+        with open(self._write_path('checkpoint', 'pkl'), 'wb') as f:
+            pickle.dump({'task_seed': task_id, 'realization_seed': realization_id,
+                         'current_step': step, 'history': history,
+                         'network': self._network_dict(network), 'task_config': task_config}, f)
+        self._save_task_config(task_config)
+
+    def drop_checkpoint(self):
+        path = self._write_path('checkpoint', 'pkl')
+        if path.exists():
+            path.unlink()
+
+    def mark_complete(self):
+        self.d.mkdir(parents=True, exist_ok=True)
+        with open(self._write_path('training_complete', 'txt'), 'w') as f:
+            f.write(f"Completed at {datetime.now().isoformat()}\n")
+
+    def mark_complete_small_loss(self, reduction_ratio=None):
+        self.d.mkdir(parents=True, exist_ok=True)
+        with open(self._write_path('training_complete_small_loss', 'txt'), 'w') as f:
+            f.write(f"Completed (loss reduction criterion) at {datetime.now().isoformat()}\n")
+            if reduction_ratio is not None:
+                f.write(f"Loss reduction ratio: {reduction_ratio:.2e} (initial/min)\n")
+                f.write(f"Orders of magnitude: {np.log10(reduction_ratio):.2f}\n")
 
 
 _READERS = {'allosteric': _AllostericReader, 'auxetic': _AuxeticReader}
