@@ -683,9 +683,6 @@
    }
   },
   "jax/task_00/realization_00/task_generator.py.gz": "present",
-  "jax/task_00/realization_00/training_complete_jammed.txt": {
-   "text": "Completed at <time>\n"
-  },
   "jax/task_00/realization_00/training_functions.py.gz": "present",
   "jax/task_00/realization_00/training_meta_jammed.json": {
    "json": {
