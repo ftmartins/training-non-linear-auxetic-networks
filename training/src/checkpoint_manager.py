@@ -6,7 +6,7 @@ tracking which jobs are complete for resume capability.
 
 Completion criteria (either one satisfies):
 1. Standard completion: training_complete.txt exists
-2. Loss-based completion: loss reduced by ≥1000× (3 orders of magnitude)
+2. Loss-based completion: loss reduced by ≥10^7× (7 orders of magnitude)
    and training_complete_small_loss.txt created
 """
 
@@ -90,7 +90,7 @@ def mark_training_complete_small_loss(task_seed, realization_seed, reduction_rat
     Mark a training job as complete based on loss reduction criterion.
 
     Creates training_complete_small_loss.txt marker file indicating that
-    the job achieved ≥1000× loss reduction (3 orders of magnitude).
+    the job achieved ≥10^7× loss reduction (7 orders of magnitude).
 
     Args:
         task_seed: Task index
@@ -105,9 +105,9 @@ def mark_training_complete_small_loss(task_seed, realization_seed, reduction_rat
 
 def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
     """
-    Check if training achieved 3+ orders of magnitude loss reduction.
+    Check if training achieved 7+ orders of magnitude loss reduction.
 
-    If the minimum loss is at least 1000× smaller than the initial loss,
+    If the minimum loss is at least 10^7× smaller than the initial loss,
     create an alternative completion marker and return True.
 
     Args:
@@ -119,16 +119,11 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
     Returns:
         criterion_met: Boolean indicating if loss reduction criterion is satisfied
     """
-    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-    loss_file = result_path / _nt_filename("loss_trajectory.npy", network_type)
-
-    # Check if loss file exists
-    if not loss_file.exists():
-        return False
-
+    record = _record(task_seed, realization_seed, results_dir, network_type)
     try:
-        # Load loss trajectory
-        loss = np.load(loss_file)
+        if not record.has('loss'):
+            return False
+        loss = record.loss.training
 
         # Check if we have at least 2 data points
         if len(loss) < 2:
@@ -144,7 +139,7 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         # Calculate reduction ratio
         reduction_ratio = initial_loss / min_loss
 
-        # Check if 3+ orders of magnitude (1000×)
+        # Check if 7+ orders of magnitude (10^7×)
         if reduction_ratio >= 10_000_000.0:
             # Create alternative completion marker
             mark_training_complete_small_loss(
@@ -172,7 +167,7 @@ def is_training_complete(task_seed, realization_seed, results_dir=None, network_
 
     Completion criteria (either one satisfies):
     1. Standard completion: training_complete.txt exists
-    2. Loss-based completion: loss reduced by ≥1000× (3 orders of magnitude)
+    2. Loss-based completion: loss reduced by ≥10^7× (7 orders of magnitude)
        and training_complete_small_loss.txt created
 
     Args:
@@ -184,14 +179,9 @@ def is_training_complete(task_seed, realization_seed, results_dir=None, network_
     Returns:
         is_complete: Boolean indicating if job is complete by either criterion
     """
-    result_path = get_training_result_path(task_seed, realization_seed, results_dir)
-
-    # Fast path 1: Check standard completion marker
-    #if (result_path / "training_complete.txt").exists():
-    #    return True
-
-    # Fast path 2: Check alternative completion marker
-    if (result_path / _nt_filename("training_complete_small_loss.txt", network_type)).exists():
+    # Fast path: the loss-reduction marker (plain-named older jammed runs included).
+    if _record(task_seed, realization_seed, results_dir, network_type).has_marker(
+            'training_complete_small_loss'):
         return True
 
     # Slow path: Evaluate loss reduction criterion
@@ -242,7 +232,7 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
 
     Completion markers (either indicates job is complete):
         - training_complete.txt: Created when full training completes normally
-        - training_complete_small_loss.txt: Created when loss reduces by ≥1000×
+        - training_complete_small_loss.txt: Created when loss reduces by ≥10^7×
 
     Args:
         task_seed: Task index

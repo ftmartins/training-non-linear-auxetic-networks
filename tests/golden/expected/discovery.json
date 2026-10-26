@@ -15912,10 +15912,10 @@
    "value": false
   },
   "auxetic_nets/targeted_results/old_targeted/t0/r0/plain": {
-   "value": false
+   "value": true
   },
   "auxetic_nets/targeted_results_sqr/jax/t0/r0/plain": {
-   "value": false
+   "value": true
   },
   "auxetic_nets/targeted_results_sqr/newton/t0/r0/jammed": {
    "value": false
@@ -15927,7 +15927,7 @@
    "value": false
   },
   "auxetic_nets/targeted_results_sqr/old/t0/r0/plain": {
-   "value": false
+   "value": true
   },
   "synthetic/drop_1e6": {
    "value": false
@@ -15943,6 +15943,7 @@
   }
  },
  "markers_written": [
+  "auxetic_nets/targeted_results_sqr/jax/task_00/realization_00/training_complete_small_loss_jammed.txt",
   "synthetic/task_00/realization_21/loss_trajectory_jammed.npy",
   "synthetic/task_00/realization_21/training_complete_small_loss_jammed.txt",
   "synthetic/task_00/realization_22/loss_trajectory_jammed.npy",

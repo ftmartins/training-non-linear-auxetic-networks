@@ -351,6 +351,10 @@ class RealizationRecord:
         self._reader.drop_checkpoint()
         self.refresh()
 
+    def has_marker(self, name):
+        """Whether the marker file `name` (e.g. 'training_complete_small_loss') exists."""
+        return self._reader.path(name, 'txt').exists()
+
     def mark_complete(self):
         self._reader.mark_complete()
 
