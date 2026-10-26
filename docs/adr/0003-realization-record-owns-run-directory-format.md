@@ -25,5 +25,5 @@ run writes the old layout.
   resumed); a new format, if any, is designed separately and applies to new runs only.
 - Format changes reach `main` and the replication repo only after the active Network A campaign
   ends and a replication impact check (canonical seed tables, Figs 1-6 caches, replay) passes.
-- Not-migrated code (`moduli_ensemble_runner.py`, `auxetic_cl_trainer.py`, legacy `src/`,
+- Not-migrated code (legacy `src/`,
   `runners/`, speedup experiments) keeps writing its own layouts; the record must still read them.
