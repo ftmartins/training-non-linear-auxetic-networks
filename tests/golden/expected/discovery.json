@@ -15943,11 +15943,9 @@
   }
  },
  "markers_written": [
-  "auxetic_nets/targeted_results_sqr/jax/task_00/realization_00/training_complete_small_loss_jammed.txt",
   "synthetic/task_00/realization_21/loss_trajectory_jammed.npy",
   "synthetic/task_00/realization_21/training_complete_small_loss_jammed.txt",
   "synthetic/task_00/realization_22/loss_trajectory_jammed.npy",
-  "synthetic/task_00/realization_22/training_complete_small_loss_jammed.txt",
   "synthetic/task_00/realization_23/loss_trajectory_jammed.npy"
  ]
 }

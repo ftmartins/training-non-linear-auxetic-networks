@@ -107,8 +107,8 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
     """
     Check if training achieved 7+ orders of magnitude loss reduction.
 
-    If the minimum loss is at least 10^7× smaller than the initial loss,
-    create an alternative completion marker and return True.
+    True if the minimum loss is at least 10^7× smaller than the initial loss. Read-only:
+    it writes no marker (mark_training_complete_small_loss does, when asked).
 
     Args:
         task_seed: Task index
@@ -140,17 +140,7 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
         reduction_ratio = initial_loss / min_loss
 
         # Check if 7+ orders of magnitude (10^7×)
-        if reduction_ratio >= 10_000_000.0:
-            # Create alternative completion marker
-            mark_training_complete_small_loss(
-                task_seed, realization_seed,
-                reduction_ratio=reduction_ratio,
-                results_dir=results_dir,
-                network_type=network_type,
-            )
-            return True
-
-        return False
+        return bool(reduction_ratio >= 10_000_000.0)
 
     except Exception as e:
         # Handle corrupted files or other errors gracefully

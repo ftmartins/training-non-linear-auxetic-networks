@@ -393,9 +393,6 @@
   "jax/task_00/realization_00/training_complete_jammed.txt": {
    "text": "Completed at <time>\n"
   },
-  "jax/task_00/realization_00/training_complete_small_loss_jammed.txt": {
-   "text": "Completed (loss reduction criterion) at <time>\nLoss reduction ratio: 1.00e+07 (initial/min)\nOrders of magnitude: 7.00\n"
-  },
   "jax/task_00/realization_00/training_functions.py.gz": "code snapshot",
   "jax/task_00/realization_00/training_meta_jammed.json": {
    "json": {
