@@ -4,10 +4,10 @@ Checkpoint management and result I/O for ensemble training.
 This module handles saving and loading training results, as well as
 tracking which jobs are complete for resume capability.
 
-Completion criteria (either one satisfies):
-1. Standard completion: training_complete.txt exists
-2. Loss-based completion: loss reduced by ≥10^7× (7 orders of magnitude)
-   and training_complete_small_loss.txt created
+A job counts as complete (is_training_complete, the runners' skip rule) when
+training_complete_small_loss.txt exists or its loss fell by ≥10^7× (7 orders of
+magnitude). training_complete.txt marks a run whose training stopped because it
+converged (the runners write it); it does not make a job count as complete.
 """
 
 import os
@@ -155,10 +155,8 @@ def is_training_complete(task_seed, realization_seed, results_dir=None, network_
     """
     Check if a training job is marked as complete.
 
-    Completion criteria (either one satisfies):
-    1. Standard completion: training_complete.txt exists
-    2. Loss-based completion: loss reduced by ≥10^7× (7 orders of magnitude)
-       and training_complete_small_loss.txt created
+    Complete when training_complete_small_loss.txt exists or the loss fell by ≥10^7×
+    (7 orders of magnitude). Read-only.
 
     Args:
         task_seed: Task index
@@ -206,8 +204,6 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
                     final_network.pkl     # Final network state
                     task_config.json      # Task configuration
                     boundary_nodes.json   # Boundary node indices used in training
-                    training_complete.txt # Standard completion marker
-                    training_complete_small_loss.txt  # Alternative marker (loss-based)
 
     The history.pkl contains the complete training trajectory:
         - 'stiffnesses': Array of stiffness values at each step (n_steps, n_edges)
@@ -220,9 +216,8 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
         - loss_trajectory.npy: Loss values at each step
         - stiffness_trajectory.npy: Stiffness values at each step
 
-    Completion markers (either indicates job is complete):
-        - training_complete.txt: Created when full training completes normally
-        - training_complete_small_loss.txt: Created when loss reduces by ≥10^7×
+    Writes no completion marker: the runners mark a run complete (mark_training_complete)
+    only when training stopped because it converged.
 
     Args:
         task_seed: Task index
@@ -238,9 +233,6 @@ def save_training_results(task_seed, realization_seed, history, network, task_co
     """
     _record(task_seed, realization_seed, results_dir, network_type).save_results(
         history, network, task_config, boundary_dict)
-
-    # Mark complete
-    mark_training_complete(task_seed, realization_seed, results_dir, network_type)
 
 
 def save_checkpoint(task_seed, realization_seed, history, network, task_config,

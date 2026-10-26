@@ -228,8 +228,9 @@ class TargetedAuxeticTrainer:
                                       Loss(training=loss), trainer_state=history), status)
 
     def save_final(self, record, state, status):
-        """Final results; the checkpoint is the run's resume state: dropped only when
-        training stopped because it converged, rewritten at the last step reached after a
+        """Final results, and the completion marker only when training stopped because it
+        converged. The checkpoint is the run's resume state: dropped only when training
+        stopped because it converged, rewritten at the last step reached after a
         run that used all its steps (a later --steps extends from there), and left as the
         trainer's last periodic one after a NaN."""
         history = state.trainer_state
@@ -244,6 +245,7 @@ class TargetedAuxeticTrainer:
         early_stop = not self.failed and len(loss_list) < self.n_steps and final_loss < LOSS_TOL
         if early_stop:
             record.drop_checkpoint()
+            record.mark_complete()
         elif not self.failed:
             save_checkpoint(self.task_id, self.realization_id, history, self.network,
                             self.task_config, current_step=len(loss_list),

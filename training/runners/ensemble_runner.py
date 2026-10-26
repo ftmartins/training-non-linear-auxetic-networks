@@ -191,8 +191,9 @@ class GeneralAuxeticTrainer:
                                       Loss(training=loss), trainer_state=history), status)
 
     def save_final(self, record, state, status):
-        """Final results (with the task config regenerated, not the checkpoint's); the
-        checkpoint is removed whatever the outcome."""
+        """Final results (with the task config regenerated, not the checkpoint's) and, only
+        when training stopped because it converged, the completion marker; the checkpoint
+        is removed whatever the outcome."""
         history = state.trainer_state
         save_training_results(
             task_seed=self.task_id, realization_seed=self.realization_id, history=history,
@@ -203,6 +204,9 @@ class GeneralAuxeticTrainer:
         self.final_loss = (history['loss'][-1] if 'loss' in history and history['loss']
                            else float('nan'))
         self.n_steps_done = len(history.get('loss', []))
+        if (np.isfinite(self.final_loss) and self.n_steps_done < self.n_steps
+                and self.final_loss < 1e-6):
+            record.mark_complete()   # training stopped because it converged
 
 
 def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoint=True,
