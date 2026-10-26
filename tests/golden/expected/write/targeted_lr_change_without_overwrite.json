@@ -776,6 +776,6 @@
  "is_training_complete": false,
  "outcomes": [
   true,
-  false
+  "HyperparameterMismatchError: <root>/jax/task_00/realization_00: recorded critical hyperparameters (solver/gradient_method/learning_rate/k_min/k_max/force_tol/optimizer/realization_seed) differ from this run's. Resuming would mix incompatible settings into one training trajectory. Pass overwrite=True (--overwrite) to wipe it and restart from scratch."
  ]
 }

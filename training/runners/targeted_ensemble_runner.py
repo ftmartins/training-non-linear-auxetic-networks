@@ -74,7 +74,7 @@ from base.stored_network import load_stored_network, network_fingerprint
 from base.realization_record import RealizationRecord, Loss
 from training.src import realization_lifecycle
 from training.src.realization_lifecycle import TrainState, TrainResult, TrainingLossBelow
-from training.src.run_provenance import DEFAULT_CRITICAL_KEYS
+from training.src.run_provenance import DEFAULT_CRITICAL_KEYS, HyperparameterMismatchError
 from training.src.checkpoint_manager import (
     is_training_complete,
     save_training_results,
@@ -270,7 +270,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             gradient), 'jax' (autodiff), or 'fire'/'parallel' (Cython FIRE + finite-difference)
         overwrite: If False (default) and this job's recorded solver/gradient_method/
             learning_rate/k_min/k_max/force_tol conflict with the current run's values,
-            the job is refused. If True, the job's saved state (checkpoint, results, meta) is
+            raises HyperparameterMismatchError. If True, the job's saved state (checkpoint, results, meta) is
             wiped and restarted from scratch under the new hyperparameters — never resumed
             under a relabeled meta, which would make training_meta.json describe a
             trajectory that never actually happened.
@@ -313,13 +313,11 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     }
 
     def refuse(record):
-        print(f"\n{'='*80}")
-        print(f"ERROR: Targeted Task {task_id}, Realization {realization_seed}")
-        print(f"Recorded solver/gradient_method/learning_rate/k_min/k_max/force_tol "
-              f"differ from this run's. Pass overwrite=True (--overwrite) to wipe and "
-              f"restart from scratch under the new hyperparameters.")
-        print(f"{'='*80}\n")
-        return False
+        raise HyperparameterMismatchError(
+            f"{record.run_dir}: recorded critical hyperparameters (solver/gradient_method/"
+            f"learning_rate/k_min/k_max/force_tol/optimizer/realization_seed) differ from this "
+            f"run's. Resuming would mix incompatible settings into one training trajectory. "
+            f"Pass overwrite=True (--overwrite) to wipe it and restart from scratch.")
 
     def done(record):
         return is_training_complete(task_id, realization_seed, results_dir=results_dir,
@@ -341,6 +339,8 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             code_files=_CODE_SNAPSHOT_FILES, target_steps=_NSTEPS, overwrite=overwrite,
             stop_rule=TrainingLossBelow(LOSS_TOL), on_mismatch=refuse, done=done,
             steps_key='n_steps')
+    except HyperparameterMismatchError:
+        raise
     except Exception as e:
         elapsed = time.time() - start_time
         print(f"\n{'='*80}")
@@ -351,8 +351,6 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
         import traceback
         traceback.print_exc()
         return False
-    if outcome.stage == 'refused':
-        return outcome.refusal
     if outcome.stage == 'complete' and outcome.state is None:
         print(f"{'='*80}\n")
         return True
