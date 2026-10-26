@@ -7,6 +7,8 @@ trajectory, resume state, ...) and never open files themselves.
     rec = RealizationRecord.open(run_dir)                  # task kind detected from its files
     rec = RealizationRecord.locate(root, 'allosteric', ('targeted', 0), 3)
     rec.loss.training, rec.network.edges, rec.resume_state()
+    for rec in RealizationRecord.iterate(root, 'auxetic'):  # rec.cell, rec.realization_id
+        ...
 
 Parts are read on first access and cached. A part the run did not store raises
 MissingRecordPart (a FileNotFoundError), never returns None; rec.has(part) asks first.
@@ -37,6 +39,7 @@ Each on-disk layout is a private reader class behind the record. Layouts so far:
 """
 import json
 import pickle
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -180,10 +183,12 @@ def incidence_to_edges(incidence_matrix):
 class RealizationRecord:
     """One realization's record. Build with open() or locate(), not the constructor."""
 
-    def __init__(self, run_dir, reader):
+    def __init__(self, run_dir, reader, cell=None, realization_id=None):
         self.run_dir = Path(run_dir)
         self.kind = reader.kind
         self._reader = reader
+        self.cell = cell                      # None for a record opened from a bare directory
+        self.realization_id = realization_id
 
     @classmethod
     def open(cls, run_dir, kind=None, **layout):
@@ -210,7 +215,20 @@ class RealizationRecord:
         run_dir = _READERS[kind].run_dir(Path(root), cell, realization_id)
         if must_exist and not run_dir.is_dir():
             raise NotARealization(f'{run_dir}: no such directory')
-        return cls(run_dir, _READERS[kind](run_dir, **layout))
+        return cls(run_dir, _READERS[kind](run_dir, **layout), cell, realization_id)
+
+    @classmethod
+    def iterate(cls, root, kind, cell=None, **layout):
+        """Records of every realization stored under data root `root`, cell by cell in
+        numeric order (allosteric: geometry 'targeted' first, then numbered; then task, then
+        realization). Only realizations present on disk are yielded, whatever files they hold:
+        ask rec.has(part) before reading. rec.cell and rec.realization_id say where each sits.
+        cell restricts to one cell (see locate()); a root that does not exist yields nothing."""
+        if kind not in _READERS:
+            raise ValueError(f'unknown task kind {kind!r}; known: {", ".join(KINDS)}')
+        reader = _READERS[kind]
+        for found_cell, realization_id, run_dir in reader.iterate(Path(root), cell):
+            yield cls(run_dir, reader(run_dir, **layout), found_cell, realization_id)
 
     def has(self, part):
         """Whether the realization stored `part` (one of PARTS)."""
@@ -409,6 +427,17 @@ def _detect_kind(run_dir):
     raise NotARealization(f'{run_dir}: no known realization layout')
 
 
+def _numbered(parent, prefix):
+    """(number, directory) of the subdirectories of `parent` named <prefix>_<integer>, in
+    numeric order; nothing when `parent` is not a directory."""
+    if not parent.is_dir():
+        return []
+    pattern = re.compile(rf'{prefix}_(\d+)')
+    found = [(int(m.group(1)), p) for p in parent.iterdir()
+             if p.is_dir() and (m := pattern.fullmatch(p.name))]
+    return sorted(found, key=lambda item: item[0])
+
+
 def _existing(path):
     if not path.exists():
         raise MissingRecordPart(str(path))
@@ -429,6 +458,17 @@ class _AllostericReader:
     def run_dir(root, cell, realization_id):
         geometry_id, task_id = cell
         return root / f'geometry_{geometry_id}' / f'task_{task_id}' / f'realization_{realization_id}'
+
+    @staticmethod
+    def iterate(root, cell=None):
+        geometries = [('targeted', root / 'geometry_targeted')] if (root / 'geometry_targeted').is_dir() else []
+        geometries += _numbered(root, 'geometry')
+        for geometry_id, geometry_dir in geometries:
+            for task_id, task_dir in _numbered(geometry_dir, 'task'):
+                if cell is not None and cell != (geometry_id, task_id):
+                    continue
+                for realization_id, run_dir in _numbered(task_dir, 'realization'):
+                    yield (geometry_id, task_id), realization_id, run_dir
 
     @staticmethod
     def recognises(run_dir):
@@ -598,6 +638,14 @@ class _AuxeticReader:
         padded = root / f'task_{cell:02d}' / f'realization_{realization_id:02d}'
         unpadded = root / f'task_{cell}' / f'realization_{realization_id:02d}'
         return unpadded if not padded.exists() and unpadded.exists() else padded
+
+    @staticmethod
+    def iterate(root, cell=None):
+        for task_id, task_dir in _numbered(root, 'task'):
+            if cell is not None and cell != task_id:
+                continue
+            for realization_id, run_dir in _numbered(task_dir, 'realization'):
+                yield task_id, realization_id, run_dir
 
     @classmethod
     def recognises(cls, run_dir):
