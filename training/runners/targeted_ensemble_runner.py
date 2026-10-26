@@ -253,7 +253,7 @@ class TargetedAuxeticTrainer:
         self.final_loss, self.n_steps_done = final_loss, len(loss_list)
 
 
-def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoint=True,
+def run_single_training(task_id, realization_id=0, verbose=False, use_checkpoint=True,
                         gradient_method='newton', network_type=NETWORK_TYPE, overwrite=False,
                         lr_override=None, steps_override=None, network_file=None,
                         results_root=None):
@@ -263,7 +263,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
 
     Args:
         task_id: Task index (0 to 4)
-        realization_seed: Realization index (default: 0)
+        realization_id: Realization index (default: 0)
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
         verbose: Print detailed progress
         use_checkpoint: Ignored; the lifecycle always resumes from a checkpoint when one
@@ -287,7 +287,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     _LR = LEARNING_RATE if lr_override is None else lr_override
     _NSTEPS = N_STEPS if steps_override is None else steps_override
     print(f"\n{'='*80}")
-    print(f"Starting Targeted Task {task_id}, Realization {realization_seed}")
+    print(f"Starting Targeted Task {task_id}, Realization {realization_id}")
     print(f"{'='*80}")
     root = TARGETED_RESULTS_DIR if results_root is None else Path(results_root)
     # Results are partitioned by gradient_method (newton/newton_fd/fire/parallel/jax
@@ -295,12 +295,12 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     # other's checkpoints and results).
     results_dir = results_dir_for_gradient_method(root / gradient_method, gradient_method)
 
-    # realization_seed (0..N_REALIZATIONS-1) is a serial index into the
+    # realization_id (0..N_REALIZATIONS-1) is a serial index into the
     # screened-good seeds for this task, not a literal RNG seed — see
     # training/src/good_realizations.py / docs/realization_screening.md.
     # Recorded as a critical key, so a mismatch between this run's screened seed and
     # whatever seed produced a resumed checkpoint is caught like any other.
-    screened_seed = get_realization_seed('auxetic_targeted', task_id, realization_seed)
+    screened_seed = get_realization_seed('auxetic_targeted', task_id, realization_id)
     optimizer = 'fire' if (gradient_method == 'jax' and USE_OPT_FIRE) else 'gradient_descent'
     hparams = {
         'learning_rate': _LR,
@@ -322,13 +322,13 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
             f"Pass overwrite=True (--overwrite) to wipe it and restart from scratch.")
 
     def done(record):
-        return is_training_complete(task_id, realization_seed, results_dir=results_dir,
+        return is_training_complete(task_id, realization_id, results_dir=results_dir,
                                     network_type=network_type)
 
-    record = RealizationRecord.locate(results_dir, 'auxetic', task_id, realization_seed,
+    record = RealizationRecord.locate(results_dir, 'auxetic', task_id, realization_id,
                                       must_exist=False, network_type=network_type)
     trainer = TargetedAuxeticTrainer(
-        task_id=task_id, realization_id=realization_seed, realization_seed=screened_seed,
+        task_id=task_id, realization_id=realization_id, realization_seed=screened_seed,
         gradient_method=gradient_method, network_type=network_type, learning_rate=_LR,
         n_steps=_NSTEPS, network_file=network_file, verbose=verbose)
     trainer.results_dir = results_dir
@@ -346,7 +346,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     except Exception as e:
         elapsed = time.time() - start_time
         print(f"\n{'='*80}")
-        print(f"ERROR: Targeted Task {task_id}, Realization {realization_seed}")
+        print(f"ERROR: Targeted Task {task_id}, Realization {realization_id}")
         print(f"Time elapsed: {elapsed/60:.2f} minutes")
         print(f"Exception: {e}")
         print(f"{'='*80}\n")
@@ -360,7 +360,7 @@ def run_single_training(task_id, realization_seed=0, verbose=False, use_checkpoi
     elapsed = time.time() - start_time
     tag = 'FAILURE' if trainer.failed else 'SUCCESS'
     print(f"\n{'='*80}")
-    print(f"{tag}: Targeted Task {task_id}, Realization {realization_seed}")
+    print(f"{tag}: Targeted Task {task_id}, Realization {realization_id}")
     print(f"Time elapsed: {elapsed/60:.2f} minutes")
     if trainer.failed:
         print(f"Final loss is not finite: {trainer.final_loss}"
@@ -418,9 +418,9 @@ def run_all_targeted(resume=True, verbose=False, gradient_method='newton', netwo
     failure_count = 0
     start_time_overall = time.time()
 
-    for idx, (task_id, realization_seed) in enumerate(jobs):
+    for idx, (task_id, realization_id) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
-        success = run_single_training(task_id, realization_seed, verbose=verbose,
+        success = run_single_training(task_id, realization_id, verbose=verbose,
                                       gradient_method=gradient_method, network_type=network_type,
                                       overwrite=overwrite)
 

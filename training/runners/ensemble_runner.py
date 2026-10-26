@@ -209,7 +209,7 @@ class GeneralAuxeticTrainer:
             record.mark_complete()   # training stopped because it converged
 
 
-def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoint=True,
+def run_single_training(task_seed, realization_id, verbose=False, use_checkpoint=True,
                         gradient_method='parallel', network_type=NETWORK_TYPE, overwrite=False,
                         lr_override=None, steps_override=None):
     """
@@ -217,7 +217,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
 
     Args:
         task_seed: Task index (0 to N_TASKS-1)
-        realization_seed: Realization index (0 to N_REALIZATIONS-1)
+        realization_id: Realization index (0 to N_REALIZATIONS-1)
         verbose: Print detailed progress
         use_checkpoint: Ignored; the lifecycle always resumes from a checkpoint when one
             exists (kept for callers)
@@ -236,7 +236,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         success: Boolean indicating success
     """
     print(f"\n{'='*80}")
-    print(f"Starting Task {task_seed}, Realization {realization_seed}")
+    print(f"Starting Task {task_seed}, Realization {realization_id}")
     print(f"{'='*80}")
     _LR = LEARNING_RATE if lr_override is None else lr_override
     _NSTEPS = N_STEPS if steps_override is None else steps_override
@@ -246,12 +246,12 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
     # checkpoints and results).
     results_dir = results_dir_for_gradient_method(RESULTS_DIR, gradient_method)
 
-    # realization_seed (0..N_REALIZATIONS-1) is a serial index into the
+    # realization_id (0..N_REALIZATIONS-1) is a serial index into the
     # screened-good seeds for this task, not a literal RNG seed — see
     # training/src/good_realizations.py / docs/realization_screening.md.
     # Recorded as a critical key, so a mismatch between this run's screened seed and
     # whatever seed produced a resumed checkpoint is caught like any other.
-    screened_seed = get_realization_seed('auxetic_general', task_seed, realization_seed)
+    screened_seed = get_realization_seed('auxetic_general', task_seed, realization_id)
     optimizer = 'fire' if (gradient_method == 'jax' and USE_OPT_FIRE) else 'gradient_descent'
     hparams = {
         'learning_rate': _LR,
@@ -273,13 +273,13 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
             f"Pass overwrite=True (--overwrite) to wipe it and restart from scratch.")
 
     def done(record):
-        return is_training_complete(task_seed, realization_seed, results_dir=results_dir,
+        return is_training_complete(task_seed, realization_id, results_dir=results_dir,
                                     network_type=network_type)
 
-    record = RealizationRecord.locate(results_dir, 'auxetic', task_seed, realization_seed,
+    record = RealizationRecord.locate(results_dir, 'auxetic', task_seed, realization_id,
                                       must_exist=False, network_type=network_type)
     trainer = GeneralAuxeticTrainer(
-        task_id=task_seed, realization_id=realization_seed, realization_seed=screened_seed,
+        task_id=task_seed, realization_id=realization_id, realization_seed=screened_seed,
         gradient_method=gradient_method, network_type=network_type, learning_rate=_LR,
         n_steps=_NSTEPS, results_dir=results_dir, verbose=verbose)
     start_time = time.time()
@@ -296,7 +296,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
     except Exception as e:
         elapsed = time.time() - start_time
         print(f"\n{'='*80}")
-        print(f"ERROR: Task {task_seed}, Realization {realization_seed}")
+        print(f"ERROR: Task {task_seed}, Realization {realization_id}")
         print(f"Time elapsed: {elapsed/60:.2f} minutes")
         print(f"Exception: {e}")
         print(f"{'='*80}\n")
@@ -310,7 +310,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
     elapsed = time.time() - start_time
     failed = not np.isfinite(trainer.final_loss)
     print(f"\n{'='*80}")
-    print(f"{'FAILURE' if failed else 'SUCCESS'}: Task {task_seed}, Realization {realization_seed}")
+    print(f"{'FAILURE' if failed else 'SUCCESS'}: Task {task_seed}, Realization {realization_id}")
     print(f"Time elapsed: {elapsed/60:.2f} minutes")
     print(f"Final loss is not finite: {trainer.final_loss}" if failed
           else f"Final loss: {trainer.final_loss:.4e}")
@@ -358,9 +358,9 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     failure_count = 0
     start_time_overall = time.time()
 
-    for idx, (task_seed, realization_seed) in enumerate(jobs):
+    for idx, (task_seed, realization_id) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
-        success = run_single_training(task_seed, realization_seed, verbose=verbose,
+        success = run_single_training(task_seed, realization_id, verbose=verbose,
                                       gradient_method=gradient_method, network_type=network_type,
                                       overwrite=overwrite)
 
