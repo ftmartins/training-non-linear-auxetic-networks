@@ -32,6 +32,7 @@ for _p in [str(_ROOT), str(_SRC)]:
 from base.config import *
 from base.config import get_n_nodes, get_n_strain_steps
 from base.network_utils import create_auxetic_network
+from base.stored_network import load_stored_network, network_fingerprint
 from training.src.task_generator import (
     generate_task_config,
     generate_realization_stiffnesses,
@@ -85,8 +86,9 @@ class GeneralAuxeticTrainer:
     initial draw, the gradient-descent trainer, and the final save."""
 
     def __init__(self, *, task_id, realization_id, realization_seed, gradient_method,
-                 network_type, learning_rate, n_steps, results_dir, verbose):
+                 network_type, learning_rate, n_steps, results_dir, verbose, network_file=None):
         self.task_id, self.realization_id = task_id, realization_id
+        self.network_file = network_file
         self.realization_seed = realization_seed
         self.gradient_method, self.network_type = gradient_method, network_type
         self.learning_rate, self.n_steps = learning_rate, n_steps
@@ -109,14 +111,23 @@ class GeneralAuxeticTrainer:
             self.task_config = generate_task_config(self.task_id)
         print(f"  Compression strains: {self.task_config['compression_strains']}")
         print(f"  Target Poisson ratios: {self.task_config['target_poisson_ratios']}")
-        self.network, self.boundary = create_auxetic_network(
-            n_nodes=get_n_nodes(self.task_id),
-            packing_seed=self.task_config['packing_seed'],
-            force_type=FORCE_TYPE,
-            boundary_margin=BOUNDARY_MARGIN,
-            central_force=PACKING_PARAMS['central'],
-            network_type=self.network_type,
-        )
+        # The packing is hardware-dependent (docs/adr/0002-auxetic-ensemble-on-stored-
+        # network-a.md), so runs that must share a network load it from network_file.
+        if self.network_file is not None:
+            self.network, self.boundary, _ = load_stored_network(self.network_file)
+            n_expected = get_n_nodes(self.task_id)
+            if len(self.network.positions) > n_expected:
+                raise ValueError(f"{self.network_file}: {len(self.network.positions)} nodes, "
+                                 f"more than task {self.task_id} uses ({n_expected})")
+        else:
+            self.network, self.boundary = create_auxetic_network(
+                n_nodes=get_n_nodes(self.task_id),
+                packing_seed=self.task_config['packing_seed'],
+                force_type=FORCE_TYPE,
+                boundary_margin=BOUNDARY_MARGIN,
+                central_force=PACKING_PARAMS['central'],
+                network_type=self.network_type,
+            )
 
     def fresh_state(self):
         print(f"  Network created: {len(self.network.positions)} nodes, {len(self.network.edges)} edges")
@@ -126,6 +137,15 @@ class GeneralAuxeticTrainer:
         self.network.save_original_parameters()
         print(f"  Stiffnesses initialized: range [{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
         return TrainState(0, initial_stiffnesses, Loss(training=np.empty(0)), trainer_state={})
+
+    def extra_hparams(self, state):
+        # Only runs on a stored network record its fingerprint (a critical key, so resuming
+        # onto a different network fails); other runs keep today's training_meta.
+        if self.network_file is None:
+            return {}
+        fingerprint = network_fingerprint(self.network.positions, self.network.edges)
+        print(f"  Network fingerprint: {fingerprint}")
+        return {'network_fingerprint': fingerprint}
 
     def resumed_state(self, resume):
         ckpt = resume.trainer_state
@@ -211,7 +231,7 @@ class GeneralAuxeticTrainer:
 
 def run_single_training(task_seed, realization_id, verbose=False, use_checkpoint=True,
                         gradient_method='parallel', network_type=NETWORK_TYPE, overwrite=False,
-                        lr_override=None, steps_override=None):
+                        lr_override=None, steps_override=None, network_file=None):
     """
     Run a single training job with checkpoint support.
 
@@ -224,6 +244,8 @@ def run_single_training(task_seed, realization_id, verbose=False, use_checkpoint
         gradient_method: 'newton' (IFT), 'newton_fd' (Newton loss + finite-difference
             gradient), 'jax' (autodiff), or 'fire'/'parallel' (Cython FIRE + finite-difference)
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+        network_file: Stored-network file (base.stored_network) to train on instead of
+            regenerating the hardware-dependent packing; its fingerprint is then recorded.
         overwrite: If False (default) and this job's recorded solver/gradient_method/
             learning_rate/k_min/k_max/force_tol conflict with the current run's values,
             raises HyperparameterMismatchError instead of continuing (n_steps is exempt —
@@ -281,7 +303,7 @@ def run_single_training(task_seed, realization_id, verbose=False, use_checkpoint
     trainer = GeneralAuxeticTrainer(
         task_id=task_seed, realization_id=realization_id, realization_seed=screened_seed,
         gradient_method=gradient_method, network_type=network_type, learning_rate=_LR,
-        n_steps=_NSTEPS, results_dir=results_dir, verbose=verbose)
+        n_steps=_NSTEPS, results_dir=results_dir, verbose=verbose, network_file=network_file)
     start_time = time.time()
     try:
         if not TRAINING_FUNCTIONS_AVAILABLE:
@@ -484,6 +506,13 @@ Examples:
              'from the hyperparameter-mismatch guard, so this works on a plain resume.'
     )
 
+    parser.add_argument(
+        '--network-file', type=Path, default=None,
+        help='Train on a stored network (e.g. base/networks/auxetic_network_A.npz) instead of '
+             'regenerating the hardware-dependent packing (single mode). The general family '
+             'normally packs a different network per task; a stored network is one network.'
+    )
+
     args = parser.parse_args()
 
     # Validate config before running
@@ -502,7 +531,8 @@ Examples:
                                       network_type=args.network_type,
                                       overwrite=args.overwrite,
                                       lr_override=args.learning_rate,
-                                      steps_override=args.steps)
+                                      steps_override=args.steps,
+                                      network_file=args.network_file)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':

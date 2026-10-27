@@ -158,7 +158,8 @@ which one a run got depended on the node it landed on. Evidence and the node-by-
 in issue #2.
 
 **Reuse a stored network instead of regenerating it.** `base/networks/auxetic_network_A.npz` is
-Network A, and `targeted_ensemble_runner.py` loads a stored network when given `--network-file`:
+Network A, and both auxetic runners (`targeted_ensemble_runner.py`, `ensemble_runner.py`) load a
+stored network when given `--network-file` (single mode):
 
 ```bash
 python targeted_ensemble_runner.py --mode single --task 0 --realization 20 \
@@ -172,7 +173,9 @@ and the canonical figure ensemble keeps only Network A runs (ADR 0002). Notes:
 
 - Always pass `--network-file` for new targeted auxetic runs. Without it the runner regenerates
   the packing and the network depends on the node.
-- The general ensemble runner (`ensemble_runner.py`) has no `--network-file` option yet.
+- The general family normally packs a different network per task (`packing_seed` = task); with
+  `--network-file` it trains on the one stored network. The allosteric trainer does not use the
+  jammed packing, so it has no such option.
 - A run that regenerates the packing is not checked against Network A; compare the recorded
   `network_fingerprint` with `NETWORK_A_FINGERPRINT`.
 
