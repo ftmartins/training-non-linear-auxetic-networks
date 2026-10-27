@@ -146,6 +146,36 @@ Each task has a unique network topology (via `packing_seed = task_seed`):
 3. Remove degree-1 (dangling) nodes
 4. Identify boundary nodes (top, bottom, left, right)
 
+### Known issue: the jammed packing depends on the CPU (GitHub issue #2)
+
+`create_auxetic_network(n_nodes, packing_seed)` integrates the packing with an adaptive solver
+(LSODA), and the result is not the same on every CPU. With `packing_seed=42` and 100 nodes,
+Intel Xeon Gold 6126 (Skylake) nodes on marmalade give Network A (fingerprint
+`86a25180f56a10ea`, 194 bonds), AMD EPYC nodes give a different network
+(`f14702529023d395`, 194 bonds), betty gave a third (`2c0b6e48b5bf0840`, 195 bonds), and a Mac
+gives a fourth. The stored runs therefore hold three networks (A 280 runs, B 20, C 180), and
+which one a run got depended on the node it landed on. Evidence and the node-by-node test are
+in issue #2.
+
+**Reuse a stored network instead of regenerating it.** `base/networks/auxetic_network_A.npz` is
+Network A, and `targeted_ensemble_runner.py` loads a stored network when given `--network-file`:
+
+```bash
+python targeted_ensemble_runner.py --mode single --task 0 --realization 20 \
+    --gradient-method jax --network-type jammed \
+    --network-file ../../base/networks/auxetic_network_A.npz
+```
+
+Every run records the network's fingerprint in `training_meta*.json`
+(`base/stored_network.py`: `network_fingerprint`, `save_stored_network`, `load_stored_network`),
+and the canonical figure ensemble keeps only Network A runs (ADR 0002). Notes:
+
+- Always pass `--network-file` for new targeted auxetic runs. Without it the runner regenerates
+  the packing and the network depends on the node.
+- The general ensemble runner (`ensemble_runner.py`) has no `--network-file` option yet.
+- A run that regenerates the packing is not checked against Network A; compare the recorded
+  `network_fingerprint` with `NETWORK_A_FINGERPRINT`.
+
 ### Stiffness Initialization
 
 Each realization has different initial stiffnesses:
