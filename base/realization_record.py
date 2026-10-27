@@ -36,8 +36,15 @@ Each on-disk layout is a private reader class behind the record. Layouts so far:
     (per-step positions), checkpoint.pkl, training_meta.json, timestep_sweep.npz.
     Open with network_type='jammed' (default; falls back to plain names), 'lattice', or
     None (plain names only).
+  * uniform (ADR 0006, new realizations of either task kind): record.json marks it; plain
+    names, no network-type suffix: network.npz, task.json, loss.npy, stiffness.npz,
+    current.npy, best.npz, resume.npz, positions.npy, training_meta.json, sweep files.
+    A fresh run directory gets this layout when NMN_RECORD_LAYOUT=uniform (default: legacy,
+    i.e. the layouts above); a directory that already holds a run keeps the layout it
+    started in.
 """
 import json
+import os
 import pickle
 import re
 import shutil
@@ -203,7 +210,7 @@ class RealizationRecord:
             kind = _detect_kind(run_dir)
         elif kind not in _READERS:
             raise ValueError(f'unknown task kind {kind!r}; known: {", ".join(KINDS)}')
-        return cls(run_dir, _READERS[kind](run_dir, **layout))
+        return cls(run_dir, _reader_for(kind, run_dir, layout))
 
     @classmethod
     def locate(cls, root, kind, cell, realization_id, must_exist=True, **layout):
@@ -215,7 +222,7 @@ class RealizationRecord:
         run_dir = _READERS[kind].run_dir(Path(root), cell, realization_id)
         if must_exist and not run_dir.is_dir():
             raise NotARealization(f'{run_dir}: no such directory')
-        return cls(run_dir, _READERS[kind](run_dir, **layout), cell, realization_id)
+        return cls(run_dir, _reader_for(kind, run_dir, layout), cell, realization_id)
 
     @classmethod
     def iterate(cls, root, kind, cell=None, **layout):
@@ -226,9 +233,8 @@ class RealizationRecord:
         cell restricts to one cell (see locate()); a root that does not exist yields nothing."""
         if kind not in _READERS:
             raise ValueError(f'unknown task kind {kind!r}; known: {", ".join(KINDS)}')
-        reader = _READERS[kind]
-        for found_cell, realization_id, run_dir in reader.iterate(Path(root), cell):
-            yield cls(run_dir, reader(run_dir, **layout), found_cell, realization_id)
+        for found_cell, realization_id, run_dir in _READERS[kind].iterate(Path(root), cell):
+            yield cls(run_dir, _reader_for(kind, run_dir, layout), found_cell, realization_id)
 
     def has(self, part):
         """Whether the realization stored `part` (one of PARTS)."""
@@ -334,6 +340,11 @@ class RealizationRecord:
 
     # ── Write side: every write goes through these, in the realization's own layout ──
 
+    def start(self):
+        """Mark the realization's directory as started (creates it). The lifecycle calls this
+        before anything else is written, so a run killed early still has its layout."""
+        self._reader.start()
+
     def refresh(self):
         """Forget parts read so far, so the next access sees what is on disk now."""
         for name in [*PARTS, '_best_loss']:
@@ -421,6 +432,9 @@ def _fits(traj, n_steps):
 
 
 def _detect_kind(run_dir):
+    marker = run_dir / _UniformReader.MARKER
+    if marker.exists():
+        return json.loads(marker.read_text())['kind']
     for kind in KINDS:
         if _READERS[kind].recognises(run_dir):
             return kind
@@ -473,6 +487,9 @@ class _AllostericReader:
     @staticmethod
     def recognises(run_dir):
         return (run_dir / 'tasks.txt').exists() or (run_dir / 'mse1.npy').exists()
+
+    def start(self):
+        self.d.mkdir(parents=True, exist_ok=True)
 
     def config(self):
         return json.loads(_existing(self.d / 'training_meta.json').read_text())
@@ -651,6 +668,9 @@ class _AuxeticReader:
     def recognises(cls, run_dir):
         return any(any(run_dir.glob(f'{m}*')) for m in cls._MARKERS)
 
+    def start(self):
+        self.d.mkdir(parents=True, exist_ok=True)
+
     def path(self, stem, ext):
         """<stem>_<network_type>.<ext>; plain <stem>.<ext> for network_type None, and as the
         fallback for 'jammed' (plain names are the older jammed runs)."""
@@ -816,4 +836,268 @@ class _AuxeticReader:
                 f.write(f"Orders of magnitude: {np.log10(reduction_ratio):.2f}\n")
 
 
+class _UniformReader:
+    """The uniform layout of ADR 0006, for new realizations of either task kind. Plain file
+    names (no network-type suffix); every file is written to a temporary name and renamed, so
+    a killed job leaves the previous complete file. Kind-specific behaviour (what K* is,
+    what the sweep's after Hessian is taken at, how a run resumes) follows the legacy reader
+    of the same kind."""
+    MARKER = 'record.json'
+    SCHEMA_VERSION = 1
+
+    def __init__(self, run_dir, kind, **_layout):   # layout (network_type) does not apply
+        self.d = Path(run_dir)
+        self.kind = kind
+        self._legacy = _READERS[kind]
+
+    # Where realizations sit under a data root is the same as for the legacy layouts.
+
+    @staticmethod
+    def stored_kind(run_dir):
+        return json.loads((Path(run_dir) / _UniformReader.MARKER).read_text())['kind']
+
+    def path(self, stem, ext):
+        return self.d / f'{stem}.{ext}'
+
+    # ── Reads ──
+
+    def config(self):
+        return json.loads(_existing(self.d / 'training_meta.json').read_text())
+
+    def _network_file(self):
+        with np.load(_existing(self.d / 'network.npz')) as z:
+            return {k: z[k] for k in z.files}
+
+    def network(self):
+        z = self._network_file()
+        if self.kind == 'allosteric':
+            return Network(nodes=z['nodes'], incidence_matrix=z['incidence_matrix'],
+                           eq_lengths=z['eq_lengths'])
+        return AuxeticNetwork(z['positions'], z['edges'], z['rest_lengths'])
+
+    def boundary(self):
+        z = self._network_file()
+        boundary = {k[len('boundary_'):]: z[k].astype(int) for k in z if k.startswith('boundary_')}
+        if not boundary:
+            raise MissingRecordPart(f'{self.d}: no boundary nodes stored')
+        return boundary
+
+    def task(self):
+        data = json.loads(_existing(self.d / 'task.json').read_text())
+        if self.kind == 'allosteric':
+            return AllostericTask(data['geometry_seed'], data['strain_output'],
+                                  data['strain_output2'])
+        if data is None:
+            raise MissingRecordPart(f'{self.d}: task is null')
+        return AuxeticTask(data)
+
+    def loss(self):
+        loss = _load(self.d / 'loss.npy')
+        return Loss(loss) if loss.ndim == 2 else Loss(training=loss)
+
+    def stiffness_trajectory(self):
+        with np.load(_existing(self.d / 'stiffness.npz')) as z:
+            return StiffnessTrajectory(steps=z['steps'], stiffnesses=z['stiffnesses'])
+
+    def positions_trajectory(self):
+        return list(_load(self.d / 'positions.npy'))
+
+    def current_stiffnesses(self):
+        return _load(self.d / 'current.npy')
+
+    def best_so_far(self):
+        with np.load(_existing(self.d / 'best.npz')) as z:
+            return BestSoFar(z['stiffnesses'], float(z['training_loss']))
+
+    def sweep(self):
+        with np.load(_existing(self.d / 'sweep.npz'), allow_pickle=True) as z:
+            return {k: z[k] for k in z.files}
+
+    def sweep_after_hessian_at_k_star(self, record, sweep):
+        return self._legacy.sweep_after_hessian_at_k_star(record, sweep)
+
+    def stiffnesses_at_best_loss(self, record, step, undetermined):
+        if self.kind == 'auxetic':
+            return _AuxeticReader.stiffnesses_at_best_loss(self, record, step, undetermined)
+        # Allosteric: the trainer's stored best state, accepted only if the stored data pin it
+        # to `step`. New runs always store it pre-update (ADR 0004), so no start-date check.
+        loss = record.loss.training
+        best = record.best_so_far
+        if best.training_loss != loss[step]:
+            raise undetermined(f'stored best loss {best.training_loss!r} is not the lowest '
+                               f'training loss {loss[step]!r} (step {step})')
+        traj = record.stiffness_trajectory
+        if not _fits(traj, len(loss)):
+            raise undetermined('stiffness trajectory does not fit the loss trajectory')
+        snapshot = np.nonzero(traj.steps == step)[0]
+        if len(snapshot) and not np.array_equal(traj.stiffnesses[snapshot[0]], best.stiffnesses):
+            raise undetermined(f'stored best stiffnesses differ from the snapshot at step {step}')
+        return best.stiffnesses
+
+    def resume_state(self):
+        if self.kind == 'allosteric':
+            return self._resume_allosteric()
+        return self._resume_auxetic()
+
+    def _resume_allosteric(self):
+        if not (self.d / 'current.npy').exists():
+            return None
+        # A run killed before its first loss save resumes from step 0 with no history.
+        loss = np.load(self.d / 'loss.npy') if (self.d / 'loss.npy').exists() else np.empty((0, 2))
+        current = np.load(self.d / 'current.npy')
+        if not np.any(np.isnan(current)):
+            return ResumeState(len(loss), current, Loss(loss), 'current')
+        if (self.d / 'resume.npz').exists():
+            with np.load(self.d / 'resume.npz') as z:
+                step, stiffnesses = int(z['step']), z['stiffnesses']
+            return ResumeState(step, stiffnesses, Loss(loss[:step]), 'checkpoint')
+        return None
+
+    def _resume_auxetic(self):
+        """The checkpoint, or None when there is none or it cannot be read."""
+        resume, blob = self.d / 'resume.npz', self.d / 'trainer_state.pkl'
+        if not resume.exists() or not blob.exists():
+            return None
+        try:
+            with np.load(resume) as z:
+                step, stiffnesses, loss = int(z['step']), z['stiffnesses'], z['loss']
+            with open(blob, 'rb') as f:
+                trainer_state = pickle.load(f)
+        except Exception as e:  # noqa: BLE001 - a truncated checkpoint means a fresh start
+            print(f'Warning: Failed to load checkpoint {resume}: {e}')
+            return None
+        return ResumeState(step, stiffnesses, Loss(training=loss), 'checkpoint',
+                           trainer_state=trainer_state)
+
+    # ── Writes ──
+
+    def start(self):
+        self.d.mkdir(parents=True, exist_ok=True)
+        marker = self.d / self.MARKER
+        if not marker.exists():
+            self._write_json(self.MARKER, {'schema_version': self.SCHEMA_VERSION,
+                                           'kind': self.kind})
+
+    def _atomic(self, name, write):
+        self.start()
+        tmp = self.d / f'.{name}.tmp'
+        with open(tmp, 'wb') as f:
+            write(f)
+        os.replace(tmp, self.d / name)
+
+    def _write_npy(self, name, array):
+        self._atomic(name, lambda f: np.save(f, array))
+
+    def _write_npz(self, name, **arrays):
+        self._atomic(name, lambda f: np.savez(f, **arrays))
+
+    def _write_json(self, name, data):
+        tmp = self.d / f'.{name}.tmp'
+        tmp.write_text(json.dumps(data, indent=2))
+        os.replace(tmp, self.d / name)
+
+    def _write_text(self, name, text):
+        self._atomic(name, lambda f: f.write(text.encode()))
+
+    def meta_file_name(self, stem):
+        return f'{stem}.json'
+
+    def wipe(self):
+        if self.d.exists():
+            shutil.rmtree(self.d)
+        self.start()
+
+    def write_network(self, network):
+        self._write_npz('network.npz', nodes=network.nodes,
+                        incidence_matrix=network.incidence_matrix, eq_lengths=network.eq_lengths)
+
+    def write_task(self, task):
+        self._write_json('task.json', {'geometry_seed': task.geometry_seed,
+                                       'strain_output': task.strain_output,
+                                       'strain_output2': task.strain_output2})
+
+    def save_checkpoint(self, step, current_stiffnesses, loss, measured_stiffnesses, best):
+        self._write_npy('current.npy', current_stiffnesses)
+        self._write_npy('loss.npy', np.ascontiguousarray(loss.per_subtask))
+        if not np.any(np.isnan(current_stiffnesses)):
+            self._write_npz('resume.npz', step=step, stiffnesses=current_stiffnesses)
+        if best is not None:
+            self._write_npz('best.npz', stiffnesses=best.stiffnesses,
+                            training_loss=best.training_loss)
+        # The snapshot pairs with its own loss index (the entry just measured), not `step`.
+        if (self.d / 'stiffness.npz').exists():
+            old = self.stiffness_trajectory()
+            traj = np.vstack([old.stiffnesses, measured_stiffnesses])
+            steps = np.append(old.steps, loss.n_steps - 1)
+        else:
+            traj = measured_stiffnesses[np.newaxis, :]
+            steps = np.array([loss.n_steps - 1])
+        self._write_npz('stiffness.npz', steps=steps, stiffnesses=traj)
+
+    def save_final(self, current_stiffnesses, loss, best):
+        self._write_npy('current.npy', current_stiffnesses)
+        if best is not None:
+            self._write_npz('best.npz', stiffnesses=best.stiffnesses,
+                            training_loss=best.training_loss)
+        self._write_npy('loss.npy', np.ascontiguousarray(loss.per_subtask))
+
+    # Auxetic writes (the ensemble runners and their trainers).
+
+    def save_results(self, history, network, task_config, boundary=None):
+        stiffness_array = np.array(history.get('stiffnesses', []))
+        loss_array = np.array(history.get('loss', []))
+        arrays = {'positions': np.asarray(network.positions), 'edges': np.array(network.edges),
+                  'rest_lengths': np.asarray(network.rest_lengths)}
+        for k, v in (boundary or {}).items():
+            arrays[f'boundary_{k}'] = np.asarray(v, dtype=int)
+        self._write_npz('network.npz', **arrays)
+        self._write_npy('current.npy', np.asarray(network.stiffnesses))
+        self._write_npy('loss.npy', loss_array)
+        self._write_npz('stiffness.npz', steps=np.arange(len(stiffness_array)),
+                        stiffnesses=stiffness_array)
+        self._write_npy('positions.npy', np.array(history.get('positions', [])))
+        self._write_json('task.json', task_config)
+
+    def save_training_checkpoint(self, step, history, network, task_config, task_id,
+                                 realization_id):
+        self._write_npz('resume.npz', step=step, stiffnesses=np.asarray(network.stiffnesses),
+                        loss=np.asarray(history.get('loss', []), float))
+        ckpt = {'task_seed': task_id, 'realization_seed': realization_id, 'current_step': step,
+                'history': history, 'network': _AuxeticReader._network_dict(network),
+                'task_config': task_config}
+        self._atomic('trainer_state.pkl', lambda f: pickle.dump(ckpt, f))
+        self._write_json('task.json', task_config)
+
+    def drop_checkpoint(self):
+        for name in ('resume.npz', 'trainer_state.pkl'):
+            if (self.d / name).exists():
+                (self.d / name).unlink()
+
+    def mark_complete(self):
+        self._write_text('training_complete.txt', f"Completed at {datetime.now().isoformat()}\n")
+
+    def mark_complete_small_loss(self, reduction_ratio=None):
+        text = f"Completed (loss reduction criterion) at {datetime.now().isoformat()}\n"
+        if reduction_ratio is not None:
+            text += (f"Loss reduction ratio: {reduction_ratio:.2e} (initial/min)\n"
+                     f"Orders of magnitude: {np.log10(reduction_ratio):.2f}\n")
+        self._write_text('training_complete_small_loss.txt', text)
+
+
 _READERS = {'allosteric': _AllostericReader, 'auxetic': _AuxeticReader}
+
+LAYOUT_ENV = 'NMN_RECORD_LAYOUT'   # 'uniform' | 'legacy' (default): layout of fresh run directories
+
+
+def _reader_for(kind, run_dir, layout):
+    """The reader of the layout `run_dir` is in; a directory holding no run yet gets the
+    layout LAYOUT_ENV names (legacy unless 'uniform'). A run keeps the layout it started in."""
+    run_dir = Path(run_dir)
+    if (run_dir / _UniformReader.MARKER).exists():
+        return _UniformReader(run_dir, kind, **layout)
+    legacy = _READERS[kind]
+    if run_dir.is_dir() and legacy.recognises(run_dir):
+        return legacy(run_dir, **layout)
+    if os.environ.get(LAYOUT_ENV, 'legacy') == 'uniform':
+        return _UniformReader(run_dir, kind, **layout)
+    return legacy(run_dir, **layout)

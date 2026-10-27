@@ -95,7 +95,7 @@ def run(record, trainer, *, hparams, critical_keys, code_files, target_steps, ov
     Outcome('complete') before anything is written. steps_key: the hparams key recording
     the target step count."""
     run_dir = record.run_dir
-    run_dir.mkdir(parents=True, exist_ok=True)
+    record.start()
     meta_file = record.meta_file_name('training_meta')
 
     stage = None

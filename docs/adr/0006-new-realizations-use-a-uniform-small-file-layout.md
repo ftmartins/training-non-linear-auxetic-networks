@@ -11,13 +11,21 @@ suffix in names:
 
 ```text
 realization_NN/
-  record.json      # schema_version, kind, realization seed, config, task, status, step
-  network.npz      # nodes, edges, rest lengths, boundary nodes
-  loss.npy         # (n_steps, n_subtasks); the training loss is the mean over subtasks
-  stiffness.npz    # steps, stiffnesses (the trajectory snapshots)
-  resume.npz       # step, current stiffnesses, best-so-far; removed when the realization is done
-  sweep.npz        # post-training sweep
-  provenance.json  # plus the code snapshot
+  record.json            # marks the layout: schema_version, kind
+  training_meta.json     # configuration, realization seed (written by run_provenance, as today)
+  run_provenance.json    # plus the code snapshot (.gz), as today
+  network.npz            # allosteric: nodes, incidence_matrix, eq_lengths;
+                         # auxetic: positions, edges, rest_lengths, boundary_<side>
+  task.json              # allosteric: geometry_seed, strain_output(2); auxetic: task config
+  loss.npy               # (n_steps, n_subtasks) allosteric; (n_steps,) auxetic
+  stiffness.npz          # steps, stiffnesses (the trajectory snapshots)
+  current.npy            # current (post-update) stiffnesses
+  best.npz               # allosteric best-so-far: stiffnesses, training_loss
+  resume.npz             # allosteric: last NaN-free checkpoint; auxetic: step, stiffnesses, loss
+  trainer_state.pkl      # auxetic only: the trainer's own history, beside resume.npz
+  positions.npy          # auxetic per-step relaxed positions
+  sweep.npz              # post-training sweep
+  training_complete.txt, training_complete_small_loss.txt   # markers, as today
 ```
 
 The record gets a third private reader for this layout and detects it from `record.json`. Reading
@@ -42,5 +50,12 @@ trajectories, best-loss stiffnesses (K*) and resume state. Files may differ.
 
 - New layout reaches `main` only after the Network A campaign has ended (ADR 0003); it is written
   by the lifecycle through the record, so runners do not change.
-- Details settled when implementing #14: snapshot cadence of `stiffness.npz`, and whether
-  `record.json` or `resume.npz` holds best-so-far.
+- Settled in #14: best-so-far lives in `best.npz`; `stiffness.npz` takes one snapshot per
+  checkpoint exactly as the legacy trajectory does; `resume.npz` is dropped only where the legacy
+  checkpoint was (auxetic training that converged), because an allosteric extend resumes from it.
+  Every file is written to a temporary name and renamed.
+- Not carried over: the auxetic `freetraj` history field and `history.pkl`'s duplicate of the
+  trajectories (no reader uses them); the trainer's private history stays in `trainer_state.pkl`.
+- Fresh run directories get this layout only when `NMN_RECORD_LAYOUT=uniform`; the default stays
+  legacy until the user flips it after the Network A campaign. `post_training_sweep.py` still
+  writes the legacy sweep file names, so sweeps of uniform runs are a follow-up.
