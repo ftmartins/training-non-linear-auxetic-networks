@@ -301,25 +301,21 @@ def discover_allosteric(pool: str = "targeted", max_per_task: int | None = None,
         raise ValueError(pool)
 
     found = []
-    for gid in geoms:
-        gdir = _allo_geom_dir(gid)
-        if not gdir.is_dir():
+    seen = {}   # realizations looked at per cell, for max_per_task
+    for rec in RealizationRecord.iterate(ALLO_DATA_DIR, "allosteric"):
+        gid, tid = rec.cell
+        if gid not in geoms:
             continue
-        for task_dir in sorted(gdir.glob("task_*"), key=lambda p: int(p.name.split("_")[1])):
-            tid = int(task_dir.name.split("_")[1])
-            reals = sorted(task_dir.glob("realization_*"), key=lambda p: int(p.name.split("_")[1]))
-            if max_per_task is not None:
-                reals = reals[:max_per_task]
-            for rdir in reals:
-                rid = int(rdir.name.split("_")[1])
-                if not (rdir / "mse1.npy").exists():
-                    continue
-                if require_converged:
-                    mse1 = np.load(rdir / "mse1.npy")
-                    mse2 = np.load(rdir / "mse2.npy")
-                    if convergence_ratio(mse1, mse2) > MIN_SUCCESS_RATIO:
-                        continue
-                found.append((gid, tid, rid))
+        seen[rec.cell] = seen.get(rec.cell, 0) + 1
+        if max_per_task is not None and seen[rec.cell] > max_per_task:
+            continue
+        if not rec.has("loss"):
+            continue
+        if require_converged:
+            per_subtask = rec.loss.per_subtask
+            if convergence_ratio(per_subtask[:, 0], per_subtask[:, 1]) > MIN_SUCCESS_RATIO:
+                continue
+        found.append((gid, tid, rec.realization_id))
     return found
 
 
@@ -429,24 +425,19 @@ def discover_auxetic(max_per_task: int | None = None, require_converged: bool = 
     """
     data_dir = AUX_DATA_DIR if family is None else REPO_ROOT / "data" / "auxetic_nets_aug" / family
     found = []
-    if not data_dir.is_dir():
-        return found
-    for task_dir in sorted(data_dir.glob("task_*"), key=lambda p: int(p.name.split("_")[1])):
-        tid = int(task_dir.name.split("_")[1])
-        reals = sorted(task_dir.glob("realization_*"), key=lambda p: int(p.name.split("_")[1]))
-        if max_per_task is not None:
-            reals = reals[:max_per_task]
-        for rdir in reals:
-            rid = int(rdir.name.split("_")[1])
-            lt = _auxfile(rdir, "loss_trajectory", "npy")
-            if not lt.exists():
+    seen = {}   # realizations looked at per task, for max_per_task
+    for rec in RealizationRecord.iterate(data_dir, "auxetic", network_type=AUX_NETWORK_TYPE):
+        seen[rec.cell] = seen.get(rec.cell, 0) + 1
+        if max_per_task is not None and seen[rec.cell] > max_per_task:
+            continue
+        if not rec.has("loss"):
+            continue
+        if require_converged:
+            loss = np.asarray(rec.loss.training, dtype=float)
+            s = loss.mean(axis=1) if loss.ndim > 1 else loss   # per-step scalar
+            if len(s) == 0 or s[0] <= 0 or float(np.nanmin(s)) / s[0] > min_success_ratio:
                 continue
-            if require_converged:
-                loss = np.asarray(np.load(lt), dtype=float)
-                s = loss.mean(axis=1) if loss.ndim > 1 else loss   # per-step scalar
-                if len(s) == 0 or s[0] <= 0 or float(np.nanmin(s)) / s[0] > min_success_ratio:
-                    continue
-            found.append((tid, rid))
+        found.append((rec.cell, rec.realization_id))
     return found
 
 

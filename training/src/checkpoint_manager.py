@@ -119,7 +119,12 @@ def check_loss_reduction_criterion(task_seed, realization_seed, results_dir=None
     Returns:
         criterion_met: Boolean indicating if loss reduction criterion is satisfied
     """
-    record = _record(task_seed, realization_seed, results_dir, network_type)
+    return _loss_reduction_met(_record(task_seed, realization_seed, results_dir, network_type),
+                               task_seed, realization_seed)
+
+
+def _loss_reduction_met(record, task_seed, realization_seed):
+    """check_loss_reduction_criterion for a realization record already in hand."""
     try:
         if not record.has('loss'):
             return False
@@ -167,13 +172,18 @@ def is_training_complete(task_seed, realization_seed, results_dir=None, network_
     Returns:
         is_complete: Boolean indicating if job is complete by either criterion
     """
+    return _is_complete(_record(task_seed, realization_seed, results_dir, network_type),
+                        task_seed, realization_seed)
+
+
+def _is_complete(record, task_seed, realization_seed):
+    """is_training_complete for a realization record already in hand."""
     # Fast path: the loss-reduction marker (plain-named older jammed runs included).
-    if _record(task_seed, realization_seed, results_dir, network_type).has_marker(
-            'training_complete_small_loss'):
+    if record.has_marker('training_complete_small_loss'):
         return True
 
     # Slow path: Evaluate loss reduction criterion
-    return check_loss_reduction_criterion(task_seed, realization_seed, results_dir, network_type)
+    return _loss_reduction_met(record, task_seed, realization_seed)
 
 
 def mark_training_complete(task_seed, realization_seed, results_dir=None, network_type=NETWORK_TYPE):
@@ -423,6 +433,17 @@ def save_run_code_snapshot(task_seed, realization_seed, files, results_dir=None,
     save_code_snapshot(result_path, files)
 
 
+def _complete_cells(n_tasks, n_realizations, results_dir, network_type):
+    """(task, realization) of every complete job in the n_tasks x n_realizations grid,
+    found by iterating the results directory through the realization record."""
+    root = RESULTS_DIR if results_dir is None else results_dir
+    for record in RealizationRecord.iterate(root, 'auxetic', network_type=network_type):
+        task_seed, realization_seed = record.cell, record.realization_id
+        if (task_seed < n_tasks and realization_seed < n_realizations
+                and _is_complete(record, task_seed, realization_seed)):
+            yield task_seed, realization_seed
+
+
 def get_incomplete_jobs(n_tasks=None, n_realizations=None, results_dir=None, network_type=NETWORK_TYPE):
     """
     Get list of incomplete jobs (not marked as complete).
@@ -441,13 +462,10 @@ def get_incomplete_jobs(n_tasks=None, n_realizations=None, results_dir=None, net
     if n_realizations is None:
         n_realizations = N_REALIZATIONS
 
-    incomplete = []
-    for task_seed in range(n_tasks):
-        for realization_seed in range(n_realizations):
-            if not is_training_complete(task_seed, realization_seed, results_dir, network_type):
-                incomplete.append((task_seed, realization_seed))
-
-    return incomplete
+    complete = set(_complete_cells(n_tasks, n_realizations, results_dir, network_type))
+    return [(task_seed, realization_seed)
+            for task_seed in range(n_tasks) for realization_seed in range(n_realizations)
+            if (task_seed, realization_seed) not in complete]
 
 
 def get_complete_jobs(n_tasks=None, n_realizations=None, results_dir=None, network_type=NETWORK_TYPE):
@@ -468,13 +486,7 @@ def get_complete_jobs(n_tasks=None, n_realizations=None, results_dir=None, netwo
     if n_realizations is None:
         n_realizations = N_REALIZATIONS
 
-    complete = []
-    for task_seed in range(n_tasks):
-        for realization_seed in range(n_realizations):
-            if is_training_complete(task_seed, realization_seed, results_dir, network_type):
-                complete.append((task_seed, realization_seed))
-
-    return complete
+    return sorted(_complete_cells(n_tasks, n_realizations, results_dir, network_type))
 
 
 def print_progress_summary(results_dir=None, network_type=NETWORK_TYPE):
