@@ -1,0 +1,105 @@
+{
+ "aux_network_fingerprint": {
+  "raises": "MissingRecordPart: <repo>/data/auxetic_nets_aug/general/task_02/realization_05/final_network_jammed.pkl"
+ },
+ "aux_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1020043
+  }
+ },
+ "data_io.load_auxetic_network": {
+  "raises": "FileNotFoundError: [Errno 2] No such file or directory: '<repo>/data/auxetic_nets_aug/general/task_02/realization_05/final_network_jammed.pkl'"
+ },
+ "load_auxetic": {
+  "value": null
+ },
+ "load_checkpoint": {
+  "value": {
+   "__dict__": {
+    "current_step": {
+     "__int__": "int",
+     "v": 1
+    },
+    "history": {
+     "__dict__": {
+      "loss": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "0.26136683895941626"
+        }
+       ]
+      },
+      "positions": {
+       "__list__": [
+        {
+         "__nd__": "<f8",
+         "sha256": "cb9cd353d3f7accb62898e5779e23536464c08f76990866f2446ca406a7df7ec",
+         "shape": [
+          96,
+          2
+         ]
+        }
+       ]
+      },
+      "stiffnesses": {
+       "__list__": [
+        {
+         "__nd__": "<f8",
+         "sha256": "72f6e0e80532f2dab8028620f8cb57ad70477bf73107afcb8ccb4b95099e1c41",
+         "shape": [
+          186
+         ]
+        }
+       ]
+      }
+     }
+    },
+    "network": {
+     "__dict__": {
+      "edges": {
+       "__nd__": "<i8",
+       "sha256": "f22eff79641f9a99e8abfb557469164c05d78e1696674b8b435934f545c0c5d1",
+       "shape": [
+        186,
+        2
+       ]
+      },
+      "positions": {
+       "__nd__": "<f8",
+       "sha256": "cb9cd353d3f7accb62898e5779e23536464c08f76990866f2446ca406a7df7ec",
+       "shape": [
+        96,
+        2
+       ]
+      },
+      "rest_lengths": {
+       "__nd__": "<f8",
+       "sha256": "f0868351ce3faa7935bcc6f813035995d7ddfe5a260ea015e7211e8965d3cc47",
+       "shape": [
+        186
+       ]
+      },
+      "stiffnesses": {
+       "__nd__": "<f8",
+       "sha256": "082b26f373229cd3166883d765b1c2f104c2001624da79f3874306851ca7c8d1",
+       "shape": [
+        186
+       ]
+      }
+     }
+    },
+    "realization_seed": {
+     "__int__": "int",
+     "v": 5
+    },
+    "task_config": null,
+    "task_seed": {
+     "__int__": "int",
+     "v": 2
+    }
+   }
+  }
+ }
+}

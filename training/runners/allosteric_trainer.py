@@ -37,16 +37,14 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from base import initial_condition
+from base.realization_record import (
+    RealizationRecord, Network, AllostericTask, Loss, BestSoFar)
 import training.lammps_utils as f
 import training.jax_actuation as jx
-from training.src.run_provenance import (
-    save_run_provenance,
-    save_training_meta,
-    save_code_snapshot,
-    has_critical_mismatch,
-    HyperparameterMismatchError,
-    DEFAULT_CRITICAL_KEYS,
-)
+from training.src import realization_lifecycle
+from training.src.realization_lifecycle import SubtaskLossRatioBelow, TrainState, TrainResult
+from training.src.run_provenance import HyperparameterMismatchError, DEFAULT_CRITICAL_KEYS
 from training.src import lr_schedule
 from training.src.good_realizations import get_realization_seed
 
@@ -67,6 +65,9 @@ ETA      = 1.0
 K_OUTPUT = 1e3
 LEARNING_RATE = 10.0    # starting lr, decayed by lr_schedule; override with --learning-rate
 
+# Early stop once each subtask's loss is below this fraction of its first value.
+ALLOSTERIC_STOP_RULE = SubtaskLossRatioBelow(1e-5)
+
 # Physics backend for evaluate_actuation: 'jax_fire' (default, same
 # differentiable FIRE solver as auxetic training) or 'lammps' (legacy).
 DEFAULT_SOLVER = 'lammps'
@@ -86,7 +87,7 @@ N_TRAINING_STEPS = 1_000
 # Non-overlapping seed namespaces
 _GEOMETRY_BASE    = 1_000_000
 _TASK_BASE        = 2_000_000
-_REALIZATION_BASE = 3_000_000
+_REALIZATION_BASE = initial_condition.REALIZATION_BASE
 
 # ── Targeted ensemble ─────────────────────────────────────────────────────────
 # Fixed geometry shared across all 5 tasks; IC seed independent of task.
@@ -111,8 +112,8 @@ def geometry_seed(gid: int) -> int:
 def task_rng(tid: int) -> np.random.RandomState:
     return np.random.RandomState(_TASK_BASE + tid)
 
-def realization_rng(rid: int) -> np.random.RandomState:
-    return np.random.RandomState(_REALIZATION_BASE + rid)
+def realization_rng(seed: int) -> np.random.RandomState:
+    return initial_condition.realization_rng(seed)
 
 
 # ── Network creation (verbatim from notebook) ─────────────────────────────────
@@ -220,34 +221,25 @@ def create_network(L, p, R):
 
 # ── Geometry: load from disk or recreate from seed ────────────────────────────
 
-def load_or_create_geometry(output_path, gseed):
+def load_or_create_geometry(record, gseed):
     """
-    Load nodes/incidence_matrix/eq_lengths from output_path if present; otherwise
-    recreate from gseed and save them.  Raises RuntimeError if existing stiffnesses
-    imply a different edge count than the geometry.
+    Load nodes/incidence_matrix/eq_lengths from the realization record if present;
+    otherwise recreate from gseed and save them through the record. Raises RuntimeError if
+    existing stiffnesses imply a different edge count than the geometry.
     """
-    nodes_path = os.path.join(output_path, 'nodes.npy')
-    inc_path   = os.path.join(output_path, 'incidence_matrix.npy')
-    eq_path    = os.path.join(output_path, 'eq_lengths.npy')
-
-    if (os.path.exists(nodes_path) and os.path.exists(inc_path)
-            and os.path.exists(eq_path)):
-        nodes            = np.load(nodes_path)
-        incidence_matrix = np.load(inc_path)
-        eq_lengths       = np.load(eq_path)
+    if record.has('network'):
+        network = record.network
         print("  Geometry: loaded from disk.")
     else:
         print("  Geometry: files missing — recreating from seed.")
         random.seed(gseed)
         nodes, incidence_matrix, eq_lengths, _ = create_network(10, 0.15, 1.6)
-        np.save(nodes_path, nodes)
-        np.save(inc_path,   incidence_matrix)
-        np.save(eq_path,    eq_lengths)
+        network = Network(nodes, incidence_matrix, eq_lengths)
+        record.write_network(network)
 
-    stiff_path = os.path.join(output_path, 'stiffnesses.npy')
-    if os.path.exists(stiff_path):
-        n_edges_stiff = len(np.load(stiff_path))
-        n_edges_geom  = len(incidence_matrix)
+    if record.has('current_stiffnesses'):
+        n_edges_stiff = len(record.current_stiffnesses)
+        n_edges_geom  = len(network.incidence_matrix)
         if n_edges_stiff != n_edges_geom:
             raise RuntimeError(
                 f"Edge-count mismatch: stiffnesses.npy has {n_edges_stiff} edges "
@@ -255,7 +247,7 @@ def load_or_create_geometry(output_path, gseed):
                 f"The network-creation code may have been modified."
             )
 
-    return nodes, incidence_matrix, eq_lengths
+    return network.nodes, network.incidence_matrix, network.eq_lengths
 
 
 # ── Resume: find the latest NaN-free stiffness state ──────────────────────────
@@ -264,38 +256,23 @@ def load_resume_state(output_path):
     """
     Return (stiffnesses, mse1, mse2, start_step) if a prior run exists, else None.
 
-    stiffnesses.npy is the primary source; stiffnesses_ckpt.npy + ckpt_step.txt
-    (written at each 500-step checkpoint) serve as a fallback if the primary file
-    contains NaNs (run diverged after the last clean save).
+    The realization record decides: the latest saved stiffnesses if NaN-free, else
+    the last NaN-free checkpoint (run diverged after its last clean save).
     """
-    stiff_path = os.path.join(output_path, 'stiffnesses.npy')
-    if not os.path.exists(stiff_path):
+    record = RealizationRecord.open(output_path, kind='allosteric')
+    state = record.resume_state()
+    if state is None:
+        if record.has('current_stiffnesses'):
+            print("  Resume: stiffnesses.npy contains NaNs and no clean checkpoint found; "
+                  "starting fresh.")
         return None
-
-    mse1_path = os.path.join(output_path, 'mse1.npy')
-    mse2_path = os.path.join(output_path, 'mse2.npy')
-    mse1 = np.load(mse1_path) if os.path.exists(mse1_path) else np.array([])
-    mse2 = np.load(mse2_path) if os.path.exists(mse2_path) else np.array([])
-
-    stiff = np.load(stiff_path)
-    if not np.any(np.isnan(stiff)):
-        start_step = len(mse1)
-        print(f"  Resume: found clean stiffnesses at step {start_step}.")
-        return stiff, mse1, mse2, start_step
-
-    # stiffnesses.npy has NaNs — fall back to last NaN-free checkpoint
-    ckpt_stiff_path = os.path.join(output_path, 'stiffnesses_ckpt.npy')
-    ckpt_step_path  = os.path.join(output_path, 'ckpt_step.txt')
-    if os.path.exists(ckpt_stiff_path) and os.path.exists(ckpt_step_path):
-        ckpt_stiff = np.load(ckpt_stiff_path)
-        ckpt_step  = int(np.loadtxt(ckpt_step_path))
+    if state.source == 'current':
+        print(f"  Resume: found clean stiffnesses at step {state.step}.")
+    else:
         print(f"  Resume: stiffnesses.npy contains NaNs; "
-              f"rolling back to checkpoint at step {ckpt_step}.")
-        return ckpt_stiff, mse1[:ckpt_step], mse2[:ckpt_step], ckpt_step
-
-    print("  Resume: stiffnesses.npy contains NaNs and no clean checkpoint found; "
-          "starting fresh.")
-    return None
+              f"rolling back to checkpoint at step {state.step}.")
+    mse1, mse2 = (np.ascontiguousarray(c) for c in state.loss.per_subtask.T)
+    return state.stiffnesses, mse1, mse2, state.step
 
 
 # ── Actuation evaluation (free + clamped actuation pair at fixed stiffnesses) ─
@@ -455,10 +432,15 @@ def learning_update(nodesfree, nodesclamped, tod, eq_lengths,
 # ── Core training loop ────────────────────────────────────────────────────────
 def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
                        learning_rate, tod, tod2, dinputdistance, dinputdistance2,
-                       nsteps, nsteps2, n_steps, output_path,
+                       nsteps, nsteps2, n_steps, on_checkpoint,
                        msearray=None, msearray2=None, step_offset=0,
                        best_stiffnesses=None, best_combined_mse=np.inf,
-                       solver=DEFAULT_SOLVER):
+                       solver=DEFAULT_SOLVER, stop_rule=ALLOSTERIC_STOP_RULE):
+    """Train for up to n_steps steps. on_checkpoint(step, current_stiffnesses, loss,
+    measured_stiffnesses, best) saves progress (RealizationRecord.save_checkpoint); it is
+    called every 50 global steps, on the first step of a fresh run, and on early stop.
+    Returns (mse1, mse2, stiffnesses, best_stiffnesses, best_combined_mse, diverged);
+    diverged is True when a NaN loss or update stopped training."""
     if msearray  is None: msearray  = np.array([])
     if msearray2 is None: msearray2 = np.array([])
     if best_stiffnesses is None:
@@ -469,6 +451,7 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
     update_mag = np.nan
 
     best_updated = False
+    diverged = False
 
     pbar = tqdm(range(n_steps),
                 desc=f'(mse1={np.nan:.4e}, mse2={np.nan:.4e}, best_combined={best_combined_mse:.4e}), updated_mag={update_mag:.4e}')
@@ -519,7 +502,14 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         # reloaded on resume, so lr_scale needs no separate persisted state.
         lr_scale, _ = lr_schedule.lr_scale_for_step((msearray + msearray2) / 2.0)
         current_lr = learning_rate * lr_scale
-        stiffnesses = np.clip(stiffnesses + current_lr * (delta_K1 + delta_K2), K_MIN, K_MAX)
+        updated = np.clip(stiffnesses + current_lr * (delta_K1 + delta_K2), K_MIN, K_MAX)
+        if np.isnan(mse) or np.isnan(mse2) or np.any(np.isnan(updated)):
+            # A diverged step is discarded and training stops: the state stays at the
+            # start of this step, so a resume retries exactly from there.
+            print(f"  NaN at step {step_offset + j + 1}: loss=({mse}, {mse2}); stopping.")
+            diverged = True
+            break
+        stiffnesses = updated
 
         update_mag = np.mean(np.log10(np.abs(current_lr * (delta_K1 + delta_K2))))
 
@@ -543,76 +533,23 @@ def _run_training_loop(nodes, incidence_matrix, eq_lengths, stiffnesses,
         if global_step % 50 == 0 or (step_offset == 0 and j == 0):
             print(f"  step {global_step}: MSE1={mse:.4e}  MSE2={mse2:.4e}"
                   f"  best_combined={best_combined_mse:.4e}")
-            np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
-            np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
-            np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
-            if not np.any(np.isnan(stiffnesses)):
-                np.save(os.path.join(output_path, 'stiffnesses_ckpt.npy'), stiffnesses)
-                np.savetxt(os.path.join(output_path, 'ckpt_step.txt'),
-                           [global_step], fmt='%d')
-            if best_updated:
-                np.save(os.path.join(output_path, 'best_stiffnesses.npy'), best_stiffnesses)
-                np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'),
-                           [best_combined_mse])
-                best_updated = False
-            # Append measured_stiffnesses (see note above the snapshot,
-            # earlier in this loop) — the stiffness mse1/mse2's last entry
-            # was actually computed at — paired with its own exact array
-            # index (len(msearray) - 1), not global_step. That index is
-            # always in range for mse1[steps[c]]/mse2[steps[c]] (see
-            # analysis.timestep_sweep._select_local_threshold_indices) since
-            # it is, by construction, the index msearray/msearray2 were just
-            # appended to — including on this, possibly the run's last,
-            # checkpoint.
-            traj_path  = os.path.join(output_path, 'stiffnesses_traj.npy')
-            steps_path = os.path.join(output_path, 'stiffnesses_traj_steps.npy')
-            if os.path.exists(traj_path) and os.path.exists(steps_path):
-                traj  = np.vstack([np.load(traj_path),  measured_stiffnesses])
-                steps = np.append(np.load(steps_path), len(msearray) - 1)
-            else:
-                traj  = measured_stiffnesses[np.newaxis, :]
-                steps = np.array([len(msearray) - 1])
-            np.save(traj_path,  traj)
-            np.save(steps_path, steps)
+            # Saves the post-update stiffnesses to resume from, and appends
+            # measured_stiffnesses (see the note above the snapshot) to the trajectory,
+            # paired with the loss entry just measured.
+            on_checkpoint(global_step, stiffnesses, Loss(np.column_stack([msearray, msearray2])),
+                          measured_stiffnesses,
+                          BestSoFar(best_stiffnesses, best_combined_mse) if best_updated else None)
+            best_updated = False
 
-        if mse/msearray[0] < 1e-5 and mse2/msearray2[0] < 1e-5:
-            np.save(os.path.join(output_path, 'stiffnesses.npy'), stiffnesses)
-            np.save(os.path.join(output_path, 'mse1.npy'),        msearray)
-            np.save(os.path.join(output_path, 'mse2.npy'),        msearray2)
-            if not np.any(np.isnan(stiffnesses)):
-                np.save(os.path.join(output_path, 'stiffnesses_ckpt.npy'), stiffnesses)
-                np.savetxt(os.path.join(output_path, 'ckpt_step.txt'),
-                           [global_step], fmt='%d')
-            if best_updated:
-                np.save(os.path.join(output_path, 'best_stiffnesses.npy'), best_stiffnesses)
-                np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'),
-                           [best_combined_mse])
-                best_updated = False
-            # Append measured_stiffnesses (see note above the snapshot,
-            # earlier in this loop) — the stiffness mse1/mse2's last entry
-            # was actually computed at — paired with its own exact array
-            # index (len(msearray) - 1), not global_step. That index is
-            # always in range for mse1[steps[c]]/mse2[steps[c]] (see
-            # analysis.timestep_sweep._select_local_threshold_indices) since
-            # it is, by construction, the index msearray/msearray2 were just
-            # appended to — including on this, possibly the run's last,
-            # checkpoint.
-            traj_path  = os.path.join(output_path, 'stiffnesses_traj.npy')
-            steps_path = os.path.join(output_path, 'stiffnesses_traj_steps.npy')
-            if os.path.exists(traj_path) and os.path.exists(steps_path):
-                traj  = np.vstack([np.load(traj_path),  measured_stiffnesses])
-                steps = np.append(np.load(steps_path), len(msearray) - 1)
-            else:
-                traj  = measured_stiffnesses[np.newaxis, :]
-                steps = np.array([len(msearray) - 1])
-            np.save(traj_path,  traj)
-            np.save(steps_path, steps)
-
-
+        if stop_rule.reached((msearray[0], msearray2[0]), (mse, mse2)):
+            on_checkpoint(global_step, stiffnesses, Loss(np.column_stack([msearray, msearray2])),
+                          measured_stiffnesses,
+                          BestSoFar(best_stiffnesses, best_combined_mse) if best_updated else None)
+            best_updated = False
             print(f"  Early stop at step {global_step}: both tasks converged.")
             break
 
-    return msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse
+    return msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse, diverged
 
 
 # ── Success check ─────────────────────────────────────────────────────────────
@@ -626,6 +563,87 @@ def check_success(msearray1, msearray2):
           f"({'PASS' if ratio < 1e-6 else 'FAIL'})")
     return ratio < 0.01
 
+
+
+# ── Trainer adapter for the realization lifecycle ───────────────────────────
+
+class AllostericTrainer:
+    """The allosteric physics behind training.src.realization_lifecycle: builds the
+    network and task, draws the initial condition, runs the coupled-learning loop."""
+
+    def __init__(self, *, targeted, geometry_id, task_id, realization_seed,
+                 learning_rate, solver):
+        self.targeted, self.geometry_id, self.task_id = targeted, geometry_id, task_id
+        self.realization_seed = realization_seed
+        self.learning_rate, self.solver = learning_rate, solver
+
+    def prepare(self, record):
+        """Load or create the geometry, resolve the task strains, write both."""
+        gseed = _TARGETED_GEOMETRY_SEED if self.targeted else geometry_seed(self.geometry_id)
+        self.nodes, self.incidence_matrix, self.eq_lengths = load_or_create_geometry(
+            record, gseed)
+
+        tid = self.task_id
+        if self.targeted:
+            if tid >= len(TARGETED_ENSEMBLE):
+                raise ValueError(f'--task-id {tid} out of range for TARGETED_ENSEMBLE '
+                                 f'(max {len(TARGETED_ENSEMBLE)-1})')
+            strain_output  = TARGETED_ENSEMBLE[tid]['strain_output']
+            strain_output2 = TARGETED_ENSEMBLE[tid]['strain_output2']
+            print(f"  Geometry seed : {gseed} (targeted, fixed)")
+            print(f"  Task          : TARGETED_ENSEMBLE[{tid}]  "
+                  f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
+        else:
+            trng = task_rng(tid)
+            soi1 = int(trng.randint(1, 11))   # inclusive [1, 10], excludes strain=0
+            soi2 = int(trng.randint(1, 11))
+            strain_output  = -0.1 * soi2
+            strain_output2 = -0.1 * soi1
+            print(f"  Geometry seed : {gseed}")
+            print(f"  Task          : soi1={soi1}, soi2={soi2}  "
+                  f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
+        record.write_task(AllostericTask(gseed, strain_output, strain_output2))
+
+        nodes = self.nodes
+        self.tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
+        self.tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
+        self.dinputdistance  = STRAIN_INPUT  * np.linalg.norm(nodes[0] - nodes[1])
+        self.dinputdistance2 = STRAIN_INPUT2 * np.linalg.norm(nodes[0] - nodes[1])
+
+    def fresh_state(self):
+        stiffnesses = initial_condition.contrastive(
+            self.realization_seed, len(self.incidence_matrix), K_MIN, K_MAX)
+        print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
+        return TrainState(0, stiffnesses, Loss(np.empty((0, 2))))
+
+    def train(self, state, n_steps, stop_rule, on_checkpoint):
+        tag = ("Training" if state.step == 0
+               else f"Training resumed — {n_steps} steps remaining")
+        print(f"\n--- {tag} ---")
+        print('Learning rate: ', self.learning_rate)
+        mse1, mse2 = (np.ascontiguousarray(c) for c in state.loss.per_subtask.T)
+        best = state.best
+        msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse, diverged = \
+            _run_training_loop(
+                self.nodes, self.incidence_matrix, self.eq_lengths, state.stiffnesses,
+                self.learning_rate, self.tod, self.tod2,
+                self.dinputdistance, self.dinputdistance2,
+                NSTEPS_TASK1, NSTEPS_TASK2, n_steps, on_checkpoint,
+                msearray=mse1, msearray2=mse2, step_offset=state.step,
+                best_stiffnesses=None if best is None else best.stiffnesses,
+                best_combined_mse=np.inf if best is None else best.training_loss,
+                solver=self.solver, stop_rule=stop_rule)
+        loss = Loss(np.column_stack([msearray, msearray2]))
+        if diverged:
+            status = 'nan'
+        elif stop_rule.reached((msearray[0], msearray2[0]), (msearray[-1], msearray2[-1])):
+            status = 'converged'
+        else:
+            status = 'steps_exhausted'
+        return TrainResult(
+            TrainState(len(msearray), stiffnesses, loss,
+                       BestSoFar(best_stiffnesses, best_combined_mse)),
+            status)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -663,13 +681,8 @@ def main():
     tid = args.task_id
     rid = args.realization_id
     training_steps = args.training_steps
-    output_dir     = args.output_dir
     targeted       = args.targeted_ensemble
     solver         = args.solver
-    learning_rate  = args.learning_rate
-    overwrite      = args.overwrite
-
-    log_dir = '/home1/felipetm/auxetic_networks/ensemble_training/Logs'
 
     mode_tag = 'targeted' if targeted else f'geometry={gid}'
     print(f"=== Allosteric trainer: {mode_tag}, task={tid}, realization={rid}, solver={solver} ===")
@@ -677,10 +690,10 @@ def main():
     # rid (0..N_REALIZATIONS-1) is a serial index into the screened-good seeds
     # for this task[, geometry], not a literal RNG seed — see
     # training/src/good_realizations.py / docs/realization_screening.md.
-    # Computed here (before the critical-hparams check below) so a mismatch
-    # between this run's screened seed and whatever seed actually produced a
-    # resumed checkpoint is caught the same way as any other critical key,
-    # instead of silently resuming a trajectory screening never selected.
+    # Recorded as a critical hyperparameter, so a mismatch between this run's
+    # screened seed and whatever seed actually produced a resumed checkpoint is
+    # caught like any other critical key instead of silently resuming a
+    # trajectory screening never selected.
     _seed_kind = 'allosteric_targeted' if targeted else 'allosteric_general'
     screened_seed = get_realization_seed(_seed_kind, tid, rid, geometry_id=None if targeted else gid)
 
@@ -690,172 +703,59 @@ def main():
     original_dir = os.getcwd()
     os.chdir(work_dir)
 
-    # Output subfolder
-    geom_dir = 'geometry_targeted' if targeted else f'geometry_{gid}'
-    output_path = os.path.join(output_dir, geom_dir, f'task_{tid}', f'realization_{rid}')
+    record = RealizationRecord.locate(
+        args.output_dir, 'allosteric', ('targeted' if targeted else gid, tid), rid,
+        must_exist=False)
+    print(record.run_dir.parent.parent.name, record.run_dir, 'test outputpath')
 
-    print(geom_dir, output_path, 'test outputpath')
-    os.makedirs(output_path, exist_ok=True)
-
-    # Persist run-level hyperparameters and provenance for this realization.
-    # training_meta.json is the source of truth for which solver, learning
-    # rate, and stiffness bounds actually produced this realization's saved
-    # trajectory (these are otherwise hardcoded/CLI values with no other
-    # per-run record); run_provenance.json additionally records the git
-    # commit that produced it, appended on every invocation.
-    #
-    # Checked against THIS invocation's values BEFORE any resume state is
-    # read — a mismatch on solver/learning_rate/k_min/k_max/eta fails outright
-    # unless --overwrite is passed. On --overwrite, the realization's saved
-    # state (stiffnesses/mse/best-state/geometry/meta) is wiped and restarted
-    # from scratch under the new hyperparameters: resuming a trajectory
-    # trained under the OLD settings and merely relabeling training_meta.json
-    # with the NEW ones would make it describe a run that never actually
-    # happened, defeating the point of tracking it. n_training_steps is
-    # exempt: resuming to train for longer is expected and fine.
-    #
-    # eta is the coupled-learning nudge strength (rest_lengths_clamped =
-    # eta*tod + (1-eta)*cod; delta_K is also divided by eta) — silently
-    # changing it mid-run would mix trajectories computed under different
-    # nudge strengths, same risk as changing learning_rate/k_min/k_max.
-    _ALLOSTERIC_CRITICAL_KEYS = DEFAULT_CRITICAL_KEYS | {'eta'}
+    # training_meta.json records which solver, learning rate, stiffness bounds and
+    # seed produced this realization's trajectory; a resumed run must match on these
+    # (eta too: the coupled-learning nudge strength) or pass --overwrite, which
+    # restarts the realization from scratch under the new values. n_training_steps
+    # may change: training longer is expected.
     current_hparams = {
         'solver': solver,
-        'learning_rate': learning_rate,
+        'learning_rate': args.learning_rate,
         'k_min': K_MIN,
         'k_max': K_MAX,
         'eta': ETA,
         'n_training_steps': training_steps,
         'realization_seed': screened_seed,
     }
-    if has_critical_mismatch(output_path, current_hparams, critical_keys=_ALLOSTERIC_CRITICAL_KEYS):
-        if not overwrite:
-            os.chdir(original_dir)
-            shutil.rmtree(work_dir, ignore_errors=True)
-            raise HyperparameterMismatchError(
-                f"{output_path}/training_meta.json already recorded different solver/"
-                f"learning_rate/k_min/k_max/eta/realization_seed than this run's. Resuming would "
-                f"mix incompatible settings into one training trajectory. Pass --overwrite to wipe "
-                f"it and restart from scratch under the new hyperparameters."
-            )
-        print(f"  --overwrite set: recorded hyperparameters differ from this run's — wiping "
-              f"{output_path} and restarting from scratch under the new hyperparameters.")
-        shutil.rmtree(output_path)
-        os.makedirs(output_path, exist_ok=True)
 
+    def refuse(record):
+        raise HyperparameterMismatchError(
+            f"{record.run_dir}/training_meta.json already recorded different solver/"
+            f"learning_rate/k_min/k_max/eta/realization_seed than this run's. Resuming would "
+            f"mix incompatible settings into one training trajectory. Pass --overwrite to wipe "
+            f"it and restart from scratch under the new hyperparameters."
+        )
+
+    trainer = AllostericTrainer(
+        targeted=targeted, geometry_id=gid, task_id=tid, realization_seed=screened_seed,
+        learning_rate=args.learning_rate, solver=solver)
     try:
-        save_training_meta(output_path, current_hparams, critical_keys=_ALLOSTERIC_CRITICAL_KEYS)
-        save_run_provenance(output_path, extra=current_hparams)
-        save_code_snapshot(output_path, _CODE_SNAPSHOT_FILES)
-    except Exception:
-        os.chdir(original_dir)
-        shutil.rmtree(work_dir, ignore_errors=True)
-        raise
-
-    try:
-        # ── Build geometry (load if present, recreate from seed if missing) ───
-        gseed = _TARGETED_GEOMETRY_SEED if targeted else geometry_seed(gid)
-        nodes, incidence_matrix, eq_lengths = load_or_create_geometry(output_path, gseed)
-
-        # ── Resolve task strains ──────────────────────────────────────────────
-        strain_input  = STRAIN_INPUT
-        strain_input2 = STRAIN_INPUT2
-        if targeted:
-            if tid >= len(TARGETED_ENSEMBLE):
-                raise ValueError(f'--task-id {tid} out of range for TARGETED_ENSEMBLE '
-                                 f'(max {len(TARGETED_ENSEMBLE)-1})')
-            strain_output  = TARGETED_ENSEMBLE[tid]['strain_output']
-            strain_output2 = TARGETED_ENSEMBLE[tid]['strain_output2']
-            print(f"  Geometry seed : {gseed} (targeted, fixed)")
-            print(f"  Task          : TARGETED_ENSEMBLE[{tid}]  "
-                  f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
-        else:
-            trng = task_rng(tid)
-            soi1 = int(trng.randint(1, 11))   # inclusive [1, 10], excludes strain=0
-            soi2 = int(trng.randint(1, 11))
-            strain_output  = -0.1 * soi2
-            strain_output2 = -0.1 * soi1
-            print(f"  Geometry seed : {gseed}")
-            print(f"  Task          : soi1={soi1}, soi2={soi2}  "
-                  f"→  strain_out={strain_output:.1f}, strain_out2={strain_output2:.1f}")
-
-        np.savetxt(os.path.join(output_path, 'tasks.txt'),
-                   [gseed, strain_output2, strain_output])
-
-        tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
-        tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
-
-        dinputdistance  = strain_input  * np.linalg.norm(nodes[0] - nodes[1])
-        dinputdistance2 = strain_input2 * np.linalg.norm(nodes[0] - nodes[1])
-
-        nsteps  = NSTEPS_TASK1
-        nsteps2 = NSTEPS_TASK2
-
-        # ── Resume or fresh start ─────────────────────────────────────────────
-        resume = load_resume_state(output_path)
-        if resume is not None:
-            stiffnesses, msearray, msearray2, start_step = resume
-            print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]"
-                  f"  (resumed from step {start_step})")
-        else:
-            # screened_seed computed earlier, up with current_hparams.
-            rrng = realization_rng(screened_seed)
-            stiffnesses = rrng.uniform(K_MIN, K_MAX, size=len(incidence_matrix))
-            msearray  = np.array([])
-            msearray2 = np.array([])
-            start_step = 0
-            print(f"  Stiffnesses   : [{stiffnesses.min():.2f}, {stiffnesses.max():.2f}]")
-
-        # Load best state (survives resume across SLURM restarts)
-        best_path = os.path.join(output_path, 'best_stiffnesses.npy')
-        bmse_path = os.path.join(output_path, 'best_combined_mse.txt')
-        if os.path.exists(best_path) and os.path.exists(bmse_path):
-            best_stiffnesses  = np.load(best_path)
-            best_combined_mse = float(np.loadtxt(bmse_path))
-            print(f"  Best state    : combined_mse={best_combined_mse:.4e} (loaded from disk)")
-        else:
-            best_stiffnesses  = None   # _run_training_loop initialises from stiffnesses
-            best_combined_mse = np.inf
-
         print(f"  Training steps: {training_steps:,}")
+        outcome = realization_lifecycle.run(
+            record, trainer, hparams=current_hparams,
+            critical_keys=DEFAULT_CRITICAL_KEYS | {'eta'},
+            code_files=_CODE_SNAPSHOT_FILES, target_steps=training_steps,
+            overwrite=args.overwrite, stop_rule=ALLOSTERIC_STOP_RULE, on_mismatch=refuse)
 
-        # ── Training (or its remaining portion, if resumed) ────────────────────
-        remaining_steps = max(0, training_steps - start_step)
-        if remaining_steps > 0:
-            tag = ("Training" if start_step == 0
-                   else f"Training resumed — {remaining_steps} steps remaining")
-            print(f"\n--- {tag} ---")
-            print('Learning rate: ', learning_rate)
-            msearray, msearray2, stiffnesses, best_stiffnesses, best_combined_mse = \
-                _run_training_loop(
-                    nodes, incidence_matrix, eq_lengths, stiffnesses,
-                    learning_rate, tod, tod2, dinputdistance, dinputdistance2,
-                    nsteps, nsteps2, remaining_steps, output_path,
-                    msearray=msearray, msearray2=msearray2,
-                    step_offset=start_step,
-                    best_stiffnesses=best_stiffnesses,
-                    best_combined_mse=best_combined_mse,
-                    solver=solver)
-
-        if check_success(msearray, msearray2):
+        mse1, mse2 = (np.ascontiguousarray(c) for c in outcome.state.loss.per_subtask.T)
+        if check_success(mse1, mse2):
             print("\nTraining succeeded.")
         else:
             print("\nTraining did not reach the success threshold within "
                   f"{training_steps:,} steps. Re-invoke with a larger "
                   "--training-steps to continue from this checkpoint.")
-
-        # ── Final save ────────────────────────────────────────────────────────
-        np.save(os.path.join(output_path, 'stiffnesses.npy'),      stiffnesses)
-        np.save(os.path.join(output_path, 'best_stiffnesses.npy'), best_stiffnesses)
-        np.save(os.path.join(output_path, 'mse1.npy'),             msearray)
-        np.save(os.path.join(output_path, 'mse2.npy'),             msearray2)
-        np.savetxt(os.path.join(output_path, 'best_combined_mse.txt'), [best_combined_mse])
-        print(f"\nResults saved to {output_path}"
-              f"  (best combined MSE: {best_combined_mse:.4e})")
-
+        print(f"\nResults saved to {record.run_dir}  ({outcome.stage}, {outcome.status})")
     finally:
         os.chdir(original_dir)
         shutil.rmtree(work_dir, ignore_errors=True)
+    if outcome.status == 'nan':
+        print(f"Training stopped on a NaN at step {outcome.state.step}; the run fails.")
+        sys.exit(1)
 
 
 if __name__ == '__main__':

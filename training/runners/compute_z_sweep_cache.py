@@ -42,6 +42,7 @@ for _p in (_ROOT, _FIGDIR, _ROOT / "training" / "src"):
         sys.path.insert(0, str(_p))
 
 import aug26_common as C
+from base.realization_record import RealizationRecord
 from training.src import explore_sep21_cases as EC
 
 EXPLORE_ROOT_DEFAULT = Path("/data2/shared/felipetm/explore_sep21")
@@ -67,8 +68,7 @@ def data_root(allo=None, aux=None):
 
 
 def _loss_ratio_allo(d):
-    m1, m2 = np.load(d / "mse1.npy"), np.load(d / "mse2.npy")
-    c = (m1 + m2) / 2.0
+    c = RealizationRecord.open(d, kind="allosteric").loss.training
     return float(np.nanmin(c) / c[0]) if len(c) else np.nan
 
 
@@ -108,7 +108,8 @@ def z_records(family, exp_root):
             task = c["orig_task"]
         else:
             d = EC.allo_z_dir(c, exp_root) / "geometry_targeted" / f"task_{c['task']}" / f"realization_{c['ic']}"
-            ratio = _loss_ratio_allo(d) if (d / "mse1.npy").exists() else np.nan
+            ratio = (_loss_ratio_allo(d)
+                     if RealizationRecord.open(d, kind="allosteric").has("loss") else np.nan)
             meta_p = d / "explore_case.json"
             task = c["task"]
         z = json.loads(meta_p.read_text())["z"] if meta_p.exists() else np.nan
@@ -194,6 +195,12 @@ def _rho_summary(rows):
     return out
 
 
+def _allo_operating_k(d):
+    """Stiffnesses the allosteric susceptibilities and cost Hessian are evaluated at: K*,
+    raising when it cannot be determined (never the final snapshot)."""
+    return C.allo_best_loss_stiffness(d)
+
+
 def compute_one(r, exp_root, allo_solver):
     """Identical to the notebook's process_record()'s inner _run()."""
     if r["family"] == "aux_z":
@@ -210,7 +217,7 @@ def compute_one(r, exp_root, allo_solver):
             d = C.load_allosteric("targeted", r["task"], r["ic"])
         if d is None:
             return None
-        k = d["best_stiffnesses"] if d["best_stiffnesses"] is not None else d["stiff_traj"][-1]
+        k = _allo_operating_k(d)
         rows = _sus_allo(d, k, allo_solver)
         edges, pos = d["edges"], d["nodes"]
     return dict(rows=rows, edges=edges, pos=pos, **_rho_summary(rows))

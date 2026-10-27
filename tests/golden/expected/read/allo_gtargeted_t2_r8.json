@@ -1,0 +1,42 @@
+{
+ "allo_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1020018
+  }
+ },
+ "load_allosteric": {
+  "raises": "StaleSweep: <repo>/data/allosteric_nets_aug/geometry_targeted/task_2/realization_8: sweep after cost Hessian is not at K*; recompute the sweep"
+ },
+ "load_resume_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "e0242e2be0a7df9dd9cab2bdeade9e1abc6177fb1ff545a0855e0f225fd16ee6",
+     "shape": [
+      253
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "c104abc300fb9905f92d3005f461d3f8642b8d9c339540cc7167e83718c40e94",
+     "shape": [
+      6000
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "0c8c058a4cfca6da8c98414c9d62519ffd41b94452964e5a4d7978f27b99c4a3",
+     "shape": [
+      6000
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 6000
+    }
+   ]
+  }
+ }
+}

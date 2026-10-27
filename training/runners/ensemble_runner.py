@@ -32,26 +32,23 @@ for _p in [str(_ROOT), str(_SRC)]:
 from base.config import *
 from base.config import get_n_nodes, get_n_strain_steps
 from base.network_utils import create_auxetic_network
+from base.stored_network import load_stored_network, network_fingerprint
 from training.src.task_generator import (
     generate_task_config,
     generate_realization_stiffnesses,
     compute_target_extensions
 )
 from training.src.good_realizations import get_realization_seed
+from base.realization_record import RealizationRecord, Loss
+from training.src import realization_lifecycle
+from training.src.realization_lifecycle import TrainState, TrainResult, TrainingLossBelow
+from training.src.run_provenance import DEFAULT_CRITICAL_KEYS, HyperparameterMismatchError
 from training.src.checkpoint_manager import (
     is_training_complete,
     save_training_results,
     get_incomplete_jobs,
     print_progress_summary,
-    save_checkpoint,
-    load_checkpoint,
-    has_checkpoint,
-    remove_checkpoint,
     results_dir_for_gradient_method,
-    save_run_metadata,
-    save_run_code_snapshot,
-    job_has_critical_mismatch,
-    reset_job,
 )
 
 # Code archived alongside each job's results (see save_run_code_snapshot) so
@@ -83,20 +80,172 @@ except ImportError as e:
     TRAINING_FUNCTIONS_AVAILABLE = False
 
 
-def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoint=True,
+class GeneralAuxeticTrainer:
+    """The general-ensemble auxetic physics behind training.src.realization_lifecycle:
+    generated task config, packed network (restored from the checkpoint on resume), the
+    initial draw, the gradient-descent trainer, and the final save."""
+
+    def __init__(self, *, task_id, realization_id, realization_seed, gradient_method,
+                 network_type, learning_rate, n_steps, results_dir, verbose, network_file=None):
+        self.task_id, self.realization_id = task_id, realization_id
+        self.network_file = network_file
+        self.realization_seed = realization_seed
+        self.gradient_method, self.network_type = gradient_method, network_type
+        self.learning_rate, self.n_steps = learning_rate, n_steps
+        self.results_dir, self.verbose = results_dir, verbose
+
+    def prepare(self, record):
+        resume = record.resume_state()
+        if resume is not None:
+            ckpt = resume.trainer_state
+            print(f"Found checkpoint at step {ckpt['current_step']}")
+            print(f"Resuming from checkpoint...")
+            print(ckpt)
+            try:
+                self.task_config = ckpt['task_config']
+                assert self.task_config is not None
+            except (KeyError, AssertionError) as e:
+                self.task_config = generate_task_config(self.task_id)
+                print(f'Regenerated task config due to checkpoint not having task config ({e!r})')
+        else:
+            self.task_config = generate_task_config(self.task_id)
+        print(f"  Compression strains: {self.task_config['compression_strains']}")
+        print(f"  Target Poisson ratios: {self.task_config['target_poisson_ratios']}")
+        # The packing is hardware-dependent (docs/adr/0002-auxetic-ensemble-on-stored-
+        # network-a.md), so runs that must share a network load it from network_file.
+        if self.network_file is not None:
+            self.network, self.boundary, _ = load_stored_network(self.network_file)
+            n_expected = get_n_nodes(self.task_id)
+            if len(self.network.positions) > n_expected:
+                raise ValueError(f"{self.network_file}: {len(self.network.positions)} nodes, "
+                                 f"more than task {self.task_id} uses ({n_expected})")
+        else:
+            self.network, self.boundary = create_auxetic_network(
+                n_nodes=get_n_nodes(self.task_id),
+                packing_seed=self.task_config['packing_seed'],
+                force_type=FORCE_TYPE,
+                boundary_margin=BOUNDARY_MARGIN,
+                central_force=PACKING_PARAMS['central'],
+                network_type=self.network_type,
+            )
+
+    def fresh_state(self):
+        print(f"  Network created: {len(self.network.positions)} nodes, {len(self.network.edges)} edges")
+        initial_stiffnesses = generate_realization_stiffnesses(
+            self.task_id, self.realization_seed, len(self.network.edges))
+        self.network.stiffnesses = initial_stiffnesses
+        self.network.save_original_parameters()
+        print(f"  Stiffnesses initialized: range [{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
+        return TrainState(0, initial_stiffnesses, Loss(training=np.empty(0)), trainer_state={})
+
+    def extra_hparams(self, state):
+        # Only runs on a stored network record its fingerprint (a critical key, so resuming
+        # onto a different network fails); other runs keep today's training_meta.
+        if self.network_file is None:
+            return {}
+        fingerprint = network_fingerprint(self.network.positions, self.network.edges)
+        print(f"  Network fingerprint: {fingerprint}")
+        return {'network_fingerprint': fingerprint}
+
+    def resumed_state(self, resume):
+        ckpt = resume.trainer_state
+        self.network.positions = ckpt['network']['positions']
+        self.network.stiffnesses = ckpt['network']['stiffnesses']
+        self.network.rest_lengths = ckpt['network']['rest_lengths']
+        self.network.edges = ckpt['network']['edges']
+        print(f"  Network restored: {len(self.network.positions)} nodes, {len(self.network.edges)} edges")
+        print(f"  Resuming from step {resume.step}/{self.n_steps}")
+        return TrainState(resume.step, self.network.stiffnesses, resume.loss,
+                          trainer_state=ckpt['history'])
+
+    def train(self, state, n_steps, stop_rule, on_checkpoint):
+        print(f"  Training parameters:")
+        print(f"    Learning rate: {self.learning_rate}")
+        print(f"    Steps: {self.n_steps:,}")
+        print(f"    Strain steps: {get_n_strain_steps(self.task_id)}")
+        print(f"    Force tolerance: {FORCE_TOL}")
+        compression_strains = self.task_config['compression_strains']
+        target_extensions = compute_target_extensions(
+            compression_strains, self.task_config['target_poisson_ratios'])
+        if self.gradient_method == 'jax':
+            train_fn = finish_training_GD_auxetic_batch_jax
+            method_kwarg = {'opt_fire': USE_OPT_FIRE, 'opt_fire_finc': OPT_FIRE_FINC}
+        else:
+            train_fn = finish_training_GD_auxetic_batch
+            method_kwarg = {'method': 'fire' if self.gradient_method in ('fire', 'parallel')
+                            else self.gradient_method}
+        # The trainer saves results and checkpoints itself (through checkpoint_manager,
+        # i.e. the record) every save_interval steps; on_checkpoint is not used.
+        history, self.network = train_fn(
+            network=self.network,
+            history=state.trainer_state,
+            learning_rate=self.learning_rate,
+            n_steps=n_steps,
+            top_nodes=self.boundary['top'],
+            bottom_nodes=self.boundary['bottom'],
+            left_nodes=self.boundary['left'],
+            right_nodes=self.boundary['right'],
+            force_type=FORCE_TYPE,
+            n_strain_steps=get_n_strain_steps(self.task_id),
+            source_compression_strain_list=compression_strains,
+            desired_target_extension_list=target_extensions,
+            force_tol=FORCE_TOL,
+            vmin=VMIN,
+            vmax=VMAX,
+            task_seed=self.task_id,
+            realization_seed=self.realization_id,
+            save_interval=500,
+            network_type=self.network_type,
+            TARGETED_RESULTS_DIR=self.results_dir,
+            **method_kwarg,
+        )
+        loss = np.asarray(history.get('loss', []), float)
+        final = loss[-1] if len(loss) else np.nan
+        if not np.isfinite(final):
+            status = 'nan'
+        elif len(loss) < self.n_steps and stop_rule.reached(loss[0], final):
+            status = 'converged'
+        else:
+            status = 'steps_exhausted'
+        return TrainResult(TrainState(len(loss), self.network.stiffnesses,
+                                      Loss(training=loss), trainer_state=history), status)
+
+    def save_final(self, record, state, status):
+        """Final results (with the task config regenerated, not the checkpoint's) and, only
+        when training stopped because it converged, the completion marker; the checkpoint
+        is removed whatever the outcome."""
+        history = state.trainer_state
+        save_training_results(
+            task_seed=self.task_id, realization_seed=self.realization_id, history=history,
+            network=self.network, task_config=generate_task_config(self.task_id),
+            boundary_dict=self.boundary, results_dir=self.results_dir,
+            network_type=self.network_type)
+        record.drop_checkpoint()
+        self.final_loss = (history['loss'][-1] if 'loss' in history and history['loss']
+                           else float('nan'))
+        self.n_steps_done = len(history.get('loss', []))
+        if (np.isfinite(self.final_loss) and self.n_steps_done < self.n_steps
+                and self.final_loss < 1e-6):
+            record.mark_complete()   # training stopped because it converged
+
+
+def run_single_training(task_seed, realization_id, verbose=False, use_checkpoint=True,
                         gradient_method='parallel', network_type=NETWORK_TYPE, overwrite=False,
-                        lr_override=None, steps_override=None):
+                        lr_override=None, steps_override=None, network_file=None):
     """
     Run a single training job with checkpoint support.
 
     Args:
         task_seed: Task index (0 to N_TASKS-1)
-        realization_seed: Realization index (0 to N_REALIZATIONS-1)
+        realization_id: Realization index (0 to N_REALIZATIONS-1)
         verbose: Print detailed progress
-        use_checkpoint: Whether to use checkpointing (default: True)
+        use_checkpoint: Ignored; the lifecycle always resumes from a checkpoint when one
+            exists (kept for callers)
         gradient_method: 'newton' (IFT), 'newton_fd' (Newton loss + finite-difference
             gradient), 'jax' (autodiff), or 'fire'/'parallel' (Cython FIRE + finite-difference)
         network_type: 'jammed' or 'lattice' (see create_auxetic_network)
+        network_file: Stored-network file (base.stored_network) to train on instead of
+            regenerating the hardware-dependent packing; its fingerprint is then recorded.
         overwrite: If False (default) and this job's recorded solver/gradient_method/
             learning_rate/k_min/k_max/force_tol conflict with the current run's values,
             raises HyperparameterMismatchError instead of continuing (n_steps is exempt —
@@ -109,7 +258,7 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
         success: Boolean indicating success
     """
     print(f"\n{'='*80}")
-    print(f"Starting Task {task_seed}, Realization {realization_seed}")
+    print(f"Starting Task {task_seed}, Realization {realization_id}")
     print(f"{'='*80}")
     _LR = LEARNING_RATE if lr_override is None else lr_override
     _NSTEPS = N_STEPS if steps_override is None else steps_override
@@ -119,276 +268,77 @@ def run_single_training(task_seed, realization_seed, verbose=False, use_checkpoi
     # checkpoints and results).
     results_dir = results_dir_for_gradient_method(RESULTS_DIR, gradient_method)
 
-    # realization_seed (0..N_REALIZATIONS-1) is a serial index into the
+    # realization_id (0..N_REALIZATIONS-1) is a serial index into the
     # screened-good seeds for this task, not a literal RNG seed — see
     # training/src/good_realizations.py / docs/realization_screening.md.
-    # Computed here (before critical_hparams below) so a mismatch between
-    # this run's screened seed and whatever seed actually produced a resumed
-    # checkpoint is caught the same way as any other critical key, instead of
-    # silently resuming a trajectory screening never selected.
-    screened_seed = get_realization_seed('auxetic_general', task_seed, realization_seed)
-
-    # Guard against silently mixing incompatible hyperparameters into one
-    # saved trajectory. Must run BEFORE any checkpoint/completion check —
-    # resuming a checkpoint trained under OLD hyperparameters and merely
-    # relabeling training_meta.json with the NEW ones would make it describe
-    # a run that never actually happened.
+    # Recorded as a critical key, so a mismatch between this run's screened seed and
+    # whatever seed produced a resumed checkpoint is caught like any other.
+    screened_seed = get_realization_seed('auxetic_general', task_seed, realization_id)
     optimizer = 'fire' if (gradient_method == 'jax' and USE_OPT_FIRE) else 'gradient_descent'
-    critical_hparams = {
+    hparams = {
         'learning_rate': _LR,
         'k_min': VMIN,
         'k_max': VMAX,
+        'n_steps': _NSTEPS,
         'force_tol': FORCE_TOL,
         'gradient_method': gradient_method,
         'optimizer': optimizer,
         'opt_fire_finc': OPT_FIRE_FINC,
         'realization_seed': screened_seed,
     }
-    if job_has_critical_mismatch(task_seed, realization_seed, critical_hparams,
-                                 results_dir=results_dir, network_type=network_type):
-        if not overwrite:
-            print(f"\n{'='*80}")
-            print(f"ERROR: Task {task_seed}, Realization {realization_seed}")
-            print(f"Recorded solver/gradient_method/learning_rate/k_min/k_max/force_tol "
-                  f"differ from this run's. Pass overwrite=True (--overwrite) to wipe and "
-                  f"restart from scratch under the new hyperparameters.")
-            print(f"{'='*80}\n")
-            return False
-        print(f"  overwrite=True: recorded hyperparameters differ from this run's — wiping "
-              f"saved state for task {task_seed}, realization {realization_seed} and "
-              f"restarting from scratch under the new hyperparameters.")
-        reset_job(task_seed, realization_seed, results_dir=results_dir, network_type=network_type)
 
-    # Check if already complete
-    if is_training_complete(task_seed, realization_seed, results_dir=results_dir, network_type=network_type):
-        print(f"Job already completed! Skipping...")
-        print(f"{'='*80}\n")
-        return True
+    def refuse(record):
+        raise HyperparameterMismatchError(
+            f"{record.run_dir}: recorded critical hyperparameters (solver/gradient_method/"
+            f"learning_rate/k_min/k_max/force_tol/optimizer/realization_seed) differ from this "
+            f"run's. Resuming would mix incompatible settings into one training trajectory. "
+            f"Pass overwrite=True (--overwrite) to wipe it and restart from scratch.")
 
+    def done(record):
+        return is_training_complete(task_seed, realization_id, results_dir=results_dir,
+                                    network_type=network_type)
+
+    record = RealizationRecord.locate(results_dir, 'auxetic', task_seed, realization_id,
+                                      must_exist=False, network_type=network_type)
+    trainer = GeneralAuxeticTrainer(
+        task_id=task_seed, realization_id=realization_id, realization_seed=screened_seed,
+        gradient_method=gradient_method, network_type=network_type, learning_rate=_LR,
+        n_steps=_NSTEPS, results_dir=results_dir, verbose=verbose, network_file=network_file)
     start_time = time.time()
-
     try:
-        # Check if training functions are available
         if not TRAINING_FUNCTIONS_AVAILABLE:
             raise ImportError("Training functions not available. Check imports.")
-
-        # Try to load checkpoint
-        checkpoint = None
-        if use_checkpoint:
-            checkpoint = load_checkpoint(task_seed, realization_seed, results_dir=results_dir, network_type=network_type)
-            if checkpoint is not None:
-                print(f"Found checkpoint at step {checkpoint['current_step']}")
-                print(f"Resuming from checkpoint...")
-
-        # 1. Generate task configuration (or load from checkpoint)
-        if checkpoint is not None:
-            print(checkpoint)
-            try:
-                task_config = checkpoint['task_config']
-                assert task_config is not None
-            except (KeyError, AssertionError) as e:
-                task_config = generate_task_config(task_seed)
-                print(f'Regenerated task config due to checkpoint not having task config ({e!r})')
-            if verbose:
-                print("Step 1: Loaded task configuration from checkpoint...")
-        else:
-            if verbose:
-                print("Step 1: Generating task configuration...")
-            task_config = generate_task_config(task_seed)
-
-        print(f"  Compression strains: {task_config['compression_strains']}")
-        print(f"  Target Poisson ratios: {task_config['target_poisson_ratios']}")
-
-        # 2. Create network (unique per task via packing_seed) or restore from checkpoint
-        if checkpoint is not None:
-            if verbose:
-                print("Step 2: Restoring network from checkpoint...")
-            # Create base network structure
-            network, boundary_dict = create_auxetic_network(
-                n_nodes=get_n_nodes(task_seed),
-                packing_seed=task_config['packing_seed'],
-                force_type=FORCE_TYPE,
-                boundary_margin=BOUNDARY_MARGIN,
-                central_force=PACKING_PARAMS['central'],
-                network_type=network_type,
-            )
-            # Restore network state from checkpoint
-            network.positions = checkpoint['network']['positions']
-            network.stiffnesses = checkpoint['network']['stiffnesses']
-            network.rest_lengths = checkpoint['network']['rest_lengths']
-            network.edges = checkpoint['network']['edges']
-            print(f"  Network restored: {len(network.positions)} nodes, {len(network.edges)} edges")
-        else:
-            if verbose:
-                print("Step 2: Creating network from packing...")
-            network, boundary_dict = create_auxetic_network(
-                n_nodes=get_n_nodes(task_seed),
-                packing_seed=task_config['packing_seed'],
-                force_type=FORCE_TYPE,
-                boundary_margin=BOUNDARY_MARGIN,
-                central_force=PACKING_PARAMS['central'],
-                network_type=network_type,
-            )
-            print(f"  Network created: {len(network.positions)} nodes, {len(network.edges)} edges")
-
-            # 3. Initialize stiffnesses (unique per realization)
-            if verbose:
-                print("Step 3: Initializing random stiffnesses...")
-            n_edges = len(network.edges)
-            # screened_seed computed earlier, up with critical_hparams.
-            initial_stiffnesses = generate_realization_stiffnesses(
-                task_seed,
-                screened_seed,
-                n_edges
-            )
-            network.stiffnesses = initial_stiffnesses
-            network.save_original_parameters()
-            print(f"  Stiffnesses initialized: range [{initial_stiffnesses.min():.2e}, {initial_stiffnesses.max():.2e}]")
-
-        # 4. Prepare training parameters
-        compression_strains = task_config['compression_strains']
-        target_poisson_ratios = task_config['target_poisson_ratios']
-
-        # Convert Poisson ratios to target extensions
-        # For auxetic: ν = -(lateral_strain / vertical_strain)
-        # So: lateral_strain = -ν * vertical_strain
-        target_extensions = compute_target_extensions(compression_strains, target_poisson_ratios)
-
-        if verbose:
-            print(f"  Target extensions: {target_extensions}")
-
-        # 5. Run training (with checkpoint support)
-        if verbose:
-            print("Step 4: Running training...")
-        print(f"  Training parameters:")
-        print(f"    Learning rate: {_LR}")
-        print(f"    Steps: {_NSTEPS:,}")
-        print(f"    Strain steps: {get_n_strain_steps(task_seed)}")
-        print(f"    Force tolerance: {FORCE_TOL}")
-
-        # Record the hyperparameters actually driving this job (the nominal
-        # LEARNING_RATE constant, unmodified) + which code version (git
-        # commit) invoked it, so a saved run's provenance is recoverable
-        # later even if these module-level constants change. Raises
-        # HyperparameterMismatchError (caught below) if this job was
-        # previously recorded with different solver/gradient_method/
-        # learning_rate/k_min/k_max/force_tol and overwrite=False.
-        save_run_metadata(
-            task_seed, realization_seed,
-            hyperparams={
-                'learning_rate': _LR,
-                'k_min': VMIN,
-                'k_max': VMAX,
-                'n_steps': _NSTEPS,
-                'force_tol': FORCE_TOL,
-                'gradient_method': gradient_method,
-                'optimizer': optimizer,
-                'opt_fire_finc': OPT_FIRE_FINC,
-                'realization_seed': screened_seed,
-            },
-            results_dir=results_dir,
-            network_type=network_type,
-            overwrite=overwrite,
-        )
-        save_run_code_snapshot(task_seed, realization_seed, _CODE_SNAPSHOT_FILES,
-                               results_dir=results_dir, network_type=network_type)
-
-        # Initialize or restore history
-        if checkpoint is not None:
-            history = checkpoint['history']
-            start_step = checkpoint['current_step']
-            print(f"  Resuming from step {start_step}/{_NSTEPS}")
-        else:
-            history = {}
-            start_step = 0
-
-        # Note: The training function doesn't natively support resuming,
-        # so we call it with remaining steps
-        remaining_steps = _NSTEPS - start_step
-
-        if remaining_steps > 0:
-            if gradient_method == 'jax':
-                train_fn = finish_training_GD_auxetic_batch_jax
-                method_kwarg = {'opt_fire': USE_OPT_FIRE, 'opt_fire_finc': OPT_FIRE_FINC}
-            else:
-                train_fn = finish_training_GD_auxetic_batch
-                method_kwarg = {'method': 'fire' if gradient_method in ('fire', 'parallel') else gradient_method}
-            history, trained_network = train_fn(
-                network=network,
-                history=history,
-                learning_rate=_LR,
-                n_steps=remaining_steps,
-                top_nodes=boundary_dict['top'],
-                bottom_nodes=boundary_dict['bottom'],
-                left_nodes=boundary_dict['left'],
-                right_nodes=boundary_dict['right'],
-                force_type=FORCE_TYPE,
-                n_strain_steps=get_n_strain_steps(task_seed),
-                source_compression_strain_list=compression_strains,
-                desired_target_extension_list=target_extensions,
-                force_tol=FORCE_TOL,
-                vmin=VMIN,
-                vmax=VMAX,
-                task_seed=task_seed,
-                realization_seed=realization_seed,
-                save_interval=500,
-                network_type=network_type,
-                TARGETED_RESULTS_DIR=results_dir,
-                **method_kwarg,
-            )
-        else:
-            trained_network = network
-            print("  Training already complete from checkpoint!")
-
-        # 6. Save final results
-        if verbose:
-            print("Step 5: Saving results...")
-        save_training_results(
-            task_seed=task_seed,
-            realization_seed=realization_seed,
-            history=history,
-            network=trained_network,
-            task_config=generate_task_config(task_seed),
-            boundary_dict=boundary_dict,
-            results_dir=results_dir,
-            network_type=network_type,
-        )
-
-        # Remove checkpoint file after successful completion
-        if use_checkpoint:
-            remove_checkpoint(task_seed, realization_seed, results_dir=results_dir, network_type=network_type)
-
-        elapsed = time.time() - start_time
-        final_loss = history['loss'][-1] if 'loss' in history and history['loss'] else float('nan')
-
-        if not np.isfinite(final_loss):
-            print(f"\n{'='*80}")
-            print(f"FAILURE: Task {task_seed}, Realization {realization_seed}")
-            print(f"Time elapsed: {elapsed/60:.2f} minutes")
-            print(f"Final loss is not finite: {final_loss}")
-            print(f"Training steps completed: {len(history.get('loss', []))}")
-            print(f"{'='*80}\n")
-            return False
-
-        print(f"\n{'='*80}")
-        print(f"SUCCESS: Task {task_seed}, Realization {realization_seed}")
-        print(f"Time elapsed: {elapsed/60:.2f} minutes")
-        print(f"Final loss: {final_loss:.4e}")
-        print(f"Training steps completed: {len(history.get('loss', []))}")
-        print(f"{'='*80}\n")
-
-        return True
-
+        outcome = realization_lifecycle.run(
+            record, trainer, hparams=hparams, critical_keys=DEFAULT_CRITICAL_KEYS,
+            code_files=_CODE_SNAPSHOT_FILES, target_steps=_NSTEPS, overwrite=overwrite,
+            stop_rule=TrainingLossBelow(1e-6), on_mismatch=refuse, done=done,
+            steps_key='n_steps')
+    except HyperparameterMismatchError:
+        raise
     except Exception as e:
         elapsed = time.time() - start_time
         print(f"\n{'='*80}")
-        print(f"ERROR: Task {task_seed}, Realization {realization_seed}")
+        print(f"ERROR: Task {task_seed}, Realization {realization_id}")
         print(f"Time elapsed: {elapsed/60:.2f} minutes")
         print(f"Exception: {e}")
         print(f"{'='*80}\n")
         import traceback
         traceback.print_exc()
         return False
+    if outcome.stage == 'complete' and outcome.state is None:
+        print(f"{'='*80}\n")
+        return True
+
+    elapsed = time.time() - start_time
+    failed = not np.isfinite(trainer.final_loss)
+    print(f"\n{'='*80}")
+    print(f"{'FAILURE' if failed else 'SUCCESS'}: Task {task_seed}, Realization {realization_id}")
+    print(f"Time elapsed: {elapsed/60:.2f} minutes")
+    print(f"Final loss is not finite: {trainer.final_loss}" if failed
+          else f"Final loss: {trainer.final_loss:.4e}")
+    print(f"Training steps completed: {trainer.n_steps_done}")
+    print(f"{'='*80}\n")
+    return not failed
 
 
 def run_ensemble_sequential(resume=True, verbose=False, gradient_method='parallel',
@@ -430,9 +380,9 @@ def run_ensemble_sequential(resume=True, verbose=False, gradient_method='paralle
     failure_count = 0
     start_time_overall = time.time()
 
-    for idx, (task_seed, realization_seed) in enumerate(jobs):
+    for idx, (task_seed, realization_id) in enumerate(jobs):
         print(f"\n[Job {idx+1}/{len(jobs)}]")
-        success = run_single_training(task_seed, realization_seed, verbose=verbose,
+        success = run_single_training(task_seed, realization_id, verbose=verbose,
                                       gradient_method=gradient_method, network_type=network_type,
                                       overwrite=overwrite)
 
@@ -556,6 +506,13 @@ Examples:
              'from the hyperparameter-mismatch guard, so this works on a plain resume.'
     )
 
+    parser.add_argument(
+        '--network-file', type=Path, default=None,
+        help='Train on a stored network (e.g. base/networks/auxetic_network_A.npz) instead of '
+             'regenerating the hardware-dependent packing (single mode). The general family '
+             'normally packs a different network per task; a stored network is one network.'
+    )
+
     args = parser.parse_args()
 
     # Validate config before running
@@ -574,7 +531,8 @@ Examples:
                                       network_type=args.network_type,
                                       overwrite=args.overwrite,
                                       lr_override=args.learning_rate,
-                                      steps_override=args.steps)
+                                      steps_override=args.steps,
+                                      network_file=args.network_file)
         sys.exit(0 if success else 1)
 
     elif args.mode == 'sequential':

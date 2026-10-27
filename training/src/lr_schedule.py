@@ -3,7 +3,7 @@ Learning-rate schedule as a pure function of a saved loss trajectory.
 
 `lr_scale_for_step` never persists anything: it replays a plateau/overshoot
 classifier over the loss values already written to disk for other reasons
-(`history['loss']` for the auxetic/moduli training loops, the combined
+(`history['loss']` for the auxetic training loops, the combined
 mse1/mse2 trajectory for allosteric) and returns the multiplier that should
 be applied on top of the run's fixed nominal `learning_rate`. Because it's
 recomputed from data that's already checkpointed/saved, it needs no new

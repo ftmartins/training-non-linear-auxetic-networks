@@ -1,0 +1,245 @@
+{
+ "aux_best_loss_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "5c9bf0dd9e68dbfba47219512a0c1af2c40938f5de657905adda1153f0f71f3d",
+     "shape": [
+      100,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "bc8e12eec98881917437b2fc9d250b491cb6ca1330a490b5030fd503be41e939",
+     "shape": [
+      196
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 4500
+    }
+   ]
+  },
+  "warnings": [
+   "UserWarning: auxetic 28/8: no history.pkl -> best-loss k with final positions"
+  ]
+ },
+ "aux_best_loss_state.no_positions": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "5c9bf0dd9e68dbfba47219512a0c1af2c40938f5de657905adda1153f0f71f3d",
+     "shape": [
+      100,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "bc8e12eec98881917437b2fc9d250b491cb6ca1330a490b5030fd503be41e939",
+     "shape": [
+      196
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 4500
+    }
+   ]
+  }
+ },
+ "aux_network_fingerprint": {
+  "value": "f42702b79357877c"
+ },
+ "aux_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1280019
+  }
+ },
+ "data_io.load_auxetic_network": {
+  "value": {
+   "__tuple__": [
+    {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "a44993464c0eb232df8c917aacaecea3daee88c203f9b209129c173e5d970092",
+        "shape": [
+         196,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "5c9bf0dd9e68dbfba47219512a0c1af2c40938f5de657905adda1153f0f71f3d",
+        "shape": [
+         100,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "beb939116261b1f9d05fff2ec07575ae266c0105d69ca26564e23acc9f9d49f6",
+        "shape": [
+         196
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "520afeeb4dd0afad7d1a63f2a961af3194801c556aeadfa1dd8fea39d80291bd",
+        "shape": [
+         196
+        ]
+       }
+      }
+     }
+    },
+    {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "1c2880e6c84882eef324a7025d85fb99d6307bb2da6181a1833b8cbf49bbc53a",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "d971576979a4380fa84593192891020c484718e3998f7cc98bbf90fade7b32bb",
+       "shape": [
+        5
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "22154c82c28fbf79f2f79068753cacef1def682db96f8dcd8a0ab7271f7a065a",
+       "shape": [
+        5
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "8c7aa06b98c54a83a3211fdd89cdca20b42c43f8cbd326c54fb3964f2b7d1391",
+       "shape": [
+        7
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "load_auxetic": {
+  "value": {
+   "__dict__": {
+    "boundary": {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "1c2880e6c84882eef324a7025d85fb99d6307bb2da6181a1833b8cbf49bbc53a",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "d971576979a4380fa84593192891020c484718e3998f7cc98bbf90fade7b32bb",
+       "shape": [
+        5
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "22154c82c28fbf79f2f79068753cacef1def682db96f8dcd8a0ab7271f7a065a",
+       "shape": [
+        5
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "8c7aa06b98c54a83a3211fdd89cdca20b42c43f8cbd326c54fb3964f2b7d1391",
+       "shape": [
+        7
+       ]
+      }
+     }
+    },
+    "dir": "<repo>/data/auxetic_nets_aug/general/task_28/realization_08",
+    "loss_traj": {
+     "__nd__": "<f8",
+     "sha256": "ba8b092c726fef09f9bb9e9225460efad84b86ba9457b63aef2208a43316834d",
+     "shape": [
+      4501
+     ]
+    },
+    "network": {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "a44993464c0eb232df8c917aacaecea3daee88c203f9b209129c173e5d970092",
+        "shape": [
+         196,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "5c9bf0dd9e68dbfba47219512a0c1af2c40938f5de657905adda1153f0f71f3d",
+        "shape": [
+         100,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "beb939116261b1f9d05fff2ec07575ae266c0105d69ca26564e23acc9f9d49f6",
+        "shape": [
+         196
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "520afeeb4dd0afad7d1a63f2a961af3194801c556aeadfa1dd8fea39d80291bd",
+        "shape": [
+         196
+        ]
+       }
+      }
+     }
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 8
+    },
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "bd402750b56f9c01d9660820e60d91e32cc0c32a96b46ffc9cb8e9ab2f595b49",
+     "shape": [
+      4501,
+      196
+     ]
+    },
+    "sweep": null,
+    "task_config": {
+     "__dict__": {}
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 28
+    }
+   }
+  }
+ },
+ "load_checkpoint": {
+  "value": null
+ }
+}

@@ -1,0 +1,221 @@
+{
+ "allo_best_loss_stiffness": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "e3f0707f3120f0dd100177cc838d331e4a88db3c72614e494f78fb86cb66ee4b",
+   "shape": [
+    253
+   ]
+  }
+ },
+ "allo_initial_stiffnesses": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "62d5da1ba5eac7a88507d4da13ff3871f3254a2f5aba3c370f531b3ad9d73583",
+   "shape": [
+    253
+   ]
+  }
+ },
+ "allo_operating_point.before": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "024a516c8f564aed7bd882bfb6f0dee934f3b9f65126a7a448c0975019f73180",
+     "shape": [
+      253
+     ]
+    },
+    "before"
+   ]
+  }
+ },
+ "allo_operating_point.best": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "e3f0707f3120f0dd100177cc838d331e4a88db3c72614e494f78fb86cb66ee4b",
+     "shape": [
+      253
+     ]
+    },
+    "best"
+   ]
+  }
+ },
+ "allo_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1000030
+  }
+ },
+ "load_allosteric": {
+  "value": {
+   "__dict__": {
+    "best_stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "e3f0707f3120f0dd100177cc838d331e4a88db3c72614e494f78fb86cb66ee4b",
+     "shape": [
+      253
+     ]
+    },
+    "dir": "<repo>/data/allosteric_nets_aug/geometry_targeted/task_0/realization_10",
+    "edges": {
+     "__nd__": "<i8",
+     "sha256": "cd81c4d82567a4aeab41df19cd213c34718d955d7834797f663090a7ecef58bc",
+     "shape": [
+      253,
+      2
+     ]
+    },
+    "eq_lengths": {
+     "__nd__": "<f8",
+     "sha256": "98c938d2a9e5b64c8111997c2f4cf8018c3ee29d7340bd90b7856eab47d0c8c5",
+     "shape": [
+      253
+     ]
+    },
+    "geometry_id": "targeted",
+    "incidence_matrix": {
+     "__nd__": "<f8",
+     "sha256": "119f754c6767c3d2a5279e06af52547fa1b8711a59c41b2b1179cf46257df16d",
+     "shape": [
+      253,
+      87
+     ]
+    },
+    "mse1": {
+     "__nd__": "<f8",
+     "sha256": "616701ad9b4ca09c40c0a271639159dba396a2e9d470f9f90d340c88f73b8b16",
+     "shape": [
+      5000
+     ]
+    },
+    "mse2": {
+     "__nd__": "<f8",
+     "sha256": "fd440d84c7de6577964626d5772d9233e9dc5b39df9a649ef1289d417e90b4a5",
+     "shape": [
+      5000
+     ]
+    },
+    "nodes": {
+     "__nd__": "<f8",
+     "sha256": "61d0c1fe1370f90bbf43111738ca85472274f293b7513eabe8a64e07880c01ad",
+     "shape": [
+      87,
+      2
+     ]
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 10
+    },
+    "solver": "lammps",
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "89a9687f67dafd5e070619496483f5505acf75b92f27b6420b0248ad805c1a31",
+     "shape": [
+      100,
+      253
+     ]
+    },
+    "stiff_traj_steps": {
+     "__nd__": "<i8",
+     "sha256": "f30474c5a48b04dfdabb9564162b6003d95d06509534067f1e34d293ec826ffb",
+     "shape": [
+      100
+     ]
+    },
+    "stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "4d26d2257bb7ee4781f25a2e76412f5241d3d3e0fdb773118ae97500833737dd",
+     "shape": [
+      253
+     ]
+    },
+    "sweep": null,
+    "task_config": {
+     "__dict__": {
+      "dinputdistance": {
+       "__float__": "float",
+       "v": "0.9527358644101644"
+      },
+      "dinputdistance2": {
+       "__float__": "float",
+       "v": "0.4763679322050822"
+      },
+      "nsteps": {
+       "__int__": "int",
+       "v": 40
+      },
+      "nsteps2": {
+       "__int__": "int",
+       "v": 20
+      },
+      "strain_input": {
+       "__float__": "float",
+       "v": "1.0"
+      },
+      "strain_input2": {
+       "__float__": "float",
+       "v": "0.5"
+      },
+      "strain_output": {
+       "__float__": "float",
+       "v": "-0.8"
+      },
+      "strain_output2": {
+       "__float__": "float",
+       "v": "-0.6"
+      },
+      "tod": {
+       "__float__": "float",
+       "v": "0.1858805629109454"
+      },
+      "tod2": {
+       "__float__": "float",
+       "v": "0.3717611258218909"
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 0
+    }
+   }
+  }
+ },
+ "load_resume_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "4d26d2257bb7ee4781f25a2e76412f5241d3d3e0fdb773118ae97500833737dd",
+     "shape": [
+      253
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "616701ad9b4ca09c40c0a271639159dba396a2e9d470f9f90d340c88f73b8b16",
+     "shape": [
+      5000
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "fd440d84c7de6577964626d5772d9233e9dc5b39df9a649ef1289d417e90b4a5",
+     "shape": [
+      5000
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 5000
+    }
+   ]
+  }
+ }
+}

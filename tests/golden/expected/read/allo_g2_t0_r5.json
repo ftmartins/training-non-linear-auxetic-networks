@@ -1,0 +1,224 @@
+{
+ "allo_best_loss_stiffness": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "729b33636852ed2e5194c40fd1b0c9b216d4593195f04b0ab5f83b9f68575270",
+   "shape": [
+    265
+   ]
+  }
+ },
+ "allo_initial_stiffnesses": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "6ce0b22f7074d0090d052b7184219707f12002a734bc3d9bfbb0aa9585eb6c4b",
+   "shape": [
+    265
+   ]
+  }
+ },
+ "allo_operating_point.before": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "568f5ba25921118f8d4dc8f8f50dd99c4ef0dc4ea3e7c5bc698f0e53645f4be4",
+     "shape": [
+      265
+     ]
+    },
+    "before"
+   ]
+  }
+ },
+ "allo_operating_point.best": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "729b33636852ed2e5194c40fd1b0c9b216d4593195f04b0ab5f83b9f68575270",
+     "shape": [
+      265
+     ]
+    },
+    "best"
+   ]
+  }
+ },
+ "allo_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1000201
+  }
+ },
+ "load_allosteric": {
+  "value": {
+   "__dict__": {
+    "best_stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "729b33636852ed2e5194c40fd1b0c9b216d4593195f04b0ab5f83b9f68575270",
+     "shape": [
+      265
+     ]
+    },
+    "dir": "<repo>/data/allosteric_nets_aug/geometry_2/task_0/realization_5",
+    "edges": {
+     "__nd__": "<i8",
+     "sha256": "9eb43682cb8058353892226254c2a1fe4e0416f67ab0da62640f01b42659be9d",
+     "shape": [
+      265,
+      2
+     ]
+    },
+    "eq_lengths": {
+     "__nd__": "<f8",
+     "sha256": "58ef05c29bc54732019c467d752078e464437196a7e7c73acae28ffafd4ca645",
+     "shape": [
+      265
+     ]
+    },
+    "geometry_id": {
+     "__int__": "int",
+     "v": 2
+    },
+    "incidence_matrix": {
+     "__nd__": "<f8",
+     "sha256": "30355e0c113a04ed2a644644a13c56c8f99eb82fa75f90758820d992fb22ac0e",
+     "shape": [
+      265,
+      89
+     ]
+    },
+    "mse1": {
+     "__nd__": "<f8",
+     "sha256": "ddcd01988d9368f1c1db78297b3849ec1f31cc6461e3a1abe1f4af068020cc27",
+     "shape": [
+      5500
+     ]
+    },
+    "mse2": {
+     "__nd__": "<f8",
+     "sha256": "ba2cf89476aad97633a4d6a112a2c61c4bc8928237fbe40c182553672bafbb90",
+     "shape": [
+      5500
+     ]
+    },
+    "nodes": {
+     "__nd__": "<f8",
+     "sha256": "363ad16fde06e52c4e75bdbb4662b6c5cebc6aeb1447c3d462ed13927f7f9e9b",
+     "shape": [
+      89,
+      2
+     ]
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 5
+    },
+    "solver": "lammps",
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "7d17ef43a84ba8e10c5fb53e69a499625c4b04e6b6af2f5b86d4cb76b15c330f",
+     "shape": [
+      110,
+      265
+     ]
+    },
+    "stiff_traj_steps": {
+     "__nd__": "<i8",
+     "sha256": "694741bf3ca691dd1aafd3e0b56e9bb8fed935010c003266bde553cd48693b4e",
+     "shape": [
+      110
+     ]
+    },
+    "stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "8b7e95e95e2a335c37ee358a05d311dc10a0e312e0d98358f11fe854036b226e",
+     "shape": [
+      265
+     ]
+    },
+    "sweep": null,
+    "task_config": {
+     "__dict__": {
+      "dinputdistance": {
+       "__float__": "float",
+       "v": "0.9542238889669755"
+      },
+      "dinputdistance2": {
+       "__float__": "float",
+       "v": "0.47711194448348776"
+      },
+      "nsteps": {
+       "__int__": "int",
+       "v": 40
+      },
+      "nsteps2": {
+       "__int__": "int",
+       "v": 20
+      },
+      "strain_input": {
+       "__float__": "float",
+       "v": "1.0"
+      },
+      "strain_input2": {
+       "__float__": "float",
+       "v": "0.5"
+      },
+      "strain_output": {
+       "__float__": "float",
+       "v": "-0.2"
+      },
+      "strain_output2": {
+       "__float__": "float",
+       "v": "-0.1"
+      },
+      "tod": {
+       "__float__": "float",
+       "v": "0.8104105942784516"
+      },
+      "tod2": {
+       "__float__": "float",
+       "v": "0.9117119185632581"
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 0
+    }
+   }
+  }
+ },
+ "load_resume_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "8b7e95e95e2a335c37ee358a05d311dc10a0e312e0d98358f11fe854036b226e",
+     "shape": [
+      265
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "ddcd01988d9368f1c1db78297b3849ec1f31cc6461e3a1abe1f4af068020cc27",
+     "shape": [
+      5500
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "ba2cf89476aad97633a4d6a112a2c61c4bc8928237fbe40c182553672bafbb90",
+     "shape": [
+      5500
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 5500
+    }
+   ]
+  }
+ }
+}

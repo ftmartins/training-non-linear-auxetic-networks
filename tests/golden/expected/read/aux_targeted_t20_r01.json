@@ -1,0 +1,283 @@
+{
+ "aux_best_loss_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+     "shape": [
+      98,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "776aa2d36244f9c139db5540492eb6c0e7e93aaab9875ece1f3c96f9d559257c",
+     "shape": [
+      194
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 4838
+    }
+   ]
+  }
+ },
+ "aux_best_loss_state.no_positions": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+     "shape": [
+      98,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "776aa2d36244f9c139db5540492eb6c0e7e93aaab9875ece1f3c96f9d559257c",
+     "shape": [
+      194
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 4838
+    }
+   ]
+  }
+ },
+ "aux_network_fingerprint": {
+  "value": "f14702529023d395"
+ },
+ "aux_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1200010
+  }
+ },
+ "data_io.load_auxetic_network": {
+  "value": {
+   "__tuple__": [
+    {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "82aff70195284ad2bbe7247a6d23a80cfd220d0502a6d4f1cf40999faafa8d37",
+        "shape": [
+         194,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "999b3f061730ae10cb4db460630d7148b186fd594c43c75be835a69d6b63b69a",
+        "shape": [
+         194
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "01d4343724a426a4a1ee04f0706d34589ea21c74ec1650a59eb38ad79cb7927d",
+        "shape": [
+         194
+        ]
+       }
+      }
+     }
+    },
+    {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "ad54f11c5112c5f0b9efae084c842943c99e0b6d1e8a4c6857affc7b25179643",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "673578f817b50885ac44b4faf1a3531848f5c2a8f260abe8b541d737c0efc33a",
+       "shape": [
+        8
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "aee48beb185269c11f3678fb43febb618607273750fc30e2cd5444083f33b05a",
+       "shape": [
+        9
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "733d2fb6b395e2edb2995b45bd4de3b44af3944eb6c880053a9ff1d29138c7d9",
+       "shape": [
+        8
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "load_auxetic": {
+  "value": {
+   "__dict__": {
+    "boundary": {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "ad54f11c5112c5f0b9efae084c842943c99e0b6d1e8a4c6857affc7b25179643",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "673578f817b50885ac44b4faf1a3531848f5c2a8f260abe8b541d737c0efc33a",
+       "shape": [
+        8
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "aee48beb185269c11f3678fb43febb618607273750fc30e2cd5444083f33b05a",
+       "shape": [
+        9
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "733d2fb6b395e2edb2995b45bd4de3b44af3944eb6c880053a9ff1d29138c7d9",
+       "shape": [
+        8
+       ]
+      }
+     }
+    },
+    "dir": "<repo>/data/auxetic_nets_aug/targeted/task_20/realization_01",
+    "loss_traj": {
+     "__nd__": "<f8",
+     "sha256": "b292efb7d4f35b9b3480bc1fdb97d5abf0d630e3599dbaa9b677c8d222608a98",
+     "shape": [
+      4841
+     ]
+    },
+    "network": {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "82aff70195284ad2bbe7247a6d23a80cfd220d0502a6d4f1cf40999faafa8d37",
+        "shape": [
+         194,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "999b3f061730ae10cb4db460630d7148b186fd594c43c75be835a69d6b63b69a",
+        "shape": [
+         194
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "01d4343724a426a4a1ee04f0706d34589ea21c74ec1650a59eb38ad79cb7927d",
+        "shape": [
+         194
+        ]
+       }
+      }
+     }
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 1
+    },
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "fa92069a7139129f3f4be548cd17ba8ee1d12a906071f45cbed21a4338c024e1",
+     "shape": [
+      4841,
+      194
+     ]
+    },
+    "sweep": null,
+    "task_config": {
+     "__dict__": {
+      "compression_strains": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.2"
+        },
+        {
+         "__float__": "float",
+         "v": "-0.1"
+        }
+       ]
+      },
+      "n_nodes": {
+       "__int__": "int",
+       "v": 100
+      },
+      "n_strain_steps": {
+       "__int__": "int",
+       "v": 400
+      },
+      "packing_seed": {
+       "__int__": "int",
+       "v": 42
+      },
+      "target_poisson_ratios": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.2"
+        },
+        {
+         "__float__": "float",
+         "v": "-0.15"
+        }
+       ]
+      },
+      "task_seed": {
+       "__int__": "int",
+       "v": 20
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 20
+    }
+   }
+  }
+ },
+ "load_checkpoint": {
+  "value": null
+ }
+}

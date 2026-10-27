@@ -28,7 +28,7 @@ _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from analysis.data_io import load_auxetic_network, load_allosteric_network
+from analysis.data_io import load_auxetic_network
 from analysis.trajectory import compute_auxetic_trajectory, save_trajectory
 from base.config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_strain_steps
 

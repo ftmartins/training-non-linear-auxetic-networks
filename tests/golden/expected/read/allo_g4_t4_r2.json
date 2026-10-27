@@ -1,0 +1,42 @@
+{
+ "allo_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1040409
+  }
+ },
+ "load_allosteric": {
+  "raises": "BestLossUndetermined: <repo>/data/allosteric_nets_aug/geometry_4/task_4/realization_2: stiffness trajectory does not fit the loss trajectory"
+ },
+ "load_resume_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "489650a5b07bc3e3d55580f84d1b150be53d2fe914758e898ec8c8546c97c812",
+     "shape": [
+      248
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "87321f6e1f7ae8b4f1d3a389f5c756fcf646ce194598cae9a523a33a84b6730a",
+     "shape": [
+      2030
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "b3013ea5dfb1135e5d43c299404b0f8fa0ae7d01ae85a4a28f3758347a092a1f",
+     "shape": [
+      2030
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 2030
+    }
+   ]
+  }
+ }
+}

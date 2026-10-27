@@ -40,12 +40,8 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
                  eps_min, n_traj_steps, k_eigs, force_type, network_type, gradient_method,
                  n_hessian_traj_steps):
     from base.elastic_network import ElasticNetwork
-    from training.src.checkpoint_manager import (
-        get_training_result_path, _nt_filename, results_dir_for_gradient_method,
-    )
-    from training.src.data_loader import (
-        load_loss_trajectory, load_stiffness_trajectory, load_positions_trajectory,
-    )
+    from base.realization_record import RealizationRecord
+    from training.src.checkpoint_manager import results_dir_for_gradient_method
 
     if results_dir is None:
         if task_type == 'targeted':
@@ -58,24 +54,21 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
     # --results-dir override) already points at a gradient_method
     # subdirectory — never produces a doubled-up .../newton/newton/... path.
     results_dir = results_dir_for_gradient_method(results_dir, gradient_method)
-    result_path = get_training_result_path(task, realization, results_dir)
+    record = RealizationRecord.locate(results_dir, 'auxetic', task, realization,
+                                      must_exist=False, network_type=network_type)
+    result_path = record.run_dir
 
-    with open(result_path / _nt_filename('final_network.pkl', network_type), 'rb') as fh:
-        net_dict = pickle.load(fh)
+    net = record.network
     network = ElasticNetwork(
-        positions=net_dict['positions'], edges=net_dict['edges'],
-        rest_lengths=net_dict['rest_lengths'], stiffnesses=net_dict['stiffnesses'],
+        positions=net.positions, edges=net.edges,
+        rest_lengths=net.rest_lengths, stiffnesses=record.current_stiffnesses,
     )
+    boundary = record.boundary
+    task_config = record.task.config
 
-    with open(result_path / _nt_filename('boundary_nodes.json', network_type), 'r') as fh:
-        boundary = {k: np.asarray(v, dtype=int) for k, v in json.load(fh).items()}
-
-    with open(result_path / _nt_filename('task_config.json', network_type), 'r') as fh:
-        task_config = json.load(fh)
-
-    loss_traj      = load_loss_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
-    stiffness_traj = load_stiffness_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
-    positions_traj = load_positions_trajectory(task, realization, results_dir=results_dir, network_type=network_type)
+    loss_traj      = record.loss.training
+    stiffness_traj = record.stiffness_trajectory.stiffnesses
+    positions_traj = record.positions_trajectory
 
     if 'n_strain_steps' in task_config:
         n_strain_steps = task_config['n_strain_steps']
@@ -101,32 +94,28 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
         STRAIN_INPUT, STRAIN_INPUT2, NSTEPS_TASK1, NSTEPS_TASK2, TARGETED_ENSEMBLE,
     )
 
-    geom_dir = 'geometry_targeted' if targeted_ensemble else f'geometry_{geometry}'
-    result_path = Path(output_dir) / geom_dir / f'task_{task}' / f'realization_{realization}'
+    from base.realization_record import RealizationRecord
 
-    nodes             = np.load(result_path / 'nodes.npy')
-    incidence_matrix  = np.load(result_path / 'incidence_matrix.npy')
-    eq_lengths        = np.load(result_path / 'eq_lengths.npy')
-    stiffness_traj    = np.load(result_path / 'stiffnesses_traj.npy')
-    steps             = np.load(result_path / 'stiffnesses_traj_steps.npy')
-    mse1              = np.load(result_path / 'mse1.npy')
-    mse2              = np.load(result_path / 'mse2.npy')
+    record = RealizationRecord.locate(
+        output_dir, 'allosteric', ('targeted' if targeted_ensemble else geometry, task),
+        realization, must_exist=False)
+    result_path = record.run_dir
 
-    # Evaluate the 'after' cost Hessian at the trainer's true lowest-loss K*
-    # (best_stiffnesses.npy) rather than the coarse checkpoint-grid argmin
-    # stiffness_traj[t_indices[-1]] -- they differ for ~23% of converged
-    # realizations (best_stiffnesses_audit.md). Absent (older runs) -> None ->
-    # sweep_allosteric keeps the old checkpoint-grid behavior.
-    best_stiffnesses = None
-    _bpath = result_path / 'best_stiffnesses.npy'
-    if _bpath.exists():
-        best_stiffnesses = np.load(_bpath)
-        print(f"  cost_hessian_after: at best_stiffnesses.npy (lowest-loss K*)", flush=True)
-    else:
-        print(f"  cost_hessian_after: best_stiffnesses.npy absent -> "
-              f"stiffness_traj[t_indices[-1]] (checkpoint-grid argmin)", flush=True)
+    network = record.network
+    nodes, incidence_matrix, eq_lengths = (
+        network.nodes, network.incidence_matrix, network.eq_lengths)
+    stiffness_traj    = record.stiffness_trajectory.stiffnesses
+    steps             = record.stiffness_trajectory.steps
+    mse1, mse2        = (np.ascontiguousarray(c) for c in record.loss.per_subtask.T)
 
-    gseed, strain_output2, strain_output = np.loadtxt(result_path / 'tasks.txt')
+    # Evaluate the 'after' cost Hessian at the best-loss stiffnesses K* (ADR 0004), never
+    # at the coarse checkpoint-grid argmin stiffness_traj[t_indices[-1]] -- they differ
+    # for ~23% of converged realizations (best_stiffnesses_audit.md). The record raises
+    # when K* cannot be determined, so no sweep is written for such a run.
+    best_stiffnesses = record.best_loss_stiffnesses
+    print(f"  cost_hessian_after: at K* (step {record.best_loss_step})", flush=True)
+
+    strain_output, strain_output2 = record.task.strain_output, record.task.strain_output2
     tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
     tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
     dinputdistance  = STRAIN_INPUT  * np.linalg.norm(nodes[0] - nodes[1])
@@ -145,9 +134,8 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
     # file have no record of it -- fall back to None (evaluate_actuation's own
     # default) and warn, since that's the pre-existing (unverified) behavior.
     meta_path = result_path / 'training_meta.json'
-    if meta_path.exists():
-        with open(meta_path) as fh:
-            solver = json.load(fh)['solver']
+    if record.has('config'):
+        solver = record.config['solver']
     else:
         from training.runners.allosteric_trainer import DEFAULT_SOLVER
         solver = None

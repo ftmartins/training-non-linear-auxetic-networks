@@ -1,0 +1,423 @@
+{
+ "aux_best_loss_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+     "shape": [
+      98,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "79f2375744b5bb43294d54ed365b6bfa847f68299a0a424a63d671a19d9e4992",
+     "shape": [
+      194
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 3
+    }
+   ]
+  }
+ },
+ "aux_best_loss_state.no_positions": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+     "shape": [
+      98,
+      2
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "79f2375744b5bb43294d54ed365b6bfa847f68299a0a424a63d671a19d9e4992",
+     "shape": [
+      194
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 3
+    }
+   ]
+  }
+ },
+ "aux_network_fingerprint": {
+  "value": "f14702529023d395"
+ },
+ "aux_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1080031
+  }
+ },
+ "data_io.load_auxetic_network": {
+  "value": {
+   "__tuple__": [
+    {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "82aff70195284ad2bbe7247a6d23a80cfd220d0502a6d4f1cf40999faafa8d37",
+        "shape": [
+         194,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "999b3f061730ae10cb4db460630d7148b186fd594c43c75be835a69d6b63b69a",
+        "shape": [
+         194
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "645d94808525d43e2d6f4cfbba959cfffe39c3489dd9e50d7fac81d7295232af",
+        "shape": [
+         194
+        ]
+       }
+      }
+     }
+    },
+    {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "ad54f11c5112c5f0b9efae084c842943c99e0b6d1e8a4c6857affc7b25179643",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "673578f817b50885ac44b4faf1a3531848f5c2a8f260abe8b541d737c0efc33a",
+       "shape": [
+        8
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "aee48beb185269c11f3678fb43febb618607273750fc30e2cd5444083f33b05a",
+       "shape": [
+        9
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "733d2fb6b395e2edb2995b45bd4de3b44af3944eb6c880053a9ff1d29138c7d9",
+       "shape": [
+        8
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "load_auxetic": {
+  "value": {
+   "__dict__": {
+    "boundary": {
+     "__dict__": {
+      "bottom": {
+       "__nd__": "<i8",
+       "sha256": "ad54f11c5112c5f0b9efae084c842943c99e0b6d1e8a4c6857affc7b25179643",
+       "shape": [
+        7
+       ]
+      },
+      "left": {
+       "__nd__": "<i8",
+       "sha256": "673578f817b50885ac44b4faf1a3531848f5c2a8f260abe8b541d737c0efc33a",
+       "shape": [
+        8
+       ]
+      },
+      "right": {
+       "__nd__": "<i8",
+       "sha256": "aee48beb185269c11f3678fb43febb618607273750fc30e2cd5444083f33b05a",
+       "shape": [
+        9
+       ]
+      },
+      "top": {
+       "__nd__": "<i8",
+       "sha256": "733d2fb6b395e2edb2995b45bd4de3b44af3944eb6c880053a9ff1d29138c7d9",
+       "shape": [
+        8
+       ]
+      }
+     }
+    },
+    "dir": "<repo>/data/auxetic_nets_aug/targeted/task_08/realization_00",
+    "loss_traj": {
+     "__nd__": "<f8",
+     "sha256": "fe016de5259e770ec97a382160f4e071c6cae9cd73a91bb0106a3a6f338d53ec",
+     "shape": [
+      4
+     ]
+    },
+    "network": {
+     "__obj__": "base.elastic_network.ElasticNetwork",
+     "attrs": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "82aff70195284ad2bbe7247a6d23a80cfd220d0502a6d4f1cf40999faafa8d37",
+        "shape": [
+         194,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "78c85ae70abe085b50b507f86d6e4477e9ab7966fc7a5611f9328f1f9c5c6790",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "999b3f061730ae10cb4db460630d7148b186fd594c43c75be835a69d6b63b69a",
+        "shape": [
+         194
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "645d94808525d43e2d6f4cfbba959cfffe39c3489dd9e50d7fac81d7295232af",
+        "shape": [
+         194
+        ]
+       }
+      }
+     }
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 0
+    },
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "05105976e8aff8390c2b72b8408e1d3231edef00bf62e7ba57691b0226451193",
+     "shape": [
+      4,
+      194
+     ]
+    },
+    "sweep": {
+     "__dict__": {
+      "compression_strains": {
+       "__nd__": "<f8",
+       "sha256": "4fae7c87a0af3854dd469afb2632f1ec1080fd1fbc61ea1ccb9d4973ffc26cb6",
+       "shape": [
+        1
+       ]
+      },
+      "cost_hessian_after_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "ffe3944ef3049afdcade31d5d493e00003d446b9483d4ec88250942611d76a75",
+       "shape": [
+        1,
+        4
+       ]
+      },
+      "cost_hessian_after_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "6abd9aa4fd14c7cad64ed377a1813a97143061dd6ca028d063a4b7ea21143be0",
+       "shape": [
+        1,
+        194,
+        4
+       ]
+      },
+      "cost_hessian_before_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "850510f37a7542c521937da185fd730bec9484504733fa4a6893758dd711cf63",
+       "shape": [
+        1,
+        4
+       ]
+      },
+      "cost_hessian_before_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "a773267fc2f7da181da66278d98d5b7d3952f64ff3eca1b986a9fd54a64b7c16",
+       "shape": [
+        1,
+        194,
+        4
+       ]
+      },
+      "elastic_hessian_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "d2390aac6f95121d54de67a84c9041e99ced4777cd4cb7b966ab03b67788e36c",
+       "shape": [
+        2,
+        1,
+        20,
+        166
+       ]
+      },
+      "elastic_hessian_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "f8f7cc29a1e20fe7a4162fe8ad8872183cb513d91b25ec04cdcc302b55057bc8",
+       "shape": [
+        2,
+        1,
+        20,
+        166,
+        166
+       ]
+      },
+      "elastic_hessian_traj_indices": {
+       "__nd__": "<i8",
+       "sha256": "7774d2bcbfebb35c4bd903160f9d254565fab007bf78f58d20bed996849b0a4b",
+       "shape": [
+        20
+       ]
+      },
+      "elastic_hessian_traj_strain": {
+       "__nd__": "<f8",
+       "sha256": "d8c718bd16ea62174bef7728653c74ac999563f1f3b6391d5628b12d3c0a1927",
+       "shape": [
+        1,
+        20
+       ]
+      },
+      "elastic_hessian_traj_strain_frac": {
+       "__nd__": "<f8",
+       "sha256": "32ceaa0e5ecb7504b5c6b16d37fbce94f0e8c86f7d5b0baba6a9dc0177d28ca5",
+       "shape": [
+        20
+       ]
+      },
+      "recomputed_stiffness_loss": {
+       "__nd__": "<f8",
+       "sha256": "192ffe8c87452c8dc742db12198ffbe96cab049f4c312f82b4723a82230c6806",
+       "shape": [
+        2
+       ]
+      },
+      "recomputed_trajectory_loss": {
+       "__nd__": "<f8",
+       "sha256": "8e61158aa87905ac59f7f76e1f0a2a1c9f63853735d3427e4bd8632205e79fb8",
+       "shape": [
+        2
+       ]
+      },
+      "stored_loss": {
+       "__nd__": "<f8",
+       "sha256": "ef66b5dad50577738444341e50329d8f759af06b4aa1e0825924fa78595555db",
+       "shape": [
+        2
+       ]
+      },
+      "subtask_trajectory_loss": {
+       "__nd__": "<f8",
+       "sha256": "8e61158aa87905ac59f7f76e1f0a2a1c9f63853735d3427e4bd8632205e79fb8",
+       "shape": [
+        2,
+        1
+       ]
+      },
+      "t_indices": {
+       "__nd__": "<i8",
+       "sha256": "96fb5e4a2704b410bbf097c41e40ff8118ef0bc819ccf4344f31f694d12d536a",
+       "shape": [
+        2
+       ]
+      },
+      "target_poisson_ratios": {
+       "__nd__": "<f8",
+       "sha256": "467833debef06c9ba6576f63c2bb4a5a52a12ed5d150c793ae368ce541a3f058",
+       "shape": [
+        1
+       ]
+      },
+      "trajectory_positions": {
+       "__nd__": "<f8",
+       "sha256": "9cc77da735755eb831f427a3d61ebdeeb70f8fce221e0e50443fc1cfd667f0a7",
+       "shape": [
+        2,
+        1,
+        400,
+        98,
+        2
+       ]
+      },
+      "trajectory_strain_frac": {
+       "__nd__": "<f8",
+       "sha256": "b81873b2261316e5b2756f1405eccc92752f9413661f55935249ac142ab692af",
+       "shape": [
+        400
+       ]
+      }
+     }
+    },
+    "task_config": {
+     "__dict__": {
+      "compression_strains": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.3"
+        }
+       ]
+      },
+      "n_nodes": {
+       "__int__": "int",
+       "v": 100
+      },
+      "n_strain_steps": {
+       "__int__": "int",
+       "v": 400
+      },
+      "packing_seed": {
+       "__int__": "int",
+       "v": 42
+      },
+      "target_poisson_ratios": {
+       "__list__": [
+        {
+         "__float__": "float",
+         "v": "-0.6"
+        }
+       ]
+      },
+      "task_seed": {
+       "__int__": "int",
+       "v": 8
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 8
+    }
+   }
+  }
+ },
+ "load_checkpoint": {
+  "value": null
+ }
+}

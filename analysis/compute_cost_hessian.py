@@ -34,6 +34,7 @@ from training.src.task_generator import generate_task_config
 from base.config import BOUNDARY_MARGIN, FORCE_TYPE, get_n_nodes, get_n_strain_steps
 from base.network_utils import create_auxetic_network, get_square_boundary_nodes
 from base.elastic_network import ElasticNetwork
+from base.realization_record import RealizationRecord
 from training.src.training_functions import (
     compute_poisson_ratio_single,
     compute_poisson_ratio_single_jax,
@@ -195,9 +196,12 @@ def main():
     print(f"Task {args.task}, Realization {args.realization}")
 
     # ── Load network and best stiffness ───────────────────────────────────────
-    loss, stiffness = load_trajectories(args.task, args.realization, args.data_dir)
-    best_step = np.argmin(loss)
-    best_stiffness = stiffness[best_step]
+    # K* from the realization record (ADR 0004): raises rather than pick a NaN step.
+    record = RealizationRecord.locate(args.data_dir, 'auxetic', args.task, args.realization,
+                                      network_type=None)
+    loss = record.loss.training
+    best_step = record.best_loss_step
+    best_stiffness = record.best_loss_stiffnesses
     print(f"  Best step: {best_step}, min loss: {loss[best_step]:.6f}")
 
     network, boundary_dict = load_network_topology(args.task, args.realization, args.data_dir)

@@ -1,0 +1,777 @@
+{
+ "dir": {
+  "jax/task_00/realization_00/boundary_nodes_jammed.json": {
+   "json": {
+    "bottom": [
+     60,
+     67,
+     79,
+     81,
+     82,
+     87,
+     94
+    ],
+    "left": [
+     63,
+     65,
+     77,
+     83,
+     85,
+     91,
+     95,
+     96
+    ],
+    "right": [
+     53,
+     68,
+     71,
+     73,
+     74,
+     75,
+     80,
+     86,
+     93
+    ],
+    "top": [
+     50,
+     62,
+     70,
+     78,
+     84,
+     89,
+     92,
+     97
+    ]
+   }
+  },
+  "jax/task_00/realization_00/checkpoint_jammed.pkl": {
+   "pickle": {
+    "__dict__": {
+     "current_step": {
+      "__int__": "int",
+      "v": 12
+     },
+     "history": {
+      "__dict__": {
+       "loss": {
+        "__list__": [
+         {
+          "__float__": "float",
+          "v": "1.0"
+         },
+         {
+          "__float__": "float",
+          "v": "0.5"
+         },
+         {
+          "__float__": "float",
+          "v": "0.3333333333333333"
+         },
+         {
+          "__float__": "float",
+          "v": "0.25"
+         },
+         {
+          "__float__": "float",
+          "v": "0.2"
+         },
+         {
+          "__float__": "float",
+          "v": "0.16666666666666666"
+         },
+         {
+          "__float__": "float",
+          "v": "0.14285714285714285"
+         },
+         {
+          "__float__": "float",
+          "v": "0.125"
+         },
+         {
+          "__float__": "float",
+          "v": "0.1111111111111111"
+         },
+         {
+          "__float__": "float",
+          "v": "0.1"
+         },
+         {
+          "__float__": "float",
+          "v": "0.09090909090909091"
+         },
+         {
+          "__float__": "float",
+          "v": "0.08333333333333333"
+         }
+        ]
+       },
+       "positions": {
+        "__list__": [
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+          "shape": [
+           98,
+           2
+          ]
+         }
+        ]
+       },
+       "stiffnesses": {
+        "__list__": [
+         {
+          "__nd__": "<f8",
+          "sha256": "8d06d7656a35b21989a46e96f149624350c82d986fa02719f46ad6a156068df1",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "5c58fc98f557c9b0e8c5e612a9a679556ac103c7704207a42c242e03a61468d8",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "9bbcb25e00e79db1f5d433a5d5687de3d44a2cd3d78909c18f4c1a18537b06cc",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "3344788a759903061d36fcbf97a1e499baa5a80a96aa55778411d5b50f9f1020",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "a2d35741ead1d3a47aa5310f93bf15c07b73091a30867591ba633ac0d7b3fa14",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b6f3bcaced3dce000da9380d01f5604a1ae7387d6aeb2b75e771587d1546f472",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "596e5a1245c75775219447aae0ef7fa525e191bb453835dda87c0efca3d7c56f",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "b85ea68fbee12fa3c3e96186100e69610a4d7ea8d9d9693febea92e474f20d8e",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "bed8ab3c4417fa0bf2555606fe5df8e04ded5da7de64edf1af6434acba181174",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "41208c611eab8f75e3c33b8175a3feed107423d024c8d1527e33d322517f351f",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "7983851b9bce4da9f6a35605b5c31f85bf4f884b6eba0fba6829ffe794b8c2f1",
+          "shape": [
+           194
+          ]
+         },
+         {
+          "__nd__": "<f8",
+          "sha256": "0c72dc41ed34b330c127bd616c97f67478bf43948bce1b5c922093eae1ace6d6",
+          "shape": [
+           194
+          ]
+         }
+        ]
+       }
+      }
+     },
+     "network": {
+      "__dict__": {
+       "edges": {
+        "__nd__": "<i8",
+        "sha256": "0516711aa0898acec3c84e6b96cee46fc1d76a4d9ccc47dee7c9a0eb5d7873c8",
+        "shape": [
+         194,
+         2
+        ]
+       },
+       "positions": {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       "rest_lengths": {
+        "__nd__": "<f8",
+        "sha256": "083391983a4648d557e403d78854b03f3238a4a3b84b797a2127029f87df254e",
+        "shape": [
+         194
+        ]
+       },
+       "stiffnesses": {
+        "__nd__": "<f8",
+        "sha256": "9b054d8aa6bb32d570a9017bf99a985c5ce2cad77fb20d1d859b330df200bd62",
+        "shape": [
+         194
+        ]
+       }
+      }
+     },
+     "realization_seed": {
+      "__int__": "int",
+      "v": 0
+     },
+     "task_config": {
+      "__dict__": {
+       "compression_strains": {
+        "__list__": [
+         {
+          "__float__": "float",
+          "v": "-0.2"
+         }
+        ]
+       },
+       "n_nodes": {
+        "__int__": "int",
+        "v": 100
+       },
+       "n_strain_steps": {
+        "__int__": "int",
+        "v": 400
+       },
+       "packing_seed": {
+        "__int__": "int",
+        "v": 42
+       },
+       "target_poisson_ratios": {
+        "__list__": [
+         {
+          "__float__": "float",
+          "v": "-0.8"
+         }
+        ]
+       },
+       "task_seed": {
+        "__int__": "int",
+        "v": 0
+       }
+      }
+     },
+     "task_seed": {
+      "__int__": "int",
+      "v": 0
+     }
+    }
+   }
+  },
+  "jax/task_00/realization_00/checkpoint_manager.py.gz": "code snapshot",
+  "jax/task_00/realization_00/config.py.gz": "code snapshot",
+  "jax/task_00/realization_00/edges_jammed.npy": {
+   "array": {
+    "__nd__": "<i8",
+    "sha256": "0516711aa0898acec3c84e6b96cee46fc1d76a4d9ccc47dee7c9a0eb5d7873c8",
+    "shape": [
+     194,
+     2
+    ]
+   },
+   "npy_sha256": "ddb0b3bbc14ae3a3c5b04a42856968fe124d3381a73d1f1e39acbb0312b5bba8"
+  },
+  "jax/task_00/realization_00/final_network_jammed.pkl": {
+   "pickle": {
+    "__dict__": {
+     "edges": {
+      "__nd__": "<i8",
+      "sha256": "0516711aa0898acec3c84e6b96cee46fc1d76a4d9ccc47dee7c9a0eb5d7873c8",
+      "shape": [
+       194,
+       2
+      ]
+     },
+     "positions": {
+      "__nd__": "<f8",
+      "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+      "shape": [
+       98,
+       2
+      ]
+     },
+     "rest_lengths": {
+      "__nd__": "<f8",
+      "sha256": "083391983a4648d557e403d78854b03f3238a4a3b84b797a2127029f87df254e",
+      "shape": [
+       194
+      ]
+     },
+     "stiffnesses": {
+      "__nd__": "<f8",
+      "sha256": "9b054d8aa6bb32d570a9017bf99a985c5ce2cad77fb20d1d859b330df200bd62",
+      "shape": [
+       194
+      ]
+     }
+    }
+   }
+  },
+  "jax/task_00/realization_00/history_jammed.pkl": {
+   "pickle": {
+    "__dict__": {
+     "boundary": {
+      "__dict__": {
+       "bottom": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 60
+         },
+         {
+          "__int__": "int",
+          "v": 67
+         },
+         {
+          "__int__": "int",
+          "v": 79
+         },
+         {
+          "__int__": "int",
+          "v": 81
+         },
+         {
+          "__int__": "int",
+          "v": 82
+         },
+         {
+          "__int__": "int",
+          "v": 87
+         },
+         {
+          "__int__": "int",
+          "v": 94
+         }
+        ]
+       },
+       "left": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 63
+         },
+         {
+          "__int__": "int",
+          "v": 65
+         },
+         {
+          "__int__": "int",
+          "v": 77
+         },
+         {
+          "__int__": "int",
+          "v": 83
+         },
+         {
+          "__int__": "int",
+          "v": 85
+         },
+         {
+          "__int__": "int",
+          "v": 91
+         },
+         {
+          "__int__": "int",
+          "v": 95
+         },
+         {
+          "__int__": "int",
+          "v": 96
+         }
+        ]
+       },
+       "right": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 53
+         },
+         {
+          "__int__": "int",
+          "v": 68
+         },
+         {
+          "__int__": "int",
+          "v": 71
+         },
+         {
+          "__int__": "int",
+          "v": 73
+         },
+         {
+          "__int__": "int",
+          "v": 74
+         },
+         {
+          "__int__": "int",
+          "v": 75
+         },
+         {
+          "__int__": "int",
+          "v": 80
+         },
+         {
+          "__int__": "int",
+          "v": 86
+         },
+         {
+          "__int__": "int",
+          "v": 93
+         }
+        ]
+       },
+       "top": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 50
+         },
+         {
+          "__int__": "int",
+          "v": 62
+         },
+         {
+          "__int__": "int",
+          "v": 70
+         },
+         {
+          "__int__": "int",
+          "v": 78
+         },
+         {
+          "__int__": "int",
+          "v": 84
+         },
+         {
+          "__int__": "int",
+          "v": 89
+         },
+         {
+          "__int__": "int",
+          "v": 92
+         },
+         {
+          "__int__": "int",
+          "v": 97
+         }
+        ]
+       }
+      }
+     },
+     "freetraj": {
+      "__list__": []
+     },
+     "loss": {
+      "__nd__": "<f8",
+      "sha256": "f16dd5c4ac545f75dc29aeda24634046e7bfda43e4b8e231a2da98de82dfc1ef",
+      "shape": [
+       12
+      ]
+     },
+     "positions": {
+      "__list__": [
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       }
+      ]
+     },
+     "stiffnesses": {
+      "__nd__": "<f8",
+      "sha256": "b71602a5c964903a947e0525098a7ccec221bfcffc9239e68cfcd74867411f2c",
+      "shape": [
+       12,
+       194
+      ]
+     }
+    }
+   }
+  },
+  "jax/task_00/realization_00/loss_trajectory_jammed.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "f16dd5c4ac545f75dc29aeda24634046e7bfda43e4b8e231a2da98de82dfc1ef",
+    "shape": [
+     12
+    ]
+   },
+   "npy_sha256": "796bc29f1c781fbf4dbae35598794bbef566bca0afc30d3d579b99976f1f0be8"
+  },
+  "jax/task_00/realization_00/network_utils.py.gz": "code snapshot",
+  "jax/task_00/realization_00/run_provenance.py.gz": "code snapshot",
+  "jax/task_00/realization_00/run_provenance_jammed.json": {
+   "json": [
+    {
+     "force_tol": 1e-10,
+     "gradient_method": "jax",
+     "k_max": 100.0,
+     "k_min": 0.0001,
+     "learning_rate": 0.003,
+     "n_steps": 12,
+     "network_fingerprint": "86a25180f56a10ea",
+     "opt_fire_finc": 1.05,
+     "optimizer": "gradient_descent",
+     "realization_seed": 1000014
+    }
+   ]
+  },
+  "jax/task_00/realization_00/stiffness_trajectory_jammed.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "b71602a5c964903a947e0525098a7ccec221bfcffc9239e68cfcd74867411f2c",
+    "shape": [
+     12,
+     194
+    ]
+   },
+   "npy_sha256": "691061bff9e20c78c58b061d82977b64557f226a3103ee3cc98e652fc15ea3d2"
+  },
+  "jax/task_00/realization_00/stored_network.py.gz": "code snapshot",
+  "jax/task_00/realization_00/targeted_ensemble_runner.py.gz": "code snapshot",
+  "jax/task_00/realization_00/targeted_task_generator.py.gz": "code snapshot",
+  "jax/task_00/realization_00/task_config_jammed.json": {
+   "json": {
+    "compression_strains": [
+     -0.2
+    ],
+    "n_nodes": 100,
+    "n_strain_steps": 400,
+    "packing_seed": 42,
+    "target_poisson_ratios": [
+     -0.8
+    ],
+    "task_seed": 0
+   }
+  },
+  "jax/task_00/realization_00/task_generator.py.gz": "code snapshot",
+  "jax/task_00/realization_00/training_functions.py.gz": "code snapshot",
+  "jax/task_00/realization_00/training_meta_jammed.json": {
+   "json": {
+    "force_tol": 1e-10,
+    "gradient_method": "jax",
+    "k_max": 100.0,
+    "k_min": 0.0001,
+    "learning_rate": 0.003,
+    "n_steps": 12,
+    "network_fingerprint": "86a25180f56a10ea",
+    "opt_fire_finc": 1.05,
+    "optimizer": "gradient_descent",
+    "realization_seed": 1000014
+   }
+  }
+ },
+ "is_training_complete": false,
+ "outcomes": [
+  true
+ ]
+}

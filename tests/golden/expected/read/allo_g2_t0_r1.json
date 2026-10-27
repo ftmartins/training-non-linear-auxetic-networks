@@ -1,0 +1,389 @@
+{
+ "allo_best_loss_stiffness": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "a88dafbc3f340d295e6bde2b6d93f2382a5d1eb92fb3f3621db744b6792f76de",
+   "shape": [
+    265
+   ]
+  }
+ },
+ "allo_initial_stiffnesses": {
+  "value": {
+   "__nd__": "<f8",
+   "sha256": "c26237715da45c8a69c68b5ae04a0f3a8dae2f00cc6be752ed6de3076cb35eae",
+   "shape": [
+    265
+   ]
+  }
+ },
+ "allo_operating_point.before": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "2cb4b04cc8ff571349c4a04563e2019f5d7901e67a143bcc97badfc701520a0a",
+     "shape": [
+      265
+     ]
+    },
+    "before"
+   ]
+  }
+ },
+ "allo_operating_point.best": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "a88dafbc3f340d295e6bde2b6d93f2382a5d1eb92fb3f3621db744b6792f76de",
+     "shape": [
+      265
+     ]
+    },
+    "after"
+   ]
+  }
+ },
+ "allo_realization_seed": {
+  "value": {
+   "__int__": "int",
+   "v": 1000228
+  }
+ },
+ "load_allosteric": {
+  "value": {
+   "__dict__": {
+    "best_stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "a88dafbc3f340d295e6bde2b6d93f2382a5d1eb92fb3f3621db744b6792f76de",
+     "shape": [
+      265
+     ]
+    },
+    "dir": "<repo>/data/allosteric_nets_aug/geometry_2/task_0/realization_1",
+    "edges": {
+     "__nd__": "<i8",
+     "sha256": "9eb43682cb8058353892226254c2a1fe4e0416f67ab0da62640f01b42659be9d",
+     "shape": [
+      265,
+      2
+     ]
+    },
+    "eq_lengths": {
+     "__nd__": "<f8",
+     "sha256": "58ef05c29bc54732019c467d752078e464437196a7e7c73acae28ffafd4ca645",
+     "shape": [
+      265
+     ]
+    },
+    "geometry_id": {
+     "__int__": "int",
+     "v": 2
+    },
+    "incidence_matrix": {
+     "__nd__": "<f8",
+     "sha256": "30355e0c113a04ed2a644644a13c56c8f99eb82fa75f90758820d992fb22ac0e",
+     "shape": [
+      265,
+      89
+     ]
+    },
+    "mse1": {
+     "__nd__": "<f8",
+     "sha256": "679edc4b199ec50b1c4917b76cc515b4596bdef92fd55a78b7bf96d4e2fbbeb3",
+     "shape": [
+      15000
+     ]
+    },
+    "mse2": {
+     "__nd__": "<f8",
+     "sha256": "113f79770bec036dce5638750e40f88e89f1a034b54dda80f705499c695c78fe",
+     "shape": [
+      15000
+     ]
+    },
+    "nodes": {
+     "__nd__": "<f8",
+     "sha256": "363ad16fde06e52c4e75bdbb4662b6c5cebc6aeb1447c3d462ed13927f7f9e9b",
+     "shape": [
+      89,
+      2
+     ]
+    },
+    "real_id": {
+     "__int__": "int",
+     "v": 1
+    },
+    "solver": "lammps",
+    "stiff_traj": {
+     "__nd__": "<f8",
+     "sha256": "5ce043b312c948743a785833adc77debecfc8631ac71de456a8da3780faf10ee",
+     "shape": [
+      300,
+      265
+     ]
+    },
+    "stiff_traj_steps": {
+     "__nd__": "<i8",
+     "sha256": "f84396fd446ade2fb1b7f81f793c750912c343be9f7d5a2068e05239c3e3a8b3",
+     "shape": [
+      300
+     ]
+    },
+    "stiffnesses": {
+     "__nd__": "<f8",
+     "sha256": "d48141779eee7a692fc777ce870d8252ebe8ce9e2dc9bec0a031d715ac8b766b",
+     "shape": [
+      265
+     ]
+    },
+    "sweep": {
+     "__dict__": {
+      "checkpoint_steps": {
+       "__nd__": "<i8",
+       "sha256": "71b50460bffb4b621e21ef39ead9e0a7f57e4d79d2526a1c5965bf2b5016dcf0",
+       "shape": [
+        43
+       ]
+      },
+      "cost_hessian_after_at_best_stiffnesses": {
+       "__nd__": "|b1",
+       "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+       "shape": []
+      },
+      "cost_hessian_after_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "853b25e0cbe7dafc5c1e7ce5b556c36c918c73a4572099054c2b3d0dc8b617c4",
+       "shape": [
+        2,
+        4
+       ]
+      },
+      "cost_hessian_after_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "a1f9c27d6472ad4b926f8ea3a89f3ed6efbe506b11a552cbe12a0d4885544b3e",
+       "shape": [
+        2,
+        265,
+        4
+       ]
+      },
+      "cost_hessian_after_stiffness": {
+       "__nd__": "<f8",
+       "sha256": "a88dafbc3f340d295e6bde2b6d93f2382a5d1eb92fb3f3621db744b6792f76de",
+       "shape": [
+        265
+       ]
+      },
+      "cost_hessian_before_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "e6c9d7025b3eb3cc516ad9df56a085ebe9504716f34030355dd958f395a7adc2",
+       "shape": [
+        2,
+        4
+       ]
+      },
+      "cost_hessian_before_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "70d22e11148bde5045c0036d8c73358b7ec78f352e545013ae2c7981a2649f3c",
+       "shape": [
+        2,
+        265,
+        4
+       ]
+      },
+      "elastic_hessian_eigvals": {
+       "__nd__": "<f8",
+       "sha256": "22d464de10bc40a50ef1af0013ddcaf77e505c26b097ed08648b1d448a0413a5",
+       "shape": [
+        43,
+        2,
+        6,
+        170
+       ]
+      },
+      "elastic_hessian_eigvecs": {
+       "__nd__": "<f8",
+       "sha256": "a39a8ce81a6b57a03ce1b4896b838d8bd4997b34f31fe01cb8baa7ce70cc5dff",
+       "shape": [
+        43,
+        2,
+        6,
+        170,
+        170
+       ]
+      },
+      "elastic_hessian_traj_indices": {
+       "__nd__": "<i8",
+       "sha256": "73f15bbec20b479078398cbe5fc161ad031c018bb3c48333bb8178e1d568a952",
+       "shape": [
+        2,
+        6
+       ]
+      },
+      "elastic_hessian_traj_strain": {
+       "__nd__": "<f8",
+       "sha256": "8ca1eaaf54dc04fb701db219b72d43215c33ee9cea6032c58d7e8d707ccad37b",
+       "shape": [
+        2,
+        6
+       ]
+      },
+      "elastic_hessian_traj_strain_frac": {
+       "__nd__": "<f8",
+       "sha256": "8bd3f6ef5cc1a3eda5ae4c403f03bc6d0b3fa0993caa978d459d50bb6e77e25e",
+       "shape": [
+        2,
+        6
+       ]
+      },
+      "recomputed_stiffness_loss": {
+       "__nd__": "<f8",
+       "sha256": "75e1df8b1721e540866b5c15f36c0e860bf17fbb00be30fee93b4fe0dffce058",
+       "shape": [
+        43,
+        2
+       ]
+      },
+      "recomputed_trajectory_loss": {
+       "__nd__": "<f8",
+       "sha256": "75e1df8b1721e540866b5c15f36c0e860bf17fbb00be30fee93b4fe0dffce058",
+       "shape": [
+        43,
+        2
+       ]
+      },
+      "stored_loss": {
+       "__nd__": "<f8",
+       "sha256": "5ec22a5a6244d9ffd1bde4d594058084a59ef640747f8ca6635d0fb990ec5917",
+       "shape": [
+        43
+       ]
+      },
+      "t_indices": {
+       "__nd__": "<i8",
+       "sha256": "7e4c367c304677fbc1dbdf32113165563c8dab9e4fd7c44d5331be8af5c21aa5",
+       "shape": [
+        43
+       ]
+      },
+      "trajectory_positions_task1": {
+       "__nd__": "<f8",
+       "sha256": "e39e81c964e968045fdeffe44e19706ed81fcdfe13489f0a75ced3a37f8de9ad",
+       "shape": [
+        43,
+        40,
+        89,
+        2
+       ]
+      },
+      "trajectory_positions_task2": {
+       "__nd__": "<f8",
+       "sha256": "7e1d4e9e8cf6d0cab64ad6d28b3a8f22f559cee186d383d58dbb63ada336b475",
+       "shape": [
+        43,
+        20,
+        89,
+        2
+       ]
+      },
+      "trajectory_strain_frac_task1": {
+       "__nd__": "<f8",
+       "sha256": "ee31551a6542f38217fe2e99424eff5edbb88dd6f4e3f05eba053cf2fd5da21d",
+       "shape": [
+        40
+       ]
+      },
+      "trajectory_strain_frac_task2": {
+       "__nd__": "<f8",
+       "sha256": "1d0cab2f268d7050d50b5a33f79400b1c17c34f7abef06543bb2382efde20346",
+       "shape": [
+        20
+       ]
+      }
+     }
+    },
+    "task_config": {
+     "__dict__": {
+      "dinputdistance": {
+       "__float__": "float",
+       "v": "0.9542238889669755"
+      },
+      "dinputdistance2": {
+       "__float__": "float",
+       "v": "0.47711194448348776"
+      },
+      "nsteps": {
+       "__int__": "int",
+       "v": 40
+      },
+      "nsteps2": {
+       "__int__": "int",
+       "v": 20
+      },
+      "strain_input": {
+       "__float__": "float",
+       "v": "1.0"
+      },
+      "strain_input2": {
+       "__float__": "float",
+       "v": "0.5"
+      },
+      "strain_output": {
+       "__float__": "float",
+       "v": "-0.2"
+      },
+      "strain_output2": {
+       "__float__": "float",
+       "v": "-0.1"
+      },
+      "tod": {
+       "__float__": "float",
+       "v": "0.8104105942784516"
+      },
+      "tod2": {
+       "__float__": "float",
+       "v": "0.9117119185632581"
+      }
+     }
+    },
+    "task_id": {
+     "__int__": "int",
+     "v": 0
+    }
+   }
+  }
+ },
+ "load_resume_state": {
+  "value": {
+   "__tuple__": [
+    {
+     "__nd__": "<f8",
+     "sha256": "d48141779eee7a692fc777ce870d8252ebe8ce9e2dc9bec0a031d715ac8b766b",
+     "shape": [
+      265
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "679edc4b199ec50b1c4917b76cc515b4596bdef92fd55a78b7bf96d4e2fbbeb3",
+     "shape": [
+      15000
+     ]
+    },
+    {
+     "__nd__": "<f8",
+     "sha256": "113f79770bec036dce5638750e40f88e89f1a034b54dda80f705499c695c78fe",
+     "shape": [
+      15000
+     ]
+    },
+    {
+     "__int__": "int",
+     "v": 15000
+    }
+   ]
+  }
+ }
+}

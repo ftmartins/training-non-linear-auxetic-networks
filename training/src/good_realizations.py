@@ -17,26 +17,17 @@ Files (one per kind, written by the corresponding screen_aggregate step):
   training/src/good_realizations/auxetic_general.json
   training/src/good_realizations/allosteric_targeted.json
   training/src/good_realizations/allosteric_general.json
-  training/src/good_realizations/auxetic_cl_targeted.json
-  training/src/good_realizations/auxetic_cl_general.json
 
 Each file: {"<key>": [seed_0, seed_1, ...]} where key is "<task_id>" for
-targeted ensembles (shared/fixed geometry) and auxetic-general/auxetic-cl-*, or
+targeted ensembles (shared/fixed geometry) and auxetic-general, or
 "<geometry_id>_<task_id>" for allosteric-general.
-
-`auxetic_cl_*` is the coupled-learning (LAMMPS free/clamped) auxetic
-variant — same task/geometry definitions as `auxetic_*` (task_generator.py /
-targeted_task_generator.py, unchanged), a separate screened-seed table
-because the training dynamics (and therefore which realizations screen well)
-differ from the gradient-based `auxetic_*` pipeline.
 """
 import json
 from pathlib import Path
 
 GOOD_REALIZATIONS_DIR = Path(__file__).parent / 'good_realizations'
 
-KINDS = ('auxetic_targeted', 'auxetic_general', 'allosteric_targeted', 'allosteric_general',
-         'auxetic_cl_targeted', 'auxetic_cl_general')
+KINDS = ('auxetic_targeted', 'auxetic_general', 'allosteric_targeted', 'allosteric_general')
 
 # Screening candidate seeds live in a disjoint range from any real/legacy
 # seed value, so a screening run can never collide with a production one.

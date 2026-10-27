@@ -1,0 +1,442 @@
+{
+ "dir": {
+  "jax/task_00/realization_00/boundary_nodes_jammed.json": {
+   "json": {
+    "bottom": [
+     60,
+     67,
+     79,
+     81,
+     82,
+     87,
+     94
+    ],
+    "left": [
+     63,
+     65,
+     77,
+     83,
+     85,
+     91,
+     95,
+     96
+    ],
+    "right": [
+     53,
+     68,
+     71,
+     73,
+     74,
+     75,
+     80,
+     86,
+     93
+    ],
+    "top": [
+     50,
+     62,
+     70,
+     78,
+     84,
+     89,
+     92,
+     97
+    ]
+   }
+  },
+  "jax/task_00/realization_00/checkpoint_manager.py.gz": "code snapshot",
+  "jax/task_00/realization_00/config.py.gz": "code snapshot",
+  "jax/task_00/realization_00/edges_jammed.npy": {
+   "array": {
+    "__nd__": "<i8",
+    "sha256": "0516711aa0898acec3c84e6b96cee46fc1d76a4d9ccc47dee7c9a0eb5d7873c8",
+    "shape": [
+     194,
+     2
+    ]
+   },
+   "npy_sha256": "ddb0b3bbc14ae3a3c5b04a42856968fe124d3381a73d1f1e39acbb0312b5bba8"
+  },
+  "jax/task_00/realization_00/ensemble_runner.py.gz": "code snapshot",
+  "jax/task_00/realization_00/final_network_jammed.pkl": {
+   "pickle": {
+    "__dict__": {
+     "edges": {
+      "__nd__": "<i8",
+      "sha256": "0516711aa0898acec3c84e6b96cee46fc1d76a4d9ccc47dee7c9a0eb5d7873c8",
+      "shape": [
+       194,
+       2
+      ]
+     },
+     "positions": {
+      "__nd__": "<f8",
+      "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+      "shape": [
+       98,
+       2
+      ]
+     },
+     "rest_lengths": {
+      "__nd__": "<f8",
+      "sha256": "083391983a4648d557e403d78854b03f3238a4a3b84b797a2127029f87df254e",
+      "shape": [
+       194
+      ]
+     },
+     "stiffnesses": {
+      "__nd__": "<f8",
+      "sha256": "e45814c6f656d002d2d3f6c39bc8abb264e5e7981d3e94d86041264ef2c1a000",
+      "shape": [
+       194
+      ]
+     }
+    }
+   }
+  },
+  "jax/task_00/realization_00/history_jammed.pkl": {
+   "pickle": {
+    "__dict__": {
+     "boundary": {
+      "__dict__": {
+       "bottom": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 60
+         },
+         {
+          "__int__": "int",
+          "v": 67
+         },
+         {
+          "__int__": "int",
+          "v": 79
+         },
+         {
+          "__int__": "int",
+          "v": 81
+         },
+         {
+          "__int__": "int",
+          "v": 82
+         },
+         {
+          "__int__": "int",
+          "v": 87
+         },
+         {
+          "__int__": "int",
+          "v": 94
+         }
+        ]
+       },
+       "left": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 63
+         },
+         {
+          "__int__": "int",
+          "v": 65
+         },
+         {
+          "__int__": "int",
+          "v": 77
+         },
+         {
+          "__int__": "int",
+          "v": 83
+         },
+         {
+          "__int__": "int",
+          "v": 85
+         },
+         {
+          "__int__": "int",
+          "v": 91
+         },
+         {
+          "__int__": "int",
+          "v": 95
+         },
+         {
+          "__int__": "int",
+          "v": 96
+         }
+        ]
+       },
+       "right": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 53
+         },
+         {
+          "__int__": "int",
+          "v": 68
+         },
+         {
+          "__int__": "int",
+          "v": 71
+         },
+         {
+          "__int__": "int",
+          "v": 73
+         },
+         {
+          "__int__": "int",
+          "v": 74
+         },
+         {
+          "__int__": "int",
+          "v": 75
+         },
+         {
+          "__int__": "int",
+          "v": 80
+         },
+         {
+          "__int__": "int",
+          "v": 86
+         },
+         {
+          "__int__": "int",
+          "v": 93
+         }
+        ]
+       },
+       "top": {
+        "__list__": [
+         {
+          "__int__": "int",
+          "v": 50
+         },
+         {
+          "__int__": "int",
+          "v": 62
+         },
+         {
+          "__int__": "int",
+          "v": 70
+         },
+         {
+          "__int__": "int",
+          "v": 78
+         },
+         {
+          "__int__": "int",
+          "v": 84
+         },
+         {
+          "__int__": "int",
+          "v": 89
+         },
+         {
+          "__int__": "int",
+          "v": 92
+         },
+         {
+          "__int__": "int",
+          "v": 97
+         }
+        ]
+       }
+      }
+     },
+     "freetraj": {
+      "__list__": []
+     },
+     "loss": {
+      "__nd__": "<f8",
+      "sha256": "f16dd5c4ac545f75dc29aeda24634046e7bfda43e4b8e231a2da98de82dfc1ef",
+      "shape": [
+       12
+      ]
+     },
+     "positions": {
+      "__list__": [
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       },
+       {
+        "__nd__": "<f8",
+        "sha256": "b79a91781afc23da217e95a871b0bdc046a88e66a019e589cf0dc8d7d6279a88",
+        "shape": [
+         98,
+         2
+        ]
+       }
+      ]
+     },
+     "stiffnesses": {
+      "__nd__": "<f8",
+      "sha256": "5715d27f56ce7645c3cad75f41abc6b1b6cd0f28f7f33ead377ac81338ad17af",
+      "shape": [
+       12,
+       194
+      ]
+     }
+    }
+   }
+  },
+  "jax/task_00/realization_00/loss_trajectory_jammed.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "f16dd5c4ac545f75dc29aeda24634046e7bfda43e4b8e231a2da98de82dfc1ef",
+    "shape": [
+     12
+    ]
+   },
+   "npy_sha256": "796bc29f1c781fbf4dbae35598794bbef566bca0afc30d3d579b99976f1f0be8"
+  },
+  "jax/task_00/realization_00/network_utils.py.gz": "code snapshot",
+  "jax/task_00/realization_00/run_provenance.py.gz": "code snapshot",
+  "jax/task_00/realization_00/run_provenance_jammed.json": {
+   "json": [
+    {
+     "force_tol": 1e-10,
+     "gradient_method": "jax",
+     "k_max": 100.0,
+     "k_min": 0.0001,
+     "learning_rate": 0.003,
+     "n_steps": 12,
+     "opt_fire_finc": 1.05,
+     "optimizer": "gradient_descent",
+     "realization_seed": 2000017
+    }
+   ]
+  },
+  "jax/task_00/realization_00/stiffness_trajectory_jammed.npy": {
+   "array": {
+    "__nd__": "<f8",
+    "sha256": "5715d27f56ce7645c3cad75f41abc6b1b6cd0f28f7f33ead377ac81338ad17af",
+    "shape": [
+     12,
+     194
+    ]
+   },
+   "npy_sha256": "78d7856fcb3d2bb41765d64cdbc817d464fac1f858c27effadd03349b4a7d8c5"
+  },
+  "jax/task_00/realization_00/task_config_jammed.json": {
+   "json": {
+    "compression_strains": [
+     -0.30000000000000004,
+     -0.15000000000000002
+    ],
+    "packing_seed": 0,
+    "target_poisson_ratios": [
+     -0.25,
+     -0.5
+    ],
+    "task_seed": 0
+   }
+  },
+  "jax/task_00/realization_00/task_generator.py.gz": "code snapshot",
+  "jax/task_00/realization_00/training_functions.py.gz": "code snapshot",
+  "jax/task_00/realization_00/training_meta_jammed.json": {
+   "json": {
+    "force_tol": 1e-10,
+    "gradient_method": "jax",
+    "k_max": 100.0,
+    "k_min": 0.0001,
+    "learning_rate": 0.003,
+    "n_steps": 12,
+    "opt_fire_finc": 1.05,
+    "optimizer": "gradient_descent",
+    "realization_seed": 2000017
+   }
+  }
+ },
+ "is_training_complete": false,
+ "outcomes": [
+  true,
+  "HyperparameterMismatchError: <root>/jax/task_00/realization_00: recorded critical hyperparameters (solver/gradient_method/learning_rate/k_min/k_max/force_tol/optimizer/realization_seed) differ from this run's. Resuming would mix incompatible settings into one training trajectory. Pass overwrite=True (--overwrite) to wipe it and restart from scratch."
+ ]
+}

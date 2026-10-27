@@ -46,6 +46,9 @@ for _p in (REPO_ROOT, REPO_ROOT / "training" / "src", REPO_ROOT / "src"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from base.realization_record import (  # noqa: E402
+    RealizationRecord, BestLossUndetermined, MissingRecordPart, incidence_to_edges)
+
 # --------------------------------------------------------------------------- #
 # Paths                                                                       #
 # --------------------------------------------------------------------------- #
@@ -175,12 +178,7 @@ def _incmat_to_edges(incidence_matrix):
     importing that module (which pulls in the ``lammps`` extension at import
     time; the plotting env need not have it).
     """
-    incidence_matrix = np.asarray(incidence_matrix)
-    edges = np.zeros((incidence_matrix.shape[0], 2), dtype=int)
-    for e, row in enumerate(incidence_matrix):
-        cols = np.where(np.abs(row) > 0.5)[0]
-        edges[e] = cols[0], cols[1]
-    return edges
+    return incidence_to_edges(incidence_matrix)
 
 
 def allo_solver_available(solver: str) -> bool:
@@ -202,6 +200,11 @@ ALLO_GEOMETRIES = ["targeted", 0, 1, 2, 3, 4]
 def _allo_geom_dir(geometry_id) -> Path:
     name = "geometry_targeted" if geometry_id == "targeted" else f"geometry_{geometry_id}"
     return ALLO_DATA_DIR / name
+
+
+def _allo_record(geometry_id, task_id, real_id) -> RealizationRecord:
+    return RealizationRecord.locate(ALLO_DATA_DIR, "allosteric", (geometry_id, task_id), real_id,
+                                    must_exist=False)
 
 
 def allo_task_config(nodes, tasks_txt_vals) -> dict:
@@ -232,56 +235,51 @@ def load_allosteric(geometry_id, task_id, real_id) -> dict | None:
     """Load one allosteric realization from the ``_aug`` tree.
 
     Returns ``None`` if the realization directory or its essential files are
-    missing. Keys: ``nodes, incidence_matrix, edges, eq_lengths, stiffnesses,
+    missing; raises when K* (``best_stiffnesses``) is missing or undetermined, or the
+    sweep is stale (ADR 0004). ``stiffnesses`` are the latest saved (post-update) ones,
+    never K*. Keys: ``nodes, incidence_matrix, edges, eq_lengths, stiffnesses,
     best_stiffnesses, stiff_traj, stiff_traj_steps, mse1, mse2, task_config,
     solver, geometry_id, task_id, real_id, dir``.
     """
-    d = _allo_geom_dir(geometry_id) / f"task_{task_id}" / f"realization_{real_id}"
-    need = ["nodes.npy", "incidence_matrix.npy", "eq_lengths.npy",
-            "stiffnesses_traj.npy", "stiffnesses_traj_steps.npy",
-            "mse1.npy", "mse2.npy", "tasks.txt"]
-    if not d.is_dir() or not all((d / f).exists() for f in need):
+    rec = _allo_record(geometry_id, task_id, real_id)
+    if not rec.run_dir.is_dir() or not all(
+            rec.has(p) for p in ("network", "stiffness_trajectory", "loss", "task")):
         return None
 
-    nodes = np.load(d / "nodes.npy").astype(float)
-    incidence_matrix = np.load(d / "incidence_matrix.npy")
-    tasks_vals = np.loadtxt(d / "tasks.txt")
+    net, traj, task = rec.network, rec.stiffness_trajectory, rec.task
+    nodes = net.nodes.astype(float)
+    mse1, mse2 = rec.loss.per_subtask.T
+    solver = rec.config.get("solver", "lammps") if rec.has("config") else "lammps"
 
-    solver = "lammps"
-    if (d / "training_meta.json").exists():
-        solver = json.loads((d / "training_meta.json").read_text()).get("solver", "lammps")
-
-    best_k = None
-    if (d / "best_stiffnesses.npy").exists():
-        best_k = np.abs(np.load(d / "best_stiffnesses.npy").astype(float))
+    # best_stiffnesses is K*: raises (MissingRecordPart / BestLossUndetermined) rather than
+    # leave callers to fall back to the final or a checkpoint stiffness.
+    best_k = np.abs(rec.best_loss_stiffnesses.astype(float))
 
     # Precomputed post-training sweep, if it has been rsync'd down. When present
     # (and new enough to carry the per-subtask + combined cost-Hessian keys,
     # 2026-08-27+), the figure code reads its cost / elastic Hessian eigen-pairs
     # straight from here instead of recomputing locally -- see
     # allo_cost_hessian_at / _cost_hessian_from_sweep.
-    sweep = None
-    if (d / "timestep_sweep.npz").exists():
-        with np.load(d / "timestep_sweep.npz", allow_pickle=True) as z:
-            sweep = {k: z[k] for k in z.files}
+    sweep = rec.sweep if rec.has("sweep") else None
 
     return dict(
         nodes=nodes,
-        incidence_matrix=incidence_matrix,
-        edges=_incmat_to_edges(incidence_matrix),
-        eq_lengths=np.load(d / "eq_lengths.npy").astype(float),
-        stiffnesses=np.abs(np.load(d / "stiffnesses.npy").astype(float))
-        if (d / "stiffnesses.npy").exists() else None,
+        incidence_matrix=net.incidence_matrix,
+        edges=net.edges,
+        eq_lengths=net.eq_lengths.astype(float),
+        stiffnesses=np.abs(rec.current_stiffnesses.astype(float))
+        if rec.has("current_stiffnesses") else None,
         best_stiffnesses=best_k,
-        stiff_traj=np.abs(np.load(d / "stiffnesses_traj.npy").astype(float)),
-        stiff_traj_steps=np.load(d / "stiffnesses_traj_steps.npy").astype(int),
-        mse1=np.load(d / "mse1.npy").astype(float),
-        mse2=np.load(d / "mse2.npy").astype(float),
-        task_config=allo_task_config(nodes, tasks_vals),
+        stiff_traj=np.abs(traj.stiffnesses.astype(float)),
+        stiff_traj_steps=traj.steps.astype(int),
+        mse1=np.ascontiguousarray(mse1, dtype=float),
+        mse2=np.ascontiguousarray(mse2, dtype=float),
+        task_config=allo_task_config(
+            nodes, (task.geometry_seed, task.strain_output2, task.strain_output)),
         solver=solver,
         sweep=sweep,
         geometry_id=geometry_id, task_id=task_id, real_id=real_id,
-        dir=str(d),
+        dir=str(rec.run_dir),
     )
 
 
@@ -303,25 +301,21 @@ def discover_allosteric(pool: str = "targeted", max_per_task: int | None = None,
         raise ValueError(pool)
 
     found = []
-    for gid in geoms:
-        gdir = _allo_geom_dir(gid)
-        if not gdir.is_dir():
+    seen = {}   # realizations looked at per cell, for max_per_task
+    for rec in RealizationRecord.iterate(ALLO_DATA_DIR, "allosteric"):
+        gid, tid = rec.cell
+        if gid not in geoms:
             continue
-        for task_dir in sorted(gdir.glob("task_*"), key=lambda p: int(p.name.split("_")[1])):
-            tid = int(task_dir.name.split("_")[1])
-            reals = sorted(task_dir.glob("realization_*"), key=lambda p: int(p.name.split("_")[1]))
-            if max_per_task is not None:
-                reals = reals[:max_per_task]
-            for rdir in reals:
-                rid = int(rdir.name.split("_")[1])
-                if not (rdir / "mse1.npy").exists():
-                    continue
-                if require_converged:
-                    mse1 = np.load(rdir / "mse1.npy")
-                    mse2 = np.load(rdir / "mse2.npy")
-                    if convergence_ratio(mse1, mse2) > MIN_SUCCESS_RATIO:
-                        continue
-                found.append((gid, tid, rid))
+        seen[rec.cell] = seen.get(rec.cell, 0) + 1
+        if max_per_task is not None and seen[rec.cell] > max_per_task:
+            continue
+        if not rec.has("loss"):
+            continue
+        if require_converged:
+            per_subtask = rec.loss.per_subtask
+            if convergence_ratio(per_subtask[:, 0], per_subtask[:, 1]) > MIN_SUCCESS_RATIO:
+                continue
+        found.append((gid, tid, rec.realization_id))
     return found
 
 
@@ -348,35 +342,23 @@ def load_auxetic(task_id, real_id, family: str | None = None) -> dict | None:
     touching the module-level default the rest of the notebook relies on.
     """
     data_dir = AUX_DATA_DIR if family is None else REPO_ROOT / "data" / "auxetic_nets_aug" / family
-    d = data_dir / f"task_{task_id:02d}" / f"realization_{real_id:02d}"
-    if not d.is_dir() or not _auxfile(d, "final_network", "pkl").exists():
+    rec = RealizationRecord.locate(data_dir, "auxetic", task_id, real_id, must_exist=False,
+                                   network_type=AUX_NETWORK_TYPE)
+    d = rec.run_dir
+    if not d.is_dir() or not rec.has("network"):
         return None
     from analysis.data_io import load_auxetic_network
 
     network, boundary = load_auxetic_network(
         task_id, real_id, data_dir=data_dir, network_type=AUX_NETWORK_TYPE)
 
-    task_config = {}
-    tc_path = _auxfile(d, "task_config", "json")
-    if tc_path.exists():
-        # Some general-family task_config_jammed.json files on disk are a bare
-        # `null` (found 2026-09-05, 14/677 general realizations) -- treat that
-        # the same as "file missing" rather than propagating None downstream.
-        task_config = json.loads(tc_path.read_text()) or {}
-
-    lt_path = _auxfile(d, "loss_trajectory", "npy")
-    st_path = _auxfile(d, "stiffness_trajectory", "npy")
-    loss_traj = np.load(lt_path) if lt_path.exists() else None
-    stiff_traj = np.load(st_path) if st_path.exists() else None
-
-    # Precomputed post-training sweep (network-type-suffixed filename possible).
-    # Used by aux_cost_hessian_at when its operating point can be matched to the
-    # sweep's before/after checkpoint (needs stiffness_trajectory.npy too).
-    sweep = None
-    for cand in sorted(d.glob("timestep_sweep*.npz")):
-        with np.load(cand, allow_pickle=True) as z:
-            sweep = {k: z[k] for k in z.files}
-        break
+    # Missing, or a bare `null` on disk (14/677 general realizations, 2026-09-05): {}.
+    task_config = rec.task.config if rec.has("task") else {}
+    loss_traj = rec.loss.training if rec.has("loss") else None
+    stiff_traj = rec.stiffness_trajectory.stiffnesses if rec.has("stiffness_trajectory") else None
+    # Precomputed post-training sweep. Used by aux_cost_hessian_at when its operating
+    # point can be matched to the sweep's before/after checkpoint.
+    sweep = rec.sweep if rec.has("sweep") else None
 
     return dict(
         network=network, boundary=boundary, task_config=task_config,
@@ -404,37 +386,23 @@ def aux_best_loss_state(aa, load_positions: bool = True) -> tuple:
     step, not the best one, and for auxetic runs that ended above their own
     minimum (resume rounds, post-backprop-crash restarts) the two differ.
 
-    ``stiffnesses`` come from ``stiffness_trajectory.npy`` (``aa['stiff_traj']``);
-    ``positions`` from ``history.pkl`` (the only per-step positions record --
-    each entry is the strain-relaxed config that step's loss was measured at).
-    Falls back to the ``final_network`` state (with a warning) when a per-step
-    record is missing or length-misaligned.
+    ``stiffnesses`` and ``best_idx`` are K* and its step from the realization record
+    (ADR 0004), which raises when they cannot be determined -- never the final network.
+    ``positions`` come from ``history.pkl`` (the only per-step positions record -- each
+    entry is the strain-relaxed config that step's loss was measured at), falling back to
+    the final-network positions (with a warning) when that record is missing or
+    length-misaligned.
     """
-    net = aa["network"]
-    pos_final = np.asarray(net.positions, float)
-    k_final = np.asarray(net.stiffnesses, float)
-    loss_traj = aa.get("loss_traj")
-    stiff_traj = aa.get("stiff_traj")
+    rec = RealizationRecord.open(aa["dir"], kind="auxetic", network_type=AUX_NETWORK_TYPE)
+    b = rec.best_loss_step
+    k_best = np.asarray(rec.best_loss_stiffnesses, float)
+    loss_traj = rec.loss.training
     tag = f"auxetic {aa.get('task_id')}/{aa.get('real_id')}"
-    if loss_traj is None or stiff_traj is None or len(np.asarray(loss_traj)) == 0:
-        warnings.warn(f"{tag}: no loss/stiffness trajectory -> best-loss state "
-                      "falls back to final_network")
-        return pos_final, k_final, None
-    loss_traj = np.asarray(loss_traj, float)
-    if not np.isfinite(loss_traj).any():
-        warnings.warn(f"{tag}: loss trajectory all-NaN -> best-loss state falls "
-                      "back to final_network")
-        return pos_final, k_final, None
-    b = int(np.nanargmin(loss_traj))
-    stiff_traj = np.asarray(stiff_traj, float)
-    k_best = np.asarray(stiff_traj[b], float) if b < len(stiff_traj) else k_final
-    pos_best = pos_final
+    pos_best = np.asarray(aa["network"].positions, float)
     if not load_positions:
         return pos_best, k_best, b
-    hist_path = _auxfile(Path(aa["dir"]), "history", "pkl")
-    if hist_path.exists():
-        with open(hist_path, "rb") as f:
-            positions = pickle.load(f).get("positions")
+    if rec.has("positions_trajectory"):
+        positions = rec.positions_trajectory
         if positions is not None and len(positions) == len(loss_traj):
             pos_best = np.asarray(positions[b], float)
         else:
@@ -457,24 +425,19 @@ def discover_auxetic(max_per_task: int | None = None, require_converged: bool = 
     """
     data_dir = AUX_DATA_DIR if family is None else REPO_ROOT / "data" / "auxetic_nets_aug" / family
     found = []
-    if not data_dir.is_dir():
-        return found
-    for task_dir in sorted(data_dir.glob("task_*"), key=lambda p: int(p.name.split("_")[1])):
-        tid = int(task_dir.name.split("_")[1])
-        reals = sorted(task_dir.glob("realization_*"), key=lambda p: int(p.name.split("_")[1]))
-        if max_per_task is not None:
-            reals = reals[:max_per_task]
-        for rdir in reals:
-            rid = int(rdir.name.split("_")[1])
-            lt = _auxfile(rdir, "loss_trajectory", "npy")
-            if not lt.exists():
+    seen = {}   # realizations looked at per task, for max_per_task
+    for rec in RealizationRecord.iterate(data_dir, "auxetic", network_type=AUX_NETWORK_TYPE):
+        seen[rec.cell] = seen.get(rec.cell, 0) + 1
+        if max_per_task is not None and seen[rec.cell] > max_per_task:
+            continue
+        if not rec.has("loss"):
+            continue
+        if require_converged:
+            loss = np.asarray(rec.loss.training, dtype=float)
+            s = loss.mean(axis=1) if loss.ndim > 1 else loss   # per-step scalar
+            if len(s) == 0 or s[0] <= 0 or float(np.nanmin(s)) / s[0] > min_success_ratio:
                 continue
-            if require_converged:
-                loss = np.asarray(np.load(lt), dtype=float)
-                s = loss.mean(axis=1) if loss.ndim > 1 else loss   # per-step scalar
-                if len(s) == 0 or s[0] <= 0 or float(np.nanmin(s)) / s[0] > min_success_ratio:
-                    continue
-            found.append((tid, rid))
+        found.append((rec.cell, rec.realization_id))
     return found
 
 
@@ -498,18 +461,23 @@ ENSEMBLE_AUX_FAMILY = "targeted"
 
 
 def _allo_ratio(gid, tid, rid) -> float:
-    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
-    if not (d / "mse1.npy").exists() or not (d / "mse2.npy").exists():
+    rec = _allo_record(gid, tid, rid)
+    if not rec.has("loss"):
         return np.inf
-    return convergence_ratio(np.load(d / "mse1.npy"), np.load(d / "mse2.npy"))
+    mse1, mse2 = rec.loss.per_subtask.T
+    return convergence_ratio(mse1, mse2)
+
+
+def _aux_record(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> RealizationRecord:
+    return RealizationRecord.locate(REPO_ROOT / "data" / "auxetic_nets_aug" / family, "auxetic",
+                                    tid, rid, must_exist=False, network_type=AUX_NETWORK_TYPE)
 
 
 def _aux_ratio(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> float:
-    d = REPO_ROOT / "data" / "auxetic_nets_aug" / family / f"task_{tid:02d}" / f"realization_{rid:02d}"
-    lt = _auxfile(d, "loss_trajectory", "npy")
-    if not lt.exists():
+    rec = _aux_record(tid, rid, family)
+    if not rec.has("loss"):
         return np.inf
-    loss = np.asarray(np.load(lt), dtype=float)
+    loss = np.asarray(rec.loss.training, dtype=float)
     s = loss.mean(axis=1) if loss.ndim > 1 else loss
     return float(np.nanmin(s) / s[0]) if len(s) and s[0] > 0 else np.inf
 
@@ -520,22 +488,19 @@ def _aux_dir(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> Path:
 
 def allo_realization_seed(gid, tid, rid) -> int:
     """Recorded realization seed of an allosteric run (``training_meta.json``)."""
-    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
-    return int(json.loads((d / "training_meta.json").read_text())["realization_seed"])
+    return _allo_record(gid, tid, rid).realization_seed
 
 
 def aux_realization_seed(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> int:
     """Recorded realization seed of an auxetic run (``training_meta_jammed.json``)."""
-    meta = _auxfile(_aux_dir(tid, rid, family), "training_meta", "json")
-    return int(json.loads(meta.read_text())["realization_seed"])
+    return _aux_record(tid, rid, family).realization_seed
 
 
 def aux_network_fingerprint(tid, rid, family=ENSEMBLE_AUX_FAMILY) -> str:
     """Fingerprint of the network an auxetic run trained on (see base.stored_network)."""
     from base.stored_network import network_fingerprint
-    with open(_auxfile(_aux_dir(tid, rid, family), "final_network", "pkl"), "rb") as f:
-        net = pickle.load(f)
-    return network_fingerprint(net["positions"], net["edges"])
+    net = _aux_record(tid, rid, family).network
+    return network_fingerprint(net.positions, net.edges)
 
 
 def _best_distinct_seeds(cands, n_best) -> list[int]:
@@ -552,12 +517,32 @@ def _best_distinct_seeds(cands, n_best) -> list[int]:
     return sorted(best)
 
 
+def allo_trajectory_consistent(gid, tid, rid) -> bool:
+    """Whether the run's stiffness trajectory pairs with its loss trajectory: snapshot steps
+    in range and never going backwards, a step repeated only with an identical snapshot.
+    Steps going backwards mean two jobs appended to one run directory, so its best-loss
+    stiffnesses are undetermined (ADR 0004)."""
+    d = _allo_geom_dir(gid) / f"task_{tid}" / f"realization_{rid}"
+    steps = np.load(d / "stiffnesses_traj_steps.npy")
+    k = np.load(d / "stiffnesses_traj.npy")
+    n_steps = len(np.load(d / "mse1.npy"))
+    if len(steps) != len(k) or (len(steps) and not 0 <= steps[0] <= steps[-1] < n_steps):
+        return False
+    gaps = np.diff(steps)
+    return not np.any(gaps < 0) and all(np.array_equal(k[i], k[i + 1])
+                                        for i in np.nonzero(gaps == 0)[0])
+
+
 def figure_ensemble_allosteric(n_best: int = ENSEMBLE_N_ALLO) -> list[tuple]:
     """Canonical allosteric ensemble: ``(geometry_id, task_id, real_id)`` triples,
     the ``n_best`` lowest-ratio converged realizations with distinct realization
-    seeds of every (geometry, task)."""
+    seeds of every (geometry, task). Runs whose stiffness trajectory is inconsistent
+    (``allo_trajectory_consistent``) are left out, so the next distinct-seed spare
+    takes their place."""
     by_cell: dict = {}
     for gid, tid, rid in discover_allosteric("all", None):
+        if not allo_trajectory_consistent(gid, tid, rid):
+            continue
         by_cell.setdefault((gid, tid), []).append(
             (_allo_ratio(gid, tid, rid), rid, allo_realization_seed(gid, tid, rid)))
     out = []
@@ -810,14 +795,9 @@ def _sweep_cost_hessian_stiffness(d, end):
 
 
 def allo_best_loss_stiffness(d) -> np.ndarray:
-    """Lowest-loss stiffness vector for an allosteric realization.
-
-    Prefers ``best_stiffnesses.npy`` -- the trainer's per-logged-step
-    argmin-``0.5*(mse1+mse2)`` snapshot (verified against ``best_combined_mse.txt``
-    for every targeted+general realization). Falls back to the coarse
-    checkpoint-grid proxy ``stiff_traj[argmin(mse1+mse2 at checkpoints)]`` (==
-    ``select_steps(...)[0][-1]``, since ``select_loss_threshold_steps`` always
-    puts the checkpoint argmin last) only when ``best_stiffnesses`` is absent.
+    """Best-loss stiffnesses K* of an allosteric realization, from its realization record
+    (ADR 0004). Raises when the record cannot determine K* -- never falls back to a
+    checkpoint.
 
     NOTE this is deliberately NOT ``allo_operating_point``: for ~23% of converged
     sweep-having realizations the sweep's after-checkpoint stiffness lands one
@@ -827,10 +807,8 @@ def allo_best_loss_stiffness(d) -> np.ndarray:
     Hessian whenever the sweep's after Hessian was evaluated at K* (2026-09-10+
     sweeps, ``cost_hessian_after_stiffness``), and recomputes locally otherwise.
     """
-    if d.get("best_stiffnesses") is not None:
-        return np.asarray(d["best_stiffnesses"], float)
-    ti, _ = select_steps(d["mse1"], d["mse2"], d["stiff_traj_steps"])
-    return np.asarray(d["stiff_traj"][ti[-1]], float)
+    return np.asarray(
+        RealizationRecord.open(d["dir"], kind="allosteric").best_loss_stiffnesses, float)
 
 
 def allo_operating_point(d, at="best"):
@@ -840,8 +818,8 @@ def allo_operating_point(d, at="best"):
     before/after cost Hessian was evaluated at (``tag`` 'before'/'after'; K* for
     2026-09-10+ after Hessians, else the checkpoint) so the cost Hessian is
     sweep-served and any susceptibility computed at ``k_vec`` is evaluated at
-    the same configuration. Otherwise: ``at='best'`` -> ``best_stiffnesses``
-    (fallback ``stiff_traj[ti[-1]]``), ``at='before'`` -> ``stiff_traj[ti[0]]``.
+    the same configuration. Otherwise: ``at='best'`` -> K* (``allo_best_loss_stiffness``,
+    raises when undetermined), ``at='before'`` -> ``stiff_traj[ti[0]]``.
     """
     end = "after" if at in ("best", "after") else "before"
     k_sweep = _sweep_cost_hessian_stiffness(d, end)
@@ -850,12 +828,9 @@ def allo_operating_point(d, at="best"):
     from analysis.timestep_sweep import _select_local_threshold_indices
     ti, _ = _select_local_threshold_indices(
         d["stiff_traj_steps"], d["mse1"], d["mse2"], CFG.n_thresh_steps, CFG.eps_min)
-    if at in ("best", "after") and d.get("best_stiffnesses") is not None:
-        return d["best_stiffnesses"], "best"
-    return d["stiff_traj"][ti[-1] if end == "after" else ti[0]], at
-
-
-_ALLO_REALIZATION_BASE = 3_000_000   # training/runners/allosteric_trainer.py::_REALIZATION_BASE
+    if at in ("best", "after"):
+        return allo_best_loss_stiffness(d), "best"
+    return d["stiff_traj"][ti[0]], at
 
 
 def allo_initial_stiffnesses(d):
@@ -864,7 +839,7 @@ def allo_initial_stiffnesses(d):
     Runs that predate the step-0 checkpoint only saved ``stiffnesses_traj`` from
     step 49 on (the first ``global_step % 50 == 0``), so the initial draw is
     regenerated exactly as the trainer makes it:
-    ``RandomState(_REALIZATION_BASE + realization_seed).uniform(k_min, k_max, n_edges)``
+    ``base.initial_condition.contrastive(realization_seed, n_edges, k_min, k_max)``
     with ``realization_seed`` / ``k_min`` / ``k_max`` from ``training_meta.json``
     (the *recorded* seed -- the screened-seed table's realization_id -> seed
     mapping has been reordered since some runs, so never re-derive it from ids).
@@ -873,9 +848,10 @@ def allo_initial_stiffnesses(d):
     """
     if int(d["stiff_traj_steps"][0]) == 0:
         return d["stiff_traj"][0]
-    meta = json.loads((Path(d["dir"]) / "training_meta.json").read_text())
-    return np.random.RandomState(_ALLO_REALIZATION_BASE + int(meta["realization_seed"])).uniform(
-        meta["k_min"], meta["k_max"], size=len(d["edges"]))
+    meta = RealizationRecord.open(d["dir"], kind="allosteric").config
+    from base import initial_condition
+    return initial_condition.contrastive(
+        meta["realization_seed"], len(d["edges"]), meta["k_min"], meta["k_max"])
 
 
 def allo_cost_hessian_at(d, k_vec, k_eigs=CFG.k_cost_eigs, verbose=False):
@@ -884,7 +860,9 @@ def allo_cost_hessian_at(d, k_vec, k_eigs=CFG.k_cost_eigs, verbose=False):
     Prefers ``d['sweep']`` when ``k_vec`` *is* the stiffness the sweep's
     before/after cost Hessian was evaluated at (exact array match against
     ``_sweep_cost_hessian_stiffness``); otherwise recomputes locally with
-    ``allo_per_task_cost_hessian``. Return contract matches the latter:
+    ``allo_per_task_cost_hessian``. Both are JAX-FIRE cost Hessians, also for
+    LAMMPS-trained runs, where K* is not a stationary point of the JAX-FIRE loss
+    (accepted, ADR 0005). Return contract matches ``allo_per_task_cost_hessian``:
     ``dict(mse1=(evals, evecs), mse2=(evals, evecs))`` (plus ``combined`` when
     served from the sweep), eigenvalues DESCENDING, ``evecs`` ``(n_edges, k_eigs)``.
     """

@@ -102,14 +102,17 @@ def _reload_allosteric_loss(task, realization, geometry, targeted_ensemble, outp
         STRAIN_INPUT, STRAIN_INPUT2, NSTEPS_TASK1, NSTEPS_TASK2, evaluate_actuation,
     )
 
-    geom_dir = 'geometry_targeted' if targeted_ensemble else f'geometry_{geometry}'
-    result_path = Path(output_dir) / geom_dir / f'task_{task}' / f'realization_{realization}'
+    from base.realization_record import RealizationRecord
 
-    nodes            = np.load(result_path / 'nodes.npy')
-    incidence_matrix = np.load(result_path / 'incidence_matrix.npy')
     # Fresh re-read from disk, independent of post_training_sweep.py's in-memory state.
-    stiffness_traj   = np.load(result_path / 'stiffnesses_traj.npy')
-    gseed, strain_output2, strain_output = np.loadtxt(result_path / 'tasks.txt')
+    record = RealizationRecord.locate(
+        output_dir, 'allosteric', ('targeted' if targeted_ensemble else geometry, task),
+        realization, must_exist=False)
+    result_path = record.run_dir
+    nodes            = record.network.nodes
+    incidence_matrix = record.network.incidence_matrix
+    stiffness_traj   = record.stiffness_trajectory.stiffnesses
+    strain_output, strain_output2 = record.task.strain_output, record.task.strain_output2
 
     tod  = (1 + strain_output)  * np.linalg.norm(nodes[3] - nodes[2])
     tod2 = (1 + strain_output2) * np.linalg.norm(nodes[3] - nodes[2])
@@ -187,19 +190,25 @@ def main():
         sweep_filename = _nt_filename('timestep_sweep.npz', args.network_type)
         scatter_filename = _nt_filename('loss_reconstruction_scatter.png', args.network_type)
     else:
-        geom_dir = 'geometry_targeted' if args.targeted_ensemble else f'geometry_{args.geometry}'
-        result_path = (Path(args.output_dir) / geom_dir /
-                       f'task_{args.task}' / f'realization_{args.realization}')
+        from base.realization_record import RealizationRecord
+        record = RealizationRecord.locate(
+            args.output_dir, 'allosteric',
+            ('targeted' if args.targeted_ensemble else args.geometry, args.task),
+            args.realization, must_exist=False)
+        result_path = record.run_dir
         sweep_filename = 'timestep_sweep.npz'
         scatter_filename = 'loss_reconstruction_scatter.png'
 
     sweep_path = result_path / sweep_filename
-    if not sweep_path.exists():
+    if args.task_type in ('targeted', 'ensemble'):
+        sweep = load_sweep_results(sweep_path) if sweep_path.exists() else None
+    else:
+        sweep = record.sweep if record.has('sweep') else None
+    if sweep is None:
         print(f"verify_and_plot_loss: {sweep_path} not found "
               f"(run post_training_sweep.py first)", file=sys.stderr)
         return 1
 
-    sweep = load_sweep_results(sweep_path)
     t_indices = sweep['t_indices']
     stored = np.asarray(sweep['stored_loss'])
 
