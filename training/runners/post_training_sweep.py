@@ -84,7 +84,7 @@ def _run_auxetic(task_type, task, realization, results_dir, n_thresh_steps,
         k_eigs=k_eigs, force_type=force_type, n_strain_steps=n_strain_steps, tol=FORCE_TOL,
         gradient_method=gradient_method,
     )
-    return result_path, results
+    return record, results
 
 
 def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
@@ -178,7 +178,7 @@ def _run_allosteric(task, realization, geometry, targeted_ensemble, output_dir,
         n_hessian_traj_steps=n_hessian_traj_steps, solver=solver,
         cost_hessian_fn=cost_hessian_fn, best_stiffnesses=best_stiffnesses,
     )
-    return result_path, results
+    return record, results
 
 
 def main():
@@ -228,14 +228,14 @@ def main():
 
     #try:
     if args.task_type in ('targeted', 'ensemble'):
-        result_path, results = _run_auxetic(
+        record, results = _run_auxetic(
                 args.task_type, args.task, args.realization, args.results_dir,
                 args.n_thresh_steps, args.eps_min, args.n_traj_steps, args.k_eigs,
                 args.force_type, args.network_type, args.gradient_method,
                 args.n_hessian_traj_steps,
             )
     else:
-        result_path, results = _run_allosteric(
+        record, results = _run_allosteric(
                 args.task, args.realization, args.geometry, args.targeted_ensemble,
                 args.output_dir, args.n_thresh_steps, args.eps_min, args.k_eigs,
                 args.n_hessian_traj_steps, cost_hessian_solver=args.cost_hessian_solver,
@@ -244,15 +244,7 @@ def main():
     #    print(f"post_training_sweep FAILED: {e!r}", file=sys.stderr)
     #    return 1
 
-    if args.task_type in ('targeted', 'ensemble'):
-        from training.src.checkpoint_manager import _nt_filename
-        sweep_filename = _nt_filename('timestep_sweep.npz', args.network_type)
-        meta_filename = _nt_filename('timestep_sweep_meta.json', args.network_type)
-    else:
-        sweep_filename = 'timestep_sweep.npz'
-        meta_filename = 'timestep_sweep_meta.json'
-
-    out_path = result_path / sweep_filename
+    out_path, meta_path = record.sweep_files()
     save_sweep_results(out_path, **results)
 
     meta = {
@@ -269,7 +261,7 @@ def main():
         meta['network_type'] = args.network_type
     else:
         meta['cost_hessian_solver'] = args.cost_hessian_solver
-    with open(result_path / meta_filename, 'w') as fh:
+    with open(meta_path, 'w') as fh:
         json.dump(meta, fh, indent=2)
 
     recomputed = np.asarray(results['recomputed_stiffness_loss'])

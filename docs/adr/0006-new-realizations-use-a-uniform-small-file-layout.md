@@ -57,5 +57,6 @@ trajectories, best-loss stiffnesses (K*) and resume state. Files may differ.
 - Not carried over: the auxetic `freetraj` history field and `history.pkl`'s duplicate of the
   trajectories (no reader uses them); the trainer's private history stays in `trainer_state.pkl`.
 - Fresh run directories get this layout only when `NMN_RECORD_LAYOUT=uniform`; the default stays
-  legacy until the user flips it after the Network A campaign. `post_training_sweep.py` still
-  writes the legacy sweep file names, so sweeps of uniform runs are a follow-up.
+  legacy until the user flips it after the Network A campaign. `post_training_sweep.py` writes
+  its sweep to the names the record gives (`record.sweep_files()`): `sweep.npz` and
+  `sweep_meta.json` here, the legacy names for legacy runs.

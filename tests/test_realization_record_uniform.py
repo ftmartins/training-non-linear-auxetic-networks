@@ -219,6 +219,33 @@ class TestLayoutChoice(UniformTestCase):
         self.assertEqual(content(recs[0])['loss'], content(recs[1])['loss'])
 
 
+class TestSweepFiles(UniformTestCase):
+    def test_file_names_per_layout(self):
+        names = lambda rec: tuple(p.name for p in rec.sweep_files())
+        self.assertEqual(names(self.record('a', 'allosteric', 'legacy')),
+                         ('timestep_sweep.npz', 'timestep_sweep_meta.json'))
+        self.assertEqual(names(RealizationRecord.open(self.root / 'x', kind='auxetic')),
+                         ('timestep_sweep_jammed.npz', 'timestep_sweep_meta_jammed.json'))
+        self.assertEqual(names(RealizationRecord.open(self.root / 'y', kind='auxetic',
+                                                      network_type='lattice')),
+                         ('timestep_sweep_lattice.npz', 'timestep_sweep_meta_lattice.json'))
+        self.assertEqual(names(RealizationRecord.open(self.root / 'z', kind='auxetic',
+                                                      network_type=None)),
+                         ('timestep_sweep.npz', 'timestep_sweep_meta.json'))
+        self.assertEqual(names(self.record('b', 'allosteric', 'uniform')),
+                         ('sweep.npz', 'sweep_meta.json'))
+
+    def test_a_sweep_written_where_sweep_files_says_is_read_back(self):
+        for kind, play, layout in (('allosteric', play_allosteric, 'uniform'),
+                                   ('allosteric', play_allosteric, 'legacy')):
+            rec = self.record(f'{kind}-{layout}', kind, layout)
+            play(rec)
+            path, _ = rec.sweep_files()
+            np.savez(path, cost_hessian_after_stiffness=rec.best_loss_stiffnesses, t=np.arange(3))
+            rec.refresh()
+            self.assertEqual(sorted(rec.sweep), ['cost_hessian_after_stiffness', 't'])
+
+
 class TestAtomicWrites(UniformTestCase):
     def test_a_killed_write_leaves_the_previous_file(self):
         rec = self.record('uniform', 'allosteric', 'uniform')

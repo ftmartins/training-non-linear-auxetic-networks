@@ -333,6 +333,12 @@ class RealizationRecord:
                              f'recompute the sweep')
         return sweep
 
+    def sweep_files(self):
+        """(sweep arrays path, sweep meta path) this layout stores a post-training sweep in;
+        the sweep scripts write them, rec.sweep reads the first."""
+        npz, meta = self._reader.sweep_file_names()
+        return self.run_dir / npz, self.run_dir / meta
+
     def resume_state(self):
         """ResumeState to continue training from, or None when there is nothing usable to
         resume (no saved stiffnesses, or NaN stiffnesses and no clean checkpoint)."""
@@ -534,6 +540,10 @@ class _AllostericReader:
             return {k: z[k] for k in z.files}
 
     @staticmethod
+    def sweep_file_names():
+        return 'timestep_sweep.npz', 'timestep_sweep_meta.json'
+
+    @staticmethod
     def sweep_after_hessian_at_k_star(record, sweep):
         """2026-09-10+ sweeps record the stiffnesses their after Hessian was taken at."""
         at = sweep.get('cost_hessian_after_stiffness')
@@ -726,6 +736,10 @@ class _AuxeticReader:
         with np.load(_existing(self.path('timestep_sweep', 'npz')), allow_pickle=True) as z:
             return {k: z[k] for k in z.files}
 
+    def sweep_file_names(self):
+        return (self._write_path('timestep_sweep', 'npz').name,
+                self._write_path('timestep_sweep_meta', 'json').name)
+
     def resume_state(self):
         """The checkpoint, or None when there is none or it cannot be unpickled."""
         path = self.path('checkpoint', 'pkl')
@@ -912,6 +926,10 @@ class _UniformReader:
     def sweep(self):
         with np.load(_existing(self.d / 'sweep.npz'), allow_pickle=True) as z:
             return {k: z[k] for k in z.files}
+
+    @staticmethod
+    def sweep_file_names():
+        return 'sweep.npz', 'sweep_meta.json'
 
     def sweep_after_hessian_at_k_star(self, record, sweep):
         return self._legacy.sweep_after_hessian_at_k_star(record, sweep)
