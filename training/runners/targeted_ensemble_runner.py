@@ -112,12 +112,13 @@ class TargetedAuxeticTrainer:
     final save with its checkpoint policy."""
 
     def __init__(self, *, task_id, realization_id, realization_seed, gradient_method,
-                 network_type, learning_rate, n_steps, network_file, verbose):
+                 network_type, learning_rate, n_steps, network_file, verbose, loss_tol=LOSS_TOL):
         self.task_id, self.realization_id = task_id, realization_id
         self.realization_seed = realization_seed
         self.gradient_method, self.network_type = gradient_method, network_type
         self.learning_rate, self.n_steps = learning_rate, n_steps
         self.network_file, self.verbose = network_file, verbose
+        self.loss_tol = loss_tol
 
     def prepare(self, record):
         resume = record.resume_state()
@@ -242,7 +243,7 @@ class TargetedAuxeticTrainer:
         final_loss = loss_list[-1] if loss_list else float('nan')
         nan_stiffness = np.isnan(np.asarray(self.network.stiffnesses)).any()
         self.failed = not np.isfinite(final_loss) or nan_stiffness
-        early_stop = not self.failed and len(loss_list) < self.n_steps and final_loss < LOSS_TOL
+        early_stop = not self.failed and len(loss_list) < self.n_steps and final_loss < self.loss_tol
         if early_stop:
             record.drop_checkpoint()
             record.mark_complete()
@@ -255,7 +256,7 @@ class TargetedAuxeticTrainer:
 
 def run_single_training(task_id, realization_id=0, verbose=False, use_checkpoint=True,
                         gradient_method='newton', network_type=NETWORK_TYPE, overwrite=False,
-                        lr_override=None, steps_override=None, network_file=None,
+                        lr_override=None, steps_override=None, network_file=None, loss_tol=None,
                         results_root=None):
     """
     Run a single targeted training job with checkpoint support, through
@@ -302,6 +303,7 @@ def run_single_training(task_id, realization_id=0, verbose=False, use_checkpoint
     # whatever seed produced a resumed checkpoint is caught like any other.
     screened_seed = get_realization_seed('auxetic_targeted', task_id, realization_id)
     optimizer = 'fire' if (gradient_method == 'jax' and USE_OPT_FIRE) else 'gradient_descent'
+    _TOL = LOSS_TOL if loss_tol is None else loss_tol
     hparams = {
         'learning_rate': _LR,
         'k_min': VMIN,
@@ -313,6 +315,8 @@ def run_single_training(task_id, realization_id=0, verbose=False, use_checkpoint
         'opt_fire_finc': OPT_FIRE_FINC,
         'realization_seed': screened_seed,
     }
+    if loss_tol is not None:
+        hparams['loss_tol'] = loss_tol   # recorded only when overridden, so default runs keep their meta
 
     def refuse(record):
         raise HyperparameterMismatchError(
@@ -330,7 +334,7 @@ def run_single_training(task_id, realization_id=0, verbose=False, use_checkpoint
     trainer = TargetedAuxeticTrainer(
         task_id=task_id, realization_id=realization_id, realization_seed=screened_seed,
         gradient_method=gradient_method, network_type=network_type, learning_rate=_LR,
-        n_steps=_NSTEPS, network_file=network_file, verbose=verbose)
+        n_steps=_NSTEPS, network_file=network_file, verbose=verbose, loss_tol=_TOL)
     trainer.results_dir = results_dir
     start_time = time.time()
     try:
@@ -339,7 +343,7 @@ def run_single_training(task_id, realization_id=0, verbose=False, use_checkpoint
         outcome = realization_lifecycle.run(
             record, trainer, hparams=hparams, critical_keys=DEFAULT_CRITICAL_KEYS,
             code_files=_CODE_SNAPSHOT_FILES, target_steps=_NSTEPS, overwrite=overwrite,
-            stop_rule=TrainingLossBelow(LOSS_TOL), on_mismatch=refuse, done=done,
+            stop_rule=TrainingLossBelow(_TOL), on_mismatch=refuse, done=done,
             steps_key='n_steps')
     except HyperparameterMismatchError:
         raise
@@ -574,6 +578,13 @@ Examples:
              'from the hyperparameter-mismatch guard, so this works on a plain resume.'
     )
     parser.add_argument(
+        '--loss-tol', type=float, default=None,
+        help='Override the absolute early-stop loss threshold (default LOSS_TOL = 1e-6) for this '
+             'run (single mode), e.g. for a task whose initial loss is so small that 1e-6 stops '
+             'training before the loss ratio reaches the ensemble bar. Recorded in the meta '
+             'only when given.'
+    )
+    parser.add_argument(
         '--network-file', type=Path, default=None,
         help='Train on a stored network (e.g. base/networks/auxetic_network_A.npz) '
              'instead of regenerating the hardware-dependent packing (single mode).'
@@ -599,6 +610,7 @@ Examples:
                                       overwrite=args.overwrite,
                                       lr_override=args.learning_rate,
                                       steps_override=args.steps,
+                                      loss_tol=args.loss_tol,
                                       network_file=args.network_file,
                                       results_root=args.results_dir)
         sys.exit(0 if success else 1)
